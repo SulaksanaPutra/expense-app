@@ -1,0 +1,879 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<meta content="web_dashboard" name="shell-type"/>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+    @layer base {
+      html, body {
+        margin: 0;
+        padding: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, sans-serif;
+        background-color: #f5f5f7;
+        color: #1d1d1f;
+        -webkit-font-smoothing: antialiased;
+      }
+      body {
+        overscroll-behavior: none;
+      }
+      main > :first-child { margin-top: 0 !important; }
+      main > :last-child { margin-bottom: 0 !important; }
+    }
+    ::-webkit-scrollbar { display: none; }
+  </style>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+  tailwind.config = {
+    darkMode: "class",
+    theme: {
+      extend: {
+        colors: {
+          primary: "#0066cc",
+          "primary-focus": "#0071e3",
+          "primary-fixed": "#d7e3ff",
+          ink: "#1d1d1f",
+          "ink-muted-80": "#333333",
+          "ink-muted-48": "#7a7a7a",
+          canvas: "#ffffff",
+          "canvas-parchment": "#f5f5f7",
+          hairline: "#e0e0e0",
+          "divider-soft": "#f0f0f0",
+          "surface-chip": "#f5f5f7",
+          "surface-chip-translucent": "#e8e8ed"
+        },
+        borderRadius: {
+          DEFAULT: "1rem",
+          "2xl": "1.125rem",
+          lg: "2rem",
+          full: "9999px"
+        },
+        fontFamily: {
+          sans: ["-apple-system", "BlinkMacSystemFont", "\"SF Pro Text\"", "\"SF Pro Display\"", "system-ui", "sans-serif"]
+        }
+      }
+    }
+  };
+</script>
+</head>
+<body class="bg-[#f5f5f7] font-sans text-[#1d1d1f] antialiased selection:bg-[#0066cc]/15 selection:text-[#0066cc]">
+<!-- Left Sidebar -->
+<aside class="fixed left-0 top-0 h-full w-64 bg-white border-r border-[#e0e0e0] z-50 flex flex-col justify-between p-5">
+<div class="flex flex-col gap-7">
+<!-- Logo Header -->
+<div class="flex items-center justify-between px-1">
+<div class="flex items-center gap-2.5">
+<img alt="LedgerSplit Logo" class="h-7 w-auto object-contain" src="https://lh3.googleusercontent.com/aida/ALJJyrAu9nZmBqNp9PikZfPxOumDMdq256wGxqQqGSbCSjQKb-OLHoAmCsGGVBg1AhCFTQr6EeEUvVjfC-SfWBNKQqROav4wxmgYuHZOUFmQ6dc-9AvtJRuFkPjuNIF7AceFpEzUEbCPb17ExG0QhJnzJvFqY1Ftl8mW-NbF3JyPyqR2dzjfyKyYbQOBiwiokeAaU6mXSk7jcAgUz_ouE8ILMhuXeizP1EWP-YVpxuNoEQwOWg"/>
+<span class="font-semibold text-[17px] tracking-tight text-[#1d1d1f]">LedgerSplit</span>
+</div>
+<span class="px-2 py-0.5 rounded-full bg-[#f5f5f7] text-[#7a7a7a] text-[11px] font-semibold uppercase tracking-wider border border-[#e0e0e0]">Shared</span>
+</div>
+<!-- Main Navigation -->
+<nav class="flex flex-col gap-1">
+<a class="flex items-center justify-between px-3.5 py-2.5 rounded-full text-[#333333] hover:bg-[#f5f5f7] hover:text-[#1d1d1f] transition-colors" data-path="dashboard" href="#">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-[19px] text-[#7a7a7a]">dashboard</span>
+<span class="text-[14px] font-medium">Dashboard</span>
+</div>
+</a>
+<a aria-current="page" class="flex items-center justify-between px-3.5 py-2.5 rounded-full transition-all bg-[#0066cc] text-white font-medium shadow-sm" data-path="expenses" href="#">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-[19px]">receipt_long</span>
+<span class="text-[14px]">Expenses</span>
+</div>
+</a>
+<a class="flex items-center justify-between px-3.5 py-2.5 rounded-full text-[#333333] hover:bg-[#f5f5f7] hover:text-[#1d1d1f] transition-colors" data-path="split-groups" href="#">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-[19px] text-[#7a7a7a]">groups</span>
+<span class="text-[14px] font-medium">Split Groups</span>
+</div>
+<span class="px-2 py-0.5 rounded-full bg-[#f5f5f7] text-[#7a7a7a] font-medium text-xs border border-[#e0e0e0]">3</span>
+</a>
+<a class="flex items-center justify-between px-3.5 py-2.5 rounded-full text-[#333333] hover:bg-[#f5f5f7] hover:text-[#1d1d1f] transition-colors" data-path="settings" href="#">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-[19px] text-[#7a7a7a]">tune</span>
+<span class="text-[14px] font-medium">Settings</span>
+</div>
+</a>
+</nav>
+</div>
+<!-- Active Group Footer Widget -->
+<div class="flex flex-col gap-3">
+<div class="p-4 rounded-[18px] bg-[#f5f5f7] border border-[#e0e0e0] flex flex-col gap-2.5">
+<div class="flex items-center justify-between">
+<span class="text-[11px] font-semibold text-[#7a7a7a] uppercase tracking-wider">Active Group</span>
+<span class="material-symbols-outlined text-sm text-[#7a7a7a] cursor-pointer hover:text-[#1d1d1f]">unfold_more</span>
+</div>
+<div class="flex items-center justify-between">
+<div class="flex flex-col">
+<span class="text-sm font-semibold text-[#1d1d1f] truncate">Apt 4B Roommates</span>
+<span class="text-xs text-[#0066cc] font-medium">4 active splits</span>
+</div>
+<div class="flex -space-x-1.5">
+<div class="w-6 h-6 rounded-full bg-[#0066cc] text-white flex items-center justify-center text-[10px] font-semibold ring-2 ring-white">AR</div>
+<div class="w-6 h-6 rounded-full bg-[#34c759] text-white flex items-center justify-center text-[10px] font-semibold ring-2 ring-white">MV</div>
+<div class="w-6 h-6 rounded-full bg-[#e0e0e0] text-[#7a7a7a] flex items-center justify-center text-[10px] font-medium ring-2 ring-white">+2</div>
+</div>
+</div>
+</div>
+<button class="flex items-center justify-center gap-1.5 py-1.5 text-[#7a7a7a] hover:text-[#1d1d1f] transition-colors text-xs font-medium" title="Collapse sidebar" type="button">
+<span class="material-symbols-outlined text-base">keyboard_double_arrow_left</span>
+<span>Collapse Sidebar</span>
+</button>
+</div>
+</aside>
+<!-- Main Wrapper -->
+<div class="pl-64">
+<!-- Top Header Bar -->
+<header class="fixed top-0 left-64 right-0 h-16 bg-white/80 backdrop-blur-xl border-b border-[#e0e0e0] z-40">
+<div class="h-full w-full px-8 flex items-center justify-between">
+<!-- Date Selector Navigation -->
+<div class="flex items-center gap-1 bg-[#f5f5f7] px-2 py-1.5 rounded-full border border-[#e0e0e0]">
+<button class="text-[#7a7a7a] hover:text-[#1d1d1f] flex items-center p-1 rounded-full hover:bg-white transition-colors" type="button">
+<span class="material-symbols-outlined text-base">chevron_left</span>
+</button>
+<div class="flex items-center gap-1 px-2 cursor-pointer text-[#1d1d1f]">
+<span class="text-xs font-semibold tracking-tight">October 2024</span>
+<span class="material-symbols-outlined text-sm text-[#7a7a7a]">keyboard_arrow_down</span>
+</div>
+<button class="text-[#7a7a7a] hover:text-[#1d1d1f] flex items-center p-1 rounded-full hover:bg-white transition-colors" type="button">
+<span class="material-symbols-outlined text-base">chevron_right</span>
+</button>
+</div>
+<!-- Search Bar & Top Actions -->
+<div class="flex items-center gap-3">
+<div class="relative flex items-center bg-[#f5f5f7] px-3.5 py-1.5 rounded-full border border-[#e0e0e0] text-[#7a7a7a] focus-within:border-[#0066cc] focus-within:ring-2 focus-within:ring-[#0066cc]/20 transition-all">
+<span class="material-symbols-outlined text-base mr-2">search</span>
+<input class="bg-transparent border-none text-xs text-[#1d1d1f] placeholder:text-[#7a7a7a] focus:outline-none w-48 font-normal" placeholder="Search expenses, groups..." type="text"/>
+<span class="ml-2 px-1.5 py-0.5 rounded-md bg-white text-[#7a7a7a] text-[10px] font-medium border border-[#e0e0e0]">竚婁</span>
+</div>
+<button class="relative p-2 rounded-full bg-[#f5f5f7] border border-[#e0e0e0] text-[#333333] hover:text-[#1d1d1f] hover:bg-white transition-colors" type="button">
+<span class="material-symbols-outlined text-lg">notifications</span>
+<span class="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-[#ff3b30] ring-2 ring-white"></span>
+</button>
+<button class="flex items-center gap-1.5 bg-[#0066cc] hover:bg-[#0071e3] text-white font-medium px-4 py-2 rounded-full text-xs transition-all shadow-sm active:scale-[0.98]" type="button">
+<span class="material-symbols-outlined text-base">add</span>
+<span>Add Expense</span>
+</button>
+<div class="flex items-center gap-1 cursor-pointer pl-1">
+<div class="w-8 h-8 rounded-full bg-[#0066cc] text-white flex items-center justify-center text-xs font-semibold ring-1 ring-[#e0e0e0]">AR</div>
+<span class="material-symbols-outlined text-sm text-[#7a7a7a]">arrow_drop_down</span>
+</div>
+</div>
+</div>
+</header>
+<!-- Main Page Content -->
+<main class="w-full pt-16 bg-[#f5f5f7] min-h-screen">
+<div class="max-w-7xl mx-auto px-8 py-8 flex flex-col gap-6">
+<!-- Clean Apple Title & Action Bar -->
+<div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+<div>
+<div class="flex items-center gap-3 mb-1">
+<h1 class="text-2xl font-semibold text-[#1d1d1f] tracking-tight">Expenses Ledger</h1>
+<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#34c759]/10 text-[#248a3d] text-[11px] font-semibold border border-[#34c759]/25">
+<span class="w-1.5 h-1.5 rounded-full bg-[#34c759] animate-pulse"></span>
+Live Sync
+</span>
+</div>
+<p class="text-sm text-[#7a7a7a]">Apt 4B Roommate shared expenses, real-time splits, and monthly settlement balances.</p>
+</div>
+<!-- Controls / Actions -->
+<div class="flex items-center gap-2.5 flex-wrap">
+<!-- Apple-style Segmented Scope Control -->
+<div class="inline-flex p-1 rounded-full bg-white border border-[#e0e0e0] shadow-sm">
+<button class="tab-pill px-3 py-1.5 rounded-full text-xs font-semibold transition-all bg-[#0066cc] text-white shadow-sm" data-filter="all" type="button">
+All Expenses
+</button>
+<button class="tab-pill px-3 py-1.5 rounded-full text-xs font-medium transition-all text-[#7a7a7a] hover:text-[#1d1d1f]" data-filter="paid-by-me" type="button">
+Paid by Me
+</button>
+<button class="tab-pill px-3 py-1.5 rounded-full text-xs font-medium transition-all text-[#7a7a7a] hover:text-[#1d1d1f]" data-filter="split-with-me" type="button">
+Split with Me
+</button>
+<button class="tab-pill px-3 py-1.5 rounded-full text-xs font-medium transition-all text-[#7a7a7a] hover:text-[#1d1d1f]" data-filter="recurring" type="button">
+Recurring
+</button>
+</div>
+<!-- Export CSV Button -->
+<button class="flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-white border border-[#e0e0e0] hover:bg-[#fafafc] text-[#1d1d1f] transition-colors text-xs font-medium shadow-sm" id="exportBtn" type="button">
+<span class="material-symbols-outlined text-base text-[#0066cc]">file_download</span>
+<span>Export CSV</span>
+</button>
+</div>
+</div>
+<!-- KPI Cards Strip -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+<!-- Card 1: Total Group Expenses -->
+<div class="relative overflow-hidden rounded-[18px] bg-white border border-[#e0e0e0] p-6 flex flex-col justify-between transition-all shadow-sm">
+<div>
+<div class="flex items-start justify-between mb-4">
+<span class="text-xs font-semibold text-[#7a7a7a] uppercase tracking-wider">Total Group Expenses</span>
+<div class="w-9 h-9 rounded-full bg-[#f5f5f7] border border-[#e0e0e0] flex items-center justify-center text-[#333333]">
+<span class="material-symbols-outlined text-base">receipt_long</span>
+</div>
+</div>
+<div class="space-y-2 mb-4">
+<div class="flex items-baseline gap-2">
+<span class="text-[32px] font-semibold text-[#1d1d1f] tracking-tight" style="font-feature-settings: 'tnum';">$3,842.50</span>
+</div>
+<div class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#f5f5f7] text-[#7a7a7a] text-xs font-medium border border-[#e0e0e0]">
+<span class="material-symbols-outlined text-xs text-[#0066cc]">trending_up</span>
+<span style="font-feature-settings: 'tnum';">+4.2% vs Sep</span>
+</div>
+</div>
+</div>
+<div class="pt-3 border-t border-[#f0f0f0] flex items-center justify-between text-[#7a7a7a] text-xs">
+<span>34 aggregate transactions</span>
+<span class="font-medium text-[#0066cc]">4 accounts linked</span>
+</div>
+</div>
+<!-- Card 2: Your Personal Share -->
+<div class="relative overflow-hidden rounded-[18px] bg-white border border-[#e0e0e0] p-6 flex flex-col justify-between transition-all shadow-sm">
+<div>
+<div class="flex items-start justify-between mb-4">
+<span class="text-xs font-semibold text-[#7a7a7a] uppercase tracking-wider">Your Personal Share</span>
+<div class="w-9 h-9 rounded-full bg-[#0066cc]/10 border border-[#0066cc]/20 flex items-center justify-center text-[#0066cc]">
+<span class="material-symbols-outlined text-base">pie_chart</span>
+</div>
+</div>
+<div class="space-y-2 mb-4">
+<div class="flex items-baseline gap-2">
+<span class="text-[32px] font-semibold text-[#1d1d1f] tracking-tight" style="font-feature-settings: 'tnum';">$1,420.00</span>
+<span class="px-2.5 py-0.5 rounded-full bg-[#0066cc]/10 text-[#0066cc] text-xs font-medium border border-[#0066cc]/20">37.0%</span>
+</div>
+<p class="text-xs text-[#7a7a7a]">Monthly limit threshold: $1,600.00</p>
+</div>
+</div>
+<!-- Minimal Apple Progress Indicator -->
+<div class="pt-3 border-t border-[#f0f0f0] flex flex-col gap-1.5">
+<div class="w-full h-1.5 rounded-full bg-[#f5f5f7] border border-[#e0e0e0] overflow-hidden">
+<div class="h-full bg-[#0066cc] rounded-full transition-all duration-700" style="width: 37%"></div>
+</div>
+<div class="flex justify-between items-center text-[10px] text-[#7a7a7a]">
+<span>0%</span>
+<span>Under target limit cap</span>
+<span>100%</span>
+</div>
+</div>
+</div>
+<!-- Card 3: Unsettled / Pending -->
+<div class="relative overflow-hidden rounded-[18px] bg-white border border-[#e0e0e0] p-6 flex flex-col justify-between transition-all shadow-sm">
+<div>
+<div class="flex items-start justify-between mb-4">
+<span class="text-xs font-semibold text-[#ff3b30] uppercase tracking-wider">Unsettled / Pending</span>
+<div class="w-9 h-9 rounded-full bg-[#ff3b30]/10 border border-[#ff3b30]/20 flex items-center justify-center text-[#ff3b30]">
+<span class="material-symbols-outlined text-base">pending_actions</span>
+</div>
+</div>
+<div class="space-y-2 mb-4">
+<div class="flex items-baseline gap-2">
+<span class="text-[32px] font-semibold text-[#ff3b30] tracking-tight" style="font-feature-settings: 'tnum';">$372.50</span>
+<span class="px-2.5 py-0.5 rounded-full bg-[#ff3b30]/10 text-[#ff3b30] text-xs font-medium border border-[#ff3b30]/20">3 receipts</span>
+</div>
+<p class="text-xs text-[#7a7a7a]">Next group settlement: Nov 1, 2024</p>
+</div>
+</div>
+<div class="pt-3 border-t border-[#f0f0f0] flex items-center justify-between text-xs">
+<div class="flex items-center gap-1.5">
+<span class="px-2 py-0.5 rounded-full bg-[#ff3b30]/10 text-[#ff3b30] font-medium text-[11px]">2 you owe ($88.15)</span>
+</div>
+<button class="inline-flex items-center gap-1 text-[#0066cc] hover:text-[#0071e3] font-medium transition-colors" type="button">
+<span>Settle now</span>
+<span class="material-symbols-outlined text-xs">arrow_forward</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Filter & Search Bar Card -->
+<div class="rounded-[18px] bg-white border border-[#e0e0e0] p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4 shadow-sm">
+<!-- Merchant search input pill -->
+<div class="relative flex items-center bg-[#f5f5f7] border border-[#e0e0e0] px-3.5 py-1.5 rounded-full text-[#7a7a7a] focus-within:border-[#0066cc] focus-within:text-[#1d1d1f] w-full lg:max-w-md transition-colors">
+<span class="material-symbols-outlined text-base mr-2 text-[#7a7a7a]">search</span>
+<input class="bg-transparent border-none text-xs text-[#1d1d1f] placeholder:text-[#7a7a7a] focus:outline-none w-full" id="expenseSearch" placeholder="Search merchant, tag, note, or room..." type="text"/>
+<kbd class="ml-2 px-1.5 py-0.5 rounded-md bg-white text-[#7a7a7a] text-[10px] font-medium border border-[#e0e0e0] shadow-2xs">/</kbd>
+</div>
+<!-- Category quick chips -->
+<div class="flex items-center gap-2 overflow-x-auto pb-1 lg:pb-0 scrollbar-none">
+<button class="category-chip px-3 py-1 rounded-full bg-[#0066cc] text-white text-xs font-medium whitespace-nowrap transition-colors shadow-sm" data-cat="all" type="button">
+All
+</button>
+<button class="category-chip px-3 py-1 rounded-full bg-[#f5f5f7] hover:bg-white text-[#7a7a7a] hover:text-[#1d1d1f] border border-[#e0e0e0] text-xs font-medium whitespace-nowrap flex items-center gap-1.5 transition-colors" data-cat="Groceries" type="button">
+<span class="w-1.5 h-1.5 rounded-full bg-[#34c759]"></span>
+<span>Groceries</span>
+<span class="text-[11px] text-[#7a7a7a]" style="font-feature-settings: 'tnum';">$1,460.15</span>
+</button>
+<button class="category-chip px-3 py-1 rounded-full bg-[#f5f5f7] hover:bg-white text-[#7a7a7a] hover:text-[#1d1d1f] border border-[#e0e0e0] text-xs font-medium whitespace-nowrap flex items-center gap-1.5 transition-colors" data-cat="Utilities" type="button">
+<span class="w-1.5 h-1.5 rounded-full bg-[#5856d6]"></span>
+<span>Utilities</span>
+<span class="text-[11px] text-[#7a7a7a]" style="font-feature-settings: 'tnum';">$537.95</span>
+</button>
+<button class="category-chip px-3 py-1 rounded-full bg-[#f5f5f7] hover:bg-white text-[#7a7a7a] hover:text-[#1d1d1f] border border-[#e0e0e0] text-xs font-medium whitespace-nowrap flex items-center gap-1.5 transition-colors" data-cat="Home Goods" type="button">
+<span class="w-1.5 h-1.5 rounded-full bg-[#0066cc]"></span>
+<span>Housing</span>
+<span class="text-[11px] text-[#7a7a7a]" style="font-feature-settings: 'tnum';">$1,229.60</span>
+</button>
+<button class="category-chip px-3 py-1 rounded-full bg-[#f5f5f7] hover:bg-white text-[#7a7a7a] hover:text-[#1d1d1f] border border-[#e0e0e0] text-xs font-medium whitespace-nowrap flex items-center gap-1.5 transition-colors" data-cat="Transport" type="button">
+<span class="w-1.5 h-1.5 rounded-full bg-[#ff9500]"></span>
+<span>Transport</span>
+<span class="text-[11px] text-[#7a7a7a]" style="font-feature-settings: 'tnum';">$345.82</span>
+</button>
+<button class="category-chip px-3 py-1 rounded-full bg-[#f5f5f7] hover:bg-white text-[#7a7a7a] hover:text-[#1d1d1f] border border-[#e0e0e0] text-xs font-medium whitespace-nowrap flex items-center gap-1.5 transition-colors" data-cat="Food &amp; Drink" type="button">
+<span class="w-1.5 h-1.5 rounded-full bg-[#ff2d55]"></span>
+<span>Fun</span>
+<span class="text-[11px] text-[#7a7a7a]" style="font-feature-settings: 'tnum';">$268.98</span>
+</button>
+</div>
+<!-- Sorter -->
+<div class="flex items-center gap-2 shrink-0 self-end lg:self-center">
+<button class="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#f5f5f7] border border-[#e0e0e0] text-xs font-medium text-[#1d1d1f] hover:bg-white transition-colors" type="button">
+<span>Date (Newest first)</span>
+<span class="material-symbols-outlined text-sm text-[#7a7a7a]">keyboard_arrow_down</span>
+</button>
+</div>
+</div>
+<!-- Expenses Ledger Table Container -->
+<div class="rounded-[18px] bg-white border border-[#e0e0e0] p-6 flex flex-col shadow-sm">
+<!-- Table Header Title -->
+<div class="flex items-center justify-between pb-4 mb-4 border-b border-[#f0f0f0]">
+<div class="flex items-center gap-3">
+<div class="w-9 h-9 rounded-full bg-[#f5f5f7] border border-[#e0e0e0] flex items-center justify-center text-[#0066cc]">
+<span class="material-symbols-outlined text-lg">receipt_long</span>
+</div>
+<div>
+<h2 class="text-[17px] font-semibold text-[#1d1d1f] tracking-tight">Itemized Transactions</h2>
+<p class="text-xs text-[#7a7a7a]">Complete household records and per-person cost breakdown</p>
+</div>
+</div>
+<div class="flex items-center gap-1.5 text-xs text-[#7a7a7a]">
+<span class="material-symbols-outlined text-sm text-[#34c759]">lock</span>
+<span>Shared Encrypted Ledger</span>
+</div>
+</div>
+<!-- Table Container -->
+<div class="overflow-x-auto rounded-[14px] border border-[#e0e0e0]">
+<table class="w-full text-left border-collapse" id="ledgerTable">
+<thead>
+<tr class="bg-[#fafafc] text-[#7a7a7a] text-[11px] font-semibold uppercase tracking-wider border-b border-[#e0e0e0]">
+<th class="py-3 px-4">Date</th>
+<th class="py-3 px-4">Description / Merchant</th>
+<th class="py-3 px-4">Category</th>
+<th class="py-3 px-4">Paid By</th>
+<th class="py-3 px-4">Split Method</th>
+<th class="py-3 px-4 text-right">Your Share</th>
+<th class="py-3 px-4 text-right">Total Amount</th>
+<th class="py-3 px-4 text-center">Status</th>
+<th class="py-3 px-4 text-center">Action</th>
+</tr>
+</thead>
+<tbody class="text-sm divide-y divide-[#f0f0f0] bg-white" id="expenseRowsContainer">
+<!-- Row 1 -->
+<tr class="hover:bg-[#f5f5f7]/60 transition-colors group cursor-pointer" data-category="Groceries" data-paid="You (Alex)" data-status="settled">
+<td class="py-3.5 px-4 whitespace-nowrap">
+<span class="font-medium text-[#1d1d1f] block text-xs">Oct 24, 2024</span>
+<span class="text-[11px] text-[#7a7a7a]">10:42 AM</span>
+</td>
+<td class="py-3.5 px-4 min-w-[220px]">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-[#34c759]/10 border border-[#34c759]/20 text-[#248a3d] flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-base">shopping_cart</span>
+</div>
+<div class="min-w-0">
+<span class="font-medium text-[#1d1d1f] block text-xs truncate">Trader Joe's Weekly Groceries</span>
+<span class="text-[11px] text-[#7a7a7a] block truncate">Produce, oat milk, sparkling water, snacks</span>
+</div>
+</div>
+</td>
+<td class="py-3.5 px-4 whitespace-nowrap">
+<span class="px-2.5 py-0.5 rounded-full bg-[#34c759]/10 text-[#248a3d] text-xs font-medium border border-[#34c759]/20 inline-flex items-center gap-1.5">
+<span class="w-1.5 h-1.5 rounded-full bg-[#34c759]"></span> Groceries
+</span>
+</td>
+<td class="py-3.5 px-4 whitespace-nowrap">
+<div class="flex items-center gap-2">
+<div class="w-6 h-6 rounded-full bg-[#0066cc] text-white text-[10px] flex items-center justify-center font-semibold">AR</div>
+<span class="font-medium text-[#1d1d1f] text-xs">You (Alex)</span>
+</div>
+</td>
+<td class="py-3.5 px-4 whitespace-nowrap">
+<span class="px-2.5 py-1 rounded-full bg-[#f5f5f7] border border-[#e0e0e0] text-[#333333] text-xs">
+Split Equally (4)
+</span>
+</td>
+<td class="py-3.5 px-4 text-right whitespace-nowrap font-medium">
+<span class="text-xs text-[#1d1d1f] font-semibold block" style="font-feature-settings: 'tnum';">$46.05</span>
+<span class="text-[11px] text-[#248a3d]">Your quarter</span>
+</td>
+<td class="py-3.5 px-4 text-right whitespace-nowrap font-medium text-xs text-[#7a7a7a]" style="font-feature-settings: 'tnum';">
+$184.20
+</td>
+<td class="py-3.5 px-4 text-center whitespace-nowrap">
+<span class="px-2.5 py-0.5 rounded-full bg-[#34c759]/10 text-[#248a3d] text-[11px] font-semibold border border-[#34c759]/20 inline-flex items-center gap-1">
+<span class="material-symbols-outlined text-[13px]">check_circle</span> Settled
+</span>
+</td>
+<td class="py-3.5 px-4 text-center whitespace-nowrap">
+<button class="p-1 rounded-md hover:bg-[#f5f5f7] text-[#7a7a7a] hover:text-[#1d1d1f]" title="More options" type="button">
+<span class="material-symbols-outlined text-base">more_vert</span>
+</button>
+</td>
+</tr>
+<!-- Row 2 -->
+<tr class="hover:bg-[#f5f5f7]/60 transition-colors group cursor-pointer" data-category="Utilities" data-paid="Marcus Vance" data-status="pending">
+<td class="py-3.5 px-4 whitespace-nowrap">
+<span class="font-medium text-[#1d1d1f] block text-xs">Oct 21, 2024</span>
+<span class="text-[11px] text-[#7a7a7a]">08:15 PM</span>
+</td>
+<td class="py-3.5 px-4 min-w-[220px]">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-[#5856d6]/10 border border-[#5856d6]/20 text-[#5856d6] flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-base">bolt</span>
+</div>
+<div class="min-w-0">
+<span class="font-medium text-[#1d1d1f] block text-xs truncate">ConEd Electricity &amp; Gas</span>
+<span class="text-[11px] text-[#7a7a7a] block truncate">Billing cycle Sep 15 - Oct 15</span>
+</div>
+</div>
+</td>
+<td class="py-3.5 px-4 whitespace-nowrap">
+<span class="px-2.5 py-0.5 rounded-full bg-[#5856d6]/10 text-[#5856d6] text-xs font-medium border border-[#5856d6]/20 inline-flex items-center gap-1.5">
+<span class="w-1.5 h-1.5 rounded-full bg-[#5856d6]"></span> Utilities
+</span>
+</td>
+<td class="py-3.5 px-4 whitespace-nowrap">
+<div class="flex items-center gap-2">
+<div class="w-6 h-6 rounded-full bg-[#5856d6] text-white text-[10px] flex items-center justify-center font-semibold">MV</div>
+<span class="font-medium text-[#1d1d1f] text-xs">Marcus Vance</span>
+</div>
+</td>
+<td class="py-3.5 px-4 whitespace-nowrap">
+<span class="px-2.5 py-1 rounded-full bg-[#f5f5f7] border border-[#e0e0e0] text-[#333333] text-xs">
+Split Equally (4)
+</span>
+</td>
+<td class="py-3.5 px-4 text-right whitespace-nowrap font-medium">
+<span class="text-xs text-[#ff3b30] font-semibold block" style="font-feature-settings: 'tnum';">$53.95</span>
+<span class="text-[11px] text-[#ff3b30]">You owe Marcus</span>
+</td>
+<td class="py-3.5 px-4 text-right whitespace-nowrap font-medium text-xs text-[#7a7a7a]" style="font-feature-settings: 'tnum';">
+$215.80
+</td>
+<td class="py-3.5 px-4 text-center whitespace-nowrap">
+<span class="px-2.5 py-0.5 rounded-full bg-[#ff3b30]/10 text-[#ff3b30] text-[11px] font-semibold border border-[#ff3b30]/20 inline-flex items-center gap-1">
+<span class="material-symbols-outlined text-[13px]">schedule</span> Pending
+</span>
+</td>
+<td class="py-3.5 px-4 text-center whitespace-nowrap">
+<button class="p-1 rounded-md hover:bg-[#f5f5f7] text-[#7a7a7a] hover:text-[#1d1d1f]" title="More options" type="button">
+<span class="material-symbols-outlined text-base">more_vert</span>
+</button>
+</td>
+</tr>
+<!-- Row 3 -->
+<tr class="hover:bg-[#f5f5f7]/60 transition-colors group cursor-pointer" data-category="Food &amp; Drink" data-paid="Elena Rostova" data-status="settled">
+<td class="py-3.5 px-4 whitespace-nowrap">
+<span class="font-medium text-[#1d1d1f] block text-xs">Oct 19, 2024</span>
+<span class="text-[11px] text-[#7a7a7a]">02:30 PM</span>
+</td>
+<td class="py-3.5 px-4 min-w-[220px]">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-[#ff9500]/10 border border-[#ff9500]/20 text-[#ff9500] flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-base">coffee</span>
+</div>
+<div class="min-w-0">
+<span class="font-medium text-[#1d1d1f] block text-xs truncate">Equator Coffee Roasters</span>
+<span class="text-[11px] text-[#7a7a7a] block truncate">2kg Espresso blend whole bean for kitchen</span>
+</div>
+</div>
+</td>
+<td class="py-3.5 px-4 whitespace-nowrap">
+<span class="px-2.5 py-0.5 rounded-full bg-[#ff9500]/10 text-[#ff9500] text-xs font-medium border border-[#ff9500]/20 inline-flex items-center gap-1.5">
+<span class="w-1.5 h-1.5 rounded-full bg-[#ff9500]"></span> Food &amp; Drink
+</span>
+</td>
+<td class="py-3.5 px-4 whitespace-nowrap">
+<div class="flex items-center gap-2">
+<div class="w-6 h-6 rounded-full bg-[#34c759] text-white text-[10px] flex items-center justify-center font-semibold">ER</div>
+<span class="font-medium text-[#1d1d1f] text-xs">Elena Rostova</span>
+</div>
+</td>
+<td class="py-3.5 px-4 whitespace-nowrap">
+<span class="px-2.5 py-1 rounded-full bg-[#f5f5f7] border border-[#e0e0e0] text-[#333333] text-xs">
+50/50 (Elena &amp; You)
+</span>
+</td>
+<td class="py-3.5 px-4 text-right whitespace-nowrap font-medium">
+<span class="text-xs text-[#1d1d1f] font-semibold block" style="font-feature-settings: 'tnum';">$34.20</span>
+<span class="text-[11px] text-[#7a7a7a]">Settled</span>
+</td>
+<td class="py-3.5 px-4 text-right whitespace-nowrap font-medium text-xs text-[#7a7a7a]" style="font-feature-settings: 'tnum';">
+$68.40
+</td>
+<td class="py-3.5 px-4 text-center whitespace-nowrap">
+<span class="px-2.5 py-0.5 rounded-full bg-[#34c759]/10 text-[#248a3d] text-[11px] font-semibold border border-[#34c759]/20 inline-flex items-center gap-1">
+<span class="material-symbols-outlined text-[13px]">check_circle</span> Settled
+</span>
+</td>
+<td class="py-3.5 px-4 text-center whitespace-nowrap">
+<button class="p-1 rounded-md hover:bg-[#f5f5f7] text-[#7a7a7a] hover:text-[#1d1d1f]" title="More options" type="button">
+<span class="material-symbols-outlined text-base">more_vert</span>
+</button>
+</td>
+</tr>
+<!-- Row 4 -->
+<tr class="hover:bg-[#f5f5f7]/60 transition-colors group cursor-pointer" data-category="Utilities" data-paid="You (Alex)" data-status="pending">
+<td class="py-3.5 px-4 whitespace-nowrap">
+<span class="font-medium text-[#1d1d1f] block text-xs">Oct 16, 2024</span>
+<span class="text-[11px] text-[#7a7a7a]">09:00 AM</span>
+</td>
+<td class="py-3.5 px-4 min-w-[220px]">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-[#0066cc]/10 border border-[#0066cc]/20 text-[#0066cc] flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-base">wifi</span>
+</div>
+<div class="min-w-0">
+<span class="font-medium text-[#1d1d1f] block text-xs truncate">Gigabit Fiber Internet</span>
+<span class="text-[11px] text-[#7a7a7a] block truncate">Sonic Webpass monthly high-speed tier</span>
+</div>
+</div>
+</td>
+<td class="py-3.5 px-4 whitespace-nowrap">
+<span class="px-2.5 py-0.5 rounded-full bg-[#5856d6]/10 text-[#5856d6] text-xs font-medium border border-[#5856d6]/20 inline-flex items-center gap-1.5">
+<span class="w-1.5 h-1.5 rounded-full bg-[#5856d6]"></span> Utilities
+</span>
+</td>
+<td class="py-3.5 px-4 whitespace-nowrap">
+<div class="flex items-center gap-2">
+<div class="w-6 h-6 rounded-full bg-[#0066cc] text-white text-[10px] flex items-center justify-center font-semibold">AR</div>
+<span class="font-medium text-[#1d1d1f] text-xs">You (Alex)</span>
+</div>
+</td>
+<td class="py-3.5 px-4 whitespace-nowrap">
+<span class="px-2.5 py-1 rounded-full bg-[#f5f5f7] border border-[#e0e0e0] text-[#333333] text-xs">
+Split Equally (4)
+</span>
+</td>
+<td class="py-3.5 px-4 text-right whitespace-nowrap font-medium">
+<span class="text-xs text-[#248a3d] font-semibold block" style="font-feature-settings: 'tnum';">$67.50</span>
+<span class="text-[11px] text-[#248a3d]">Owed to you</span>
+</td>
+<td class="py-3.5 px-4 text-right whitespace-nowrap font-medium text-xs text-[#7a7a7a]" style="font-feature-settings: 'tnum';">
+$90.00
+</td>
+<td class="py-3.5 px-4 text-center whitespace-nowrap">
+<span class="px-2.5 py-0.5 rounded-full bg-[#0066cc]/10 text-[#0066cc] text-[11px] font-semibold border border-[#0066cc]/20 inline-flex items-center gap-1">
+<span class="material-symbols-outlined text-[13px]">hourglass_top</span> Pending
+</span>
+</td>
+<td class="py-3.5 px-4 text-center whitespace-nowrap">
+<button class="p-1 rounded-md hover:bg-[#f5f5f7] text-[#7a7a7a] hover:text-[#1d1d1f]" title="More options" type="button">
+<span class="material-symbols-outlined text-base">more_vert</span>
+</button>
+</td>
+</tr>
+<!-- Row 5 -->
+<tr class="hover:bg-[#f5f5f7]/60 transition-colors group cursor-pointer" data-category="Home Goods" data-paid="Liam Chen" data-status="settled">
+<td class="py-3.5 px-4 whitespace-nowrap">
+<span class="font-medium text-[#1d1d1f] block text-xs">Oct 14, 2024</span>
+<span class="text-[11px] text-[#7a7a7a]">04:12 PM</span>
+</td>
+<td class="py-3.5 px-4 min-w-[220px]">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-[#0066cc]/10 border border-[#0066cc]/20 text-[#0066cc] flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-base">cleaning_services</span>
+</div>
+<div class="min-w-0">
+<span class="font-medium text-[#1d1d1f] block text-xs truncate">Target Living Room Supplies</span>
+<span class="text-[11px] text-[#7a7a7a] block truncate">Trash bags, detergents, microfiber pads</span>
+</div>
+</div>
+</td>
+<td class="py-3.5 px-4 whitespace-nowrap">
+<span class="px-2.5 py-0.5 rounded-full bg-[#0066cc]/10 text-[#0066cc] text-xs font-medium border border-[#0066cc]/20 inline-flex items-center gap-1.5">
+<span class="w-1.5 h-1.5 rounded-full bg-[#0066cc]"></span> Home Goods
+</span>
+</td>
+<td class="py-3.5 px-4 whitespace-nowrap">
+<div class="flex items-center gap-2">
+<div class="w-6 h-6 rounded-full bg-[#5856d6] text-white text-[10px] flex items-center justify-center font-semibold">LC</div>
+<span class="font-medium text-[#1d1d1f] text-xs">Liam Chen</span>
+</div>
+</td>
+<td class="py-3.5 px-4 whitespace-nowrap">
+<span class="px-2.5 py-1 rounded-full bg-[#f5f5f7] border border-[#e0e0e0] text-[#333333] text-xs">
+Split Equally (4)
+</span>
+</td>
+<td class="py-3.5 px-4 text-right whitespace-nowrap font-medium">
+<span class="text-xs text-[#1d1d1f] font-semibold block" style="font-feature-settings: 'tnum';">$15.50</span>
+<span class="text-[11px] text-[#7a7a7a]">Settled Oct 15</span>
+</td>
+<td class="py-3.5 px-4 text-right whitespace-nowrap font-medium text-xs text-[#7a7a7a]" style="font-feature-settings: 'tnum';">
+$62.00
+</td>
+<td class="py-3.5 px-4 text-center whitespace-nowrap">
+<span class="px-2.5 py-0.5 rounded-full bg-[#34c759]/10 text-[#248a3d] text-[11px] font-semibold border border-[#34c759]/20 inline-flex items-center gap-1">
+<span class="material-symbols-outlined text-[13px]">check_circle</span> Settled
+</span>
+</td>
+<td class="py-3.5 px-4 text-center whitespace-nowrap">
+<button class="p-1 rounded-md hover:bg-[#f5f5f7] text-[#7a7a7a] hover:text-[#1d1d1f]" title="More options" type="button">
+<span class="material-symbols-outlined text-base">more_vert</span>
+</button>
+</td>
+</tr>
+<!-- Row 6 -->
+<tr class="hover:bg-[#f5f5f7]/60 transition-colors group cursor-pointer" data-category="Transport" data-paid="Liam Chen" data-status="settled">
+<td class="py-3.5 px-4 whitespace-nowrap">
+<span class="font-medium text-[#1d1d1f] block text-xs">Oct 12, 2024</span>
+<span class="text-[11px] text-[#7a7a7a]">06:45 AM</span>
+</td>
+<td class="py-3.5 px-4 min-w-[220px]">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-[#ff9500]/10 border border-[#ff9500]/20 text-[#ff9500] flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-base">directions_car</span>
+</div>
+<div class="min-w-0">
+<span class="font-medium text-[#1d1d1f] block text-xs truncate">Uber XL to SFO Airport</span>
+<span class="text-[11px] text-[#7a7a7a] block truncate">Shared ride with Liam for weekend trip</span>
+</div>
+</div>
+</td>
+<td class="py-3.5 px-4 whitespace-nowrap">
+<span class="px-2.5 py-0.5 rounded-full bg-[#ff9500]/10 text-[#ff9500] text-xs font-medium border border-[#ff9500]/20 inline-flex items-center gap-1.5">
+<span class="w-1.5 h-1.5 rounded-full bg-[#ff9500]"></span> Transport
+</span>
+</td>
+<td class="py-3.5 px-4 whitespace-nowrap">
+<div class="flex items-center gap-2">
+<div class="w-6 h-6 rounded-full bg-[#5856d6] text-white text-[10px] flex items-center justify-center font-semibold">LC</div>
+<span class="font-medium text-[#1d1d1f] text-xs">Liam Chen</span>
+</div>
+</td>
+<td class="py-3.5 px-4 whitespace-nowrap">
+<span class="px-2.5 py-1 rounded-full bg-[#f5f5f7] border border-[#e0e0e0] text-[#333333] text-xs">
+Custom Split (60/40)
+</span>
+</td>
+<td class="py-3.5 px-4 text-right whitespace-nowrap font-medium">
+<span class="text-xs text-[#1d1d1f] font-semibold block" style="font-feature-settings: 'tnum';">$29.00</span>
+<span class="text-[11px] text-[#7a7a7a]">Settled</span>
+</td>
+<td class="py-3.5 px-4 text-right whitespace-nowrap font-medium text-xs text-[#7a7a7a]" style="font-feature-settings: 'tnum';">
+$72.50
+</td>
+<td class="py-3.5 px-4 text-center whitespace-nowrap">
+<span class="px-2.5 py-0.5 rounded-full bg-[#34c759]/10 text-[#248a3d] text-[11px] font-semibold border border-[#34c759]/20 inline-flex items-center gap-1">
+<span class="material-symbols-outlined text-[13px]">check_circle</span> Settled
+</span>
+</td>
+<td class="py-3.5 px-4 text-center whitespace-nowrap">
+<button class="p-1 rounded-md hover:bg-[#f5f5f7] text-[#7a7a7a] hover:text-[#1d1d1f]" title="More options" type="button">
+<span class="material-symbols-outlined text-base">more_vert</span>
+</button>
+</td>
+</tr>
+<!-- Row 7 -->
+<tr class="hover:bg-[#f5f5f7]/60 transition-colors group cursor-pointer" data-category="Groceries" data-paid="You (Alex)" data-status="settled">
+<td class="py-3.5 px-4 whitespace-nowrap">
+<span class="font-medium text-[#1d1d1f] block text-xs">Oct 08, 2024</span>
+<span class="text-[11px] text-[#7a7a7a]">07:20 PM</span>
+</td>
+<td class="py-3.5 px-4 min-w-[220px]">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-[#34c759]/10 border border-[#34c759]/20 text-[#248a3d] flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-base">restaurant</span>
+</div>
+<div class="min-w-0">
+<span class="font-medium text-[#1d1d1f] block text-xs truncate">Whole Foods Dinner Gathering</span>
+<span class="text-[11px] text-[#7a7a7a] block truncate">Ingredients for Sunday apartment tacos</span>
+</div>
+</div>
+</td>
+<td class="py-3.5 px-4 whitespace-nowrap">
+<span class="px-2.5 py-0.5 rounded-full bg-[#34c759]/10 text-[#248a3d] text-xs font-medium border border-[#34c759]/20 inline-flex items-center gap-1.5">
+<span class="w-1.5 h-1.5 rounded-full bg-[#34c759]"></span> Groceries
+</span>
+</td>
+<td class="py-3.5 px-4 whitespace-nowrap">
+<div class="flex items-center gap-2">
+<div class="w-6 h-6 rounded-full bg-[#0066cc] text-white text-[10px] flex items-center justify-center font-semibold">AR</div>
+<span class="font-medium text-[#1d1d1f] text-xs">You (Alex)</span>
+</div>
+</td>
+<td class="py-3.5 px-4 whitespace-nowrap">
+<span class="px-2.5 py-1 rounded-full bg-[#f5f5f7] border border-[#e0e0e0] text-[#333333] text-xs">
+Split Equally (4)
+</span>
+</td>
+<td class="py-3.5 px-4 text-right whitespace-nowrap font-medium">
+<span class="text-xs text-[#1d1d1f] font-semibold block" style="font-feature-settings: 'tnum';">$32.25</span>
+<span class="text-[11px] text-[#7a7a7a]">Settled</span>
+</td>
+<td class="py-3.5 px-4 text-right whitespace-nowrap font-medium text-xs text-[#7a7a7a]" style="font-feature-settings: 'tnum';">
+$129.00
+</td>
+<td class="py-3.5 px-4 text-center whitespace-nowrap">
+<span class="px-2.5 py-0.5 rounded-full bg-[#34c759]/10 text-[#248a3d] text-[11px] font-semibold border border-[#34c759]/20 inline-flex items-center gap-1">
+<span class="material-symbols-outlined text-[13px]">check_circle</span> Settled
+</span>
+</td>
+<td class="py-3.5 px-4 text-center whitespace-nowrap">
+<button class="p-1 rounded-md hover:bg-[#f5f5f7] text-[#7a7a7a] hover:text-[#1d1d1f]" title="More options" type="button">
+<span class="material-symbols-outlined text-base">more_vert</span>
+</button>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<!-- Table Pagination & Count Footer -->
+<div class="flex flex-col sm:flex-row items-center justify-between gap-3 mt-4 pt-3 border-t border-[#f0f0f0] text-[#7a7a7a] text-xs">
+<div class="flex items-center gap-1">
+<span>Showing <strong class="text-[#1d1d1f]">1 to 7</strong> of 34 transactions</span>
+</div>
+<div class="flex items-center gap-1.5">
+<button class="px-3 py-1.5 rounded-full bg-white border border-[#e0e0e0] opacity-50 cursor-not-allowed text-[#7a7a7a] text-xs font-medium" disabled="" type="button">
+Previous
+</button>
+<button class="w-8 h-8 rounded-full bg-[#0066cc] text-white text-xs font-medium flex items-center justify-center shadow-sm" type="button">
+1
+</button>
+<button class="w-8 h-8 rounded-full bg-white border border-[#e0e0e0] hover:bg-[#fafafc] text-[#1d1d1f] text-xs font-medium flex items-center justify-center transition-colors" type="button">
+2
+</button>
+<button class="w-8 h-8 rounded-full bg-white border border-[#e0e0e0] hover:bg-[#fafafc] text-[#1d1d1f] text-xs font-medium flex items-center justify-center transition-colors" type="button">
+3
+</button>
+<span class="text-xs text-[#7a7a7a] px-1">...</span>
+<button class="w-8 h-8 rounded-full bg-white border border-[#e0e0e0] hover:bg-[#fafafc] text-[#1d1d1f] text-xs font-medium flex items-center justify-center transition-colors" type="button">
+5
+</button>
+<button class="px-3 py-1.5 rounded-full bg-white border border-[#e0e0e0] hover:bg-[#fafafc] text-[#1d1d1f] text-xs font-medium transition-colors" type="button">
+Next
+</button>
+</div>
+</div>
+</div>
+<!-- Financial Insight Tiles (Editorial Apple Layout) -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6 pb-6">
+<div class="p-6 rounded-[18px] bg-white border border-[#e0e0e0] flex items-start gap-4 shadow-sm">
+<div class="w-10 h-10 rounded-full bg-[#0066cc]/10 border border-[#0066cc]/20 text-[#0066cc] flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-[20px]">insights</span>
+</div>
+<div>
+<h3 class="text-sm font-semibold text-[#1d1d1f]">Household Run-Rate Analysis</h3>
+<p class="text-xs text-[#7a7a7a] mt-1">
+Based on current grocery and utilities consumption, Apt 4B is trending $184 under your quarterly budget cap.
+</p>
+</div>
+</div>
+<div class="p-6 rounded-[18px] bg-white border border-[#e0e0e0] flex items-start gap-4 shadow-sm">
+<div class="w-10 h-10 rounded-full bg-[#ff9500]/10 border border-[#ff9500]/20 text-[#ff9500] flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-[20px]">sync_alt</span>
+</div>
+<div>
+<h3 class="text-sm font-semibold text-[#1d1d1f]">Smart Split Recommendation</h3>
+<p class="text-xs text-[#7a7a7a] mt-1">
+Settling ConEd ($53.95) with Marcus directly cancels out Liam's pending reimbursement for Target supplies.
+</p>
+</div>
+</div>
+</div>
+</div>
+</main>
+</div>
+<script>
+  (function () {
+    const scopeButtons = document.querySelectorAll('.tab-pill');
+    const tableRows = document.querySelectorAll('#expenseRowsContainer tr');
+    const categoryChips = document.querySelectorAll('.category-chip');
+    const searchInput = document.getElementById('expenseSearch');
+    let activeCategory = 'all';
+
+    // Scope Pill Filtering
+    scopeButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        scopeButtons.forEach(b => {
+          b.classList.remove('bg-[#0066cc]', 'text-white', 'shadow-sm', 'font-semibold');
+          b.classList.add('text-[#7a7a7a]', 'font-medium');
+        });
+        btn.classList.add('bg-[#0066cc]', 'text-white', 'shadow-sm', 'font-semibold');
+        btn.classList.remove('text-[#7a7a7a]', 'font-medium');
+
+        const filter = btn.getAttribute('data-filter');
+        filterLedger(filter, activeCategory, searchInput ? searchInput.value.toLowerCase() : '');
+      });
+    });
+
+    // Category Chips Filtering
+    categoryChips.forEach(chip => {
+      chip.addEventListener('click', () => {
+        categoryChips.forEach(c => {
+          c.classList.remove('bg-[#0066cc]', 'text-white', 'shadow-sm');
+          c.classList.add('bg-[#f5f5f7]', 'text-[#7a7a7a]', 'border', 'border-[#e0e0e0]');
+        });
+        chip.classList.add('bg-[#0066cc]', 'text-white', 'shadow-sm');
+        chip.classList.remove('bg-[#f5f5f7]', 'text-[#7a7a7a]');
+
+        activeCategory = chip.getAttribute('data-cat');
+        const activeScope = document.querySelector('.tab-pill.bg-\\[\\#0066cc\\]')?.getAttribute('data-filter') || 'all';
+        filterLedger(activeScope, activeCategory, searchInput ? searchInput.value.toLowerCase() : '');
+      });
+    });
+
+    // Search Input Filtering
+    if (searchInput) {
+      searchInput.addEventListener('input', (e) => {
+        const query = e.target.value.toLowerCase();
+        const activeScope = document.querySelector('.tab-pill.bg-\\[\\#0066cc\\]')?.getAttribute('data-filter') || 'all';
+        filterLedger(activeScope, activeCategory, query);
+      });
+
+      window.addEventListener('keydown', (e) => {
+        if (e.key === '/' && document.activeElement !== searchInput) {
+          e.preventDefault();
+          searchInput.focus();
+        }
+      });
+    }
+
+    // Filter Logic
+    function filterLedger(scope, category, query) {
+      tableRows.forEach(row => {
+        const text = row.innerText.toLowerCase();
+        const rowCategory = row.getAttribute('data-category');
+        const rowPaid = row.getAttribute('data-paid');
+
+        let matchesSearch = query === '' || text.includes(query);
+        let matchesCategory = category === 'all' || (rowCategory && rowCategory.includes(category));
+        
+        let matchesScope = true;
+        if (scope === 'paid-by-me') {
+          matchesScope = rowPaid && rowPaid.includes('Alex');
+        } else if (scope === 'split-with-me') {
+          matchesScope = rowPaid && !rowPaid.includes('Alex');
+        } else if (scope === 'recurring') {
+          matchesScope = text.includes('fiber') || text.includes('electricity') || text.includes('coned');
+        }
+
+        row.style.display = (matchesSearch && matchesCategory && matchesScope) ? '' : 'none';
+      });
+    }
+
+    // Export CSV Feedback
+    const exportBtn = document.getElementById('exportBtn');
+    if (exportBtn) {
+      exportBtn.addEventListener('click', () => {
+        const originalText = exportBtn.innerHTML;
+        exportBtn.innerHTML = '<span class="material-symbols-outlined text-base text-[#0066cc]">check</span><span>Exporting...</span>';
+        setTimeout(() => {
+          exportBtn.innerHTML = originalText;
+        }, 1200);
+      });
+    }
+  })();
+</script>
+</body></html>
