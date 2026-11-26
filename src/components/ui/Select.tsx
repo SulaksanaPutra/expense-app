@@ -22,6 +22,7 @@ export interface SelectProps {
   label?: string;
   error?: string;
   variant?: SelectVariant;
+  menuPlacement?: "bottom" | "top";
   searchable?: boolean;
   searchPlaceholder?: string;
   disabled?: boolean;
@@ -39,6 +40,7 @@ export function Select({
   label,
   error,
   variant = "default",
+  menuPlacement = "bottom",
   searchable,
   searchPlaceholder = "Search options...",
   disabled = false,
@@ -264,7 +266,14 @@ export function Select({
       </button>
 
       {open && (
-        <div className="absolute top-full left-0 z-40 mt-1.5 w-full min-w-[200px] overflow-hidden rounded-[14px] border border-hairline bg-canvas p-1.5 shadow-[0_8px_24px_rgba(0,0,0,0.08)]">
+        <div
+          className={cn(
+            "absolute left-0 z-40 w-full min-w-[200px] overflow-hidden rounded-[14px] border border-hairline bg-canvas p-1.5 shadow-[0_8px_24px_rgba(0,0,0,0.08)]",
+            menuPlacement === "top"
+              ? "bottom-full mb-1.5"
+              : "top-full mt-1.5",
+          )}
+        >
           {isSearchable && (
             <div className="mb-1.5 flex items-center gap-2 rounded-sm border border-hairline bg-surface-pearl px-2.5 py-1.5">
               <Search className="h-3.5 w-3.5 shrink-0 text-ink-muted-48" aria-hidden="true" />

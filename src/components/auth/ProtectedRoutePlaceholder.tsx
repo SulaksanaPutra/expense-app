@@ -12,7 +12,7 @@ export function ProtectedRoutePlaceholder({
   userEmail,
 }: ProtectedRoutePlaceholderProps) {
   return (
-    <main className="mx-auto flex min-h-screen max-w-3xl items-center justify-center px-4 py-12">
+    <section className="mx-auto w-full max-w-3xl py-4">
       <Card padding="lg" className="w-full">
         <CardHeader>
           <div>
@@ -31,6 +31,6 @@ export function ProtectedRoutePlaceholder({
           </form>
         </CardHeader>
       </Card>
-    </main>
+    </section>
   );
 }
