@@ -14,6 +14,12 @@ import type {
   SplitGroupsPageData,
 } from "./types";
 import { createSignedInviteToken } from "./invite-token";
+import {
+  classifyAuditCategory,
+  extractAuditDetails,
+  recordGroupAuditEvent,
+  type GroupAuditLogEntry,
+} from "./audit-log";
 
 const VALID_GROUP_TYPES: readonly GroupType[] = [
   "RESIDENTIAL",
@@ -420,6 +426,21 @@ export async function createSplitGroup(
     // Fallback to auth metadata when profile lookup is unavailable.
   }
 
+  const initialAuditEntry = await recordGroupAuditEvent(supabase, {
+    groupId,
+    actorId: authUser.id,
+    actorName: creatorName,
+    eventType: "GROUP_CREATED",
+    summary: `Created ${input.name} (${input.group_type}) with ${creatorName} as Admin`,
+    metadata: {
+      next_split_mode: "EQUAL",
+      details: [
+        `Base currency: ${input.base_currency}`,
+        `Initial split mode: Equal Split (100% creator share)`,
+      ],
+    },
+  });
+
   const group: SplitGroupDetail = {
     id: groupId,
     name: input.name,
@@ -440,6 +461,7 @@ export async function createSplitGroup(
     recurringRuleCount: 0,
     isFullySettled: true,
     currentUserRole: "ADMIN",
+    auditLogs: [initialAuditEntry],
     members: [
       {
         userId: authUser.id,
@@ -590,6 +612,71 @@ export async function getSplitGroupsPageData(
       );
     }
 
+    const auditLogsByGroup = new Map<string, GroupAuditLogEntry[]>();
+    try {
+      const auditTable = supabase.from("group_audit_logs") as unknown as {
+        select?: (cols: string) => {
+          in?: (col: string, vals: string[]) => {
+            order?: (
+              col: string,
+              opts: { ascending: boolean },
+            ) => Promise<{
+              data: Array<
+                Database["public"]["Tables"]["group_audit_logs"]["Row"]
+              > | null;
+              error: { message?: string } | null;
+            }>;
+          };
+        };
+      };
+      const inQuery = auditTable
+        ?.select?.("id, group_id, actor_id, event_type, summary, metadata, created_at")
+        ?.in?.("group_id", groupIds);
+      if (inQuery && typeof inQuery.order === "function") {
+        const { data: auditRows, error: auditError } = await inQuery.order(
+          "created_at",
+          { ascending: false },
+        );
+        if (!auditError && Array.isArray(auditRows)) {
+          for (const row of auditRows) {
+            const actorProfile = row.actor_id
+              ? usersById.get(row.actor_id)
+              : undefined;
+            const rowMetadata =
+              row.metadata &&
+              typeof row.metadata === "object" &&
+              !Array.isArray(row.metadata)
+                ? (row.metadata as Record<string, unknown>)
+                : undefined;
+            const entry: GroupAuditLogEntry = {
+              id: row.id,
+              groupId: row.group_id,
+              category: classifyAuditCategory(row.event_type),
+              eventType: row.event_type,
+              actorId: row.actor_id,
+              actorName:
+                actorProfile?.full_name ||
+                actorProfile?.email ||
+                (row.actor_id ? "Group Member" : "System"),
+              summary: row.summary,
+              details: extractAuditDetails(
+                row.event_type,
+                rowMetadata,
+                usersById,
+              ),
+              createdAt: row.created_at,
+              metadata: rowMetadata,
+            };
+            const list = auditLogsByGroup.get(row.group_id) ?? [];
+            list.push(entry);
+            auditLogsByGroup.set(row.group_id, list);
+          }
+        }
+      }
+    } catch {
+      // Gracefully skip if audit table is unmocked or unavailable.
+    }
+
     const activeGroups: SplitGroupDetail[] = [];
     const archivedGroups: SplitGroupDetail[] = [];
 
@@ -644,6 +731,7 @@ export async function getSplitGroupsPageData(
         isFullySettled: metrics.isFullySettled,
         members,
         currentUserRole: currentMember?.role ?? null,
+        auditLogs: auditLogsByGroup.get(g.id),
       };
 
       if (g.status === "ARCHIVED") {

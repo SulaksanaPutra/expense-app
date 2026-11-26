@@ -4,12 +4,14 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import {
   Archive,
-  Calendar,
   Check,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
   Copy,
+  Eye,
+  History,
+  Home,
   Link2,
   Plus,
   ReceiptText,
@@ -34,6 +36,7 @@ import { useActiveGroup } from "@/components/shell/ActiveGroupContext";
 import type { ShellGroupSummary } from "@/components/shell/types";
 import { formatCycleLabel } from "@/components/shell/url-state";
 import { cn } from "@/lib/cn";
+import type { GroupAuditLogEntry } from "@/lib/groups/audit-log";
 import { buildInviteJoinUrl } from "@/lib/groups/invite-utils";
 import type {
   SplitGroupDetail,
@@ -41,6 +44,7 @@ import type {
 } from "@/lib/groups/types";
 import { formatMinorUnits } from "@/lib/money";
 import type { GroupStatus, SplitMode } from "@/types/database";
+import { AuditLogDrawer } from "./AuditLogDrawer";
 import { CreateGroupModal } from "./CreateGroupModal";
 import { EditRatiosModal } from "./EditRatiosModal";
 import { SplitGroupCard } from "./SplitGroupCard";
@@ -79,6 +83,7 @@ export function SplitGroupsClient({
   >({});
   const [createModalOpen, setCreateModalOpen] = React.useState(false);
   const [editRatiosModalOpen, setEditRatiosModalOpen] = React.useState(false);
+  const [auditDrawerOpen, setAuditDrawerOpen] = React.useState(false);
   const [archiveModalOpen, setArchiveModalOpen] = React.useState(false);
   const [archivedExpanded, setArchivedExpanded] = React.useState(false);
   const [copiedGroupId, setCopiedGroupId] = React.useState<string | null>(null);
@@ -201,14 +206,34 @@ export function SplitGroupsClient({
           return;
         }
 
-        setGroupOverrides((prev) => ({
-          ...prev,
-          [group.id]: {
-            ...prev[group.id],
-            inviteToken: payload.inviteToken,
-            inviteTokenVersion: payload.inviteTokenVersion,
-          },
-        }));
+        setGroupOverrides((prev) => {
+          const existingLogs =
+            prev[group.id]?.auditLogs ?? group.auditLogs ?? [];
+          const nextVersion = payload.inviteTokenVersion;
+          const regenEntry: GroupAuditLogEntry = {
+            id: `local-regen-${group.id}-${Date.now()}`,
+            groupId: group.id,
+            category: "GOVERNANCE",
+            eventType: "INVITE_LINK_REGENERATED",
+            actorId: null,
+            actorName: "Group Admin",
+            summary: `Regenerated invite link${nextVersion ? ` (v${nextVersion})` : ""} and revoked prior links`,
+            details: nextVersion
+              ? [`Active invite token version: v${nextVersion}`]
+              : [],
+            createdAt: new Date().toISOString(),
+          };
+
+          return {
+            ...prev,
+            [group.id]: {
+              ...prev[group.id],
+              inviteToken: payload.inviteToken,
+              inviteTokenVersion: payload.inviteTokenVersion,
+              auditLogs: [regenEntry, ...existingLogs],
+            },
+          };
+        });
         setCopiedGroupId(null);
         pushToast({
           tone: "success",
@@ -235,6 +260,7 @@ export function SplitGroupsClient({
       groupStatus: GroupStatus;
       defaultSplitMode: SplitMode;
       memberShares: Array<{ userId: string; sharePercentage: number }>;
+      auditEntry?: GroupAuditLogEntry;
     }) => {
       const shareByUser = new Map(
         result.memberShares.map((item) => [item.userId, item.sharePercentage]),
@@ -243,12 +269,19 @@ export function SplitGroupsClient({
       setGroupOverrides((prev) => {
         const currentGroup = activeGroups.find((g) => g.id === result.groupId);
         if (!currentGroup) return prev;
+        const existingLogs =
+          prev[result.groupId]?.auditLogs ?? currentGroup.auditLogs ?? [];
+        const nextAuditLogs = result.auditEntry
+          ? [result.auditEntry, ...existingLogs]
+          : existingLogs;
+
         return {
           ...prev,
           [result.groupId]: {
             ...prev[result.groupId],
             status: result.groupStatus,
             defaultSplitMode: result.defaultSplitMode,
+            auditLogs: nextAuditLogs,
             members: currentGroup.members.map((member) => ({
               ...member,
               sharePercentage:
@@ -439,7 +472,7 @@ export function SplitGroupsClient({
 
           <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
             <div>
-              <div className="mb-1 flex items-center gap-2">
+              <div className="mb-1 flex flex-wrap items-center gap-2">
                 <span className="text-[11px] font-semibold uppercase tracking-wide text-[#0066cc]">
                   Spotlight Partition
                 </span>
@@ -448,6 +481,11 @@ export function SplitGroupsClient({
                     ? "Equal Split"
                     : "Custom Ratios"}
                 </Badge>
+                {selectedGroup.currentUserRole !== "ADMIN" && (
+                  <Badge tone="neutral" size="sm">
+                    View-only
+                  </Badge>
+                )}
               </div>
               <h2 className="font-display text-[21px] font-semibold tracking-tight text-ink">
                 {selectedGroup.name} · Split Rules &amp; Ratios
@@ -460,17 +498,36 @@ export function SplitGroupsClient({
 
             <div className="flex flex-wrap items-center gap-2">
               {selectedGroup.currentUserRole === "ADMIN" &&
-                selectedGroup.status !== "ARCHIVED" && (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    leftIcon={<SlidersHorizontal className="h-3.5 w-3.5" />}
-                    onClick={() => setEditRatiosModalOpen(true)}
-                  >
-                    Edit Ratios
-                  </Button>
-                )}
+              selectedGroup.status !== "ARCHIVED" ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  leftIcon={<SlidersHorizontal className="h-3.5 w-3.5" />}
+                  onClick={() => setEditRatiosModalOpen(true)}
+                >
+                  Edit Ratios
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  leftIcon={<Eye className="h-3.5 w-3.5" />}
+                  onClick={() => setEditRatiosModalOpen(true)}
+                >
+                  View Ratios
+                </Button>
+              )}
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                leftIcon={<History className="h-3.5 w-3.5" />}
+                onClick={() => setAuditDrawerOpen(true)}
+              >
+                Log
+              </Button>
               <Button
                 type="button"
                 variant="secondary"
@@ -587,44 +644,52 @@ export function SplitGroupsClient({
                             )}`
                           : "Settled"}
                     </span>
-                    {member.status === "FORMER_MEMBER" && (
+                    {member.status === "FORMER_MEMBER" ? (
                       <Badge tone="warning" size="sm">
                         Former
                       </Badge>
-                    )}
+                    ) : member.netBalanceCents === 0 ? (
+                      <Badge tone="neutral" size="sm">
+                        Balanced
+                      </Badge>
+                    ) : null}
                   </div>
                 </Card>
               );
             })}
           </div>
 
-          {/* Group Configuration & Member Invitation Gateway */}
+          {/* Assigned Habitat & Member Invitation Gateway */}
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
             <Card
               variant="sub-card"
               padding="md"
+              data-testid="assigned-habitat-card"
               className="flex flex-col justify-between gap-4 lg:col-span-6"
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="flex flex-col gap-1">
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-[#0066cc]">
-                    Cycle &amp; Budget Policy
+                    Assigned Habitat
                   </span>
                   <h3 className="text-[16px] font-semibold text-ink">
+                    {selectedGroup.name}
+                  </h3>
+                  <p className="text-[12px] text-ink-muted-80">
                     {selectedGroup.operationalBudgetCents !== null
                       ? `${formatMinorUnits(
                           selectedGroup.operationalBudgetCents,
                           selectedGroup.baseCurrency,
                         )} Monthly Target`
                       : "No Monthly Budget Cap"}
-                  </h3>
+                  </p>
                   <p className="text-[12px] text-ink-muted-48">
                     Base currency {selectedGroup.baseCurrency} · Anchored on day{" "}
                     {selectedGroup.billingCycleAnchorDay} of each month
                   </p>
                 </div>
                 <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-hairline bg-canvas text-ink-muted-48">
-                  <Calendar className="h-4 w-4" aria-hidden="true" />
+                  <Home className="h-4 w-4" aria-hidden="true" />
                 </span>
               </div>
 
@@ -635,9 +700,11 @@ export function SplitGroupsClient({
                     : "No lease end date configured"}
                 </span>
                 <span className="font-medium text-ink-muted-80">
-                  {selectedGroup.simplifyDebts
-                    ? "Debt simplification on"
-                    : "Direct peer balances"}
+                  {selectedGroup.recurringRuleCount > 0
+                    ? `Auto-ingestion active (${selectedGroup.recurringRuleCount})`
+                    : selectedGroup.simplifyDebts
+                      ? "Debt simplification on"
+                      : "Direct peer balances"}
                 </span>
               </div>
             </Card>
@@ -834,11 +901,20 @@ export function SplitGroupsClient({
 
       {selectedGroup && (
         <EditRatiosModal
-          key={`${selectedGroup.id}-${selectedGroup.members.length}-${selectedGroup.defaultSplitMode}`}
+          key={`${selectedGroup.id}-${selectedGroup.members.length}-${selectedGroup.defaultSplitMode}-${selectedGroup.currentUserRole ?? "none"}`}
           open={editRatiosModalOpen}
           onClose={() => setEditRatiosModalOpen(false)}
           group={selectedGroup}
           onSaved={handleRatiosSaved}
+        />
+      )}
+
+      {selectedGroup && (
+        <AuditLogDrawer
+          key={selectedGroup.id}
+          open={auditDrawerOpen}
+          onClose={() => setAuditDrawerOpen(false)}
+          group={selectedGroup}
         />
       )}
 

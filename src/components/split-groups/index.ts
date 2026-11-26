@@ -1,3 +1,6 @@
+export { AuditLogDrawer } from "./AuditLogDrawer";
+export type { AuditLogDrawerProps } from "./AuditLogDrawer";
+
 export { CreateGroupModal } from "./CreateGroupModal";
 export type { CreateGroupModalProps } from "./CreateGroupModal";
 
