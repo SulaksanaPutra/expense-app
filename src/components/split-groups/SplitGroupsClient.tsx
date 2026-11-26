@@ -34,12 +34,15 @@ import { useActiveGroup } from "@/components/shell/ActiveGroupContext";
 import type { ShellGroupSummary } from "@/components/shell/types";
 import { formatCycleLabel } from "@/components/shell/url-state";
 import { cn } from "@/lib/cn";
+import { buildInviteJoinUrl } from "@/lib/groups/invite-utils";
 import type {
   SplitGroupDetail,
   SplitGroupsPageData,
 } from "@/lib/groups/types";
 import { formatMinorUnits } from "@/lib/money";
+import type { GroupStatus, SplitMode } from "@/types/database";
 import { CreateGroupModal } from "./CreateGroupModal";
+import { EditRatiosModal } from "./EditRatiosModal";
 import { SplitGroupCard } from "./SplitGroupCard";
 
 export interface SplitGroupsClientProps {
@@ -52,7 +55,7 @@ function buildInvitePath(group: SplitGroupDetail): string {
     typeof window !== "undefined" && window.location?.origin
       ? window.location.origin
       : "https://ledgersplit.app";
-  return `${origin}/join/${group.slug}?token=${encodeURIComponent(group.inviteToken)}`;
+  return buildInviteJoinUrl(group.slug, group.inviteToken, origin);
 }
 
 export function SplitGroupsClient({
@@ -71,18 +74,30 @@ export function SplitGroupsClient({
   const [createdGroups, setCreatedGroups] = React.useState<SplitGroupDetail[]>(
     [],
   );
+  const [groupOverrides, setGroupOverrides] = React.useState<
+    Record<string, Partial<SplitGroupDetail>>
+  >({});
   const [createModalOpen, setCreateModalOpen] = React.useState(false);
+  const [editRatiosModalOpen, setEditRatiosModalOpen] = React.useState(false);
   const [archiveModalOpen, setArchiveModalOpen] = React.useState(false);
   const [archivedExpanded, setArchivedExpanded] = React.useState(false);
   const [copiedGroupId, setCopiedGroupId] = React.useState<string | null>(null);
+  const [copyStatusText, setCopyStatusText] = React.useState("");
+  const [regeneratingGroupId, setRegeneratingGroupId] = React.useState<
+    string | null
+  >(null);
   const [toasts, setToasts] = React.useState<ToastItem[]>([]);
   const toastCounterRef = React.useRef(0);
+  const copyTimerRef = React.useRef<number | null>(null);
 
   const activeGroups = React.useMemo(() => {
     const incomingIds = new Set(initialData.activeGroups.map((g) => g.id));
     const pendingLocal = createdGroups.filter((g) => !incomingIds.has(g.id));
-    return [...initialData.activeGroups, ...pendingLocal];
-  }, [createdGroups, initialData.activeGroups]);
+    return [...initialData.activeGroups, ...pendingLocal].map((group) => {
+      const override = groupOverrides[group.id];
+      return override ? { ...group, ...override } : group;
+    });
+  }, [createdGroups, groupOverrides, initialData.activeGroups]);
 
   const pushToast = React.useCallback((toast: Omit<ToastItem, "id">) => {
     toastCounterRef.current += 1;
@@ -121,28 +136,139 @@ export function SplitGroupsClient({
   const handleCopyInviteLink = React.useCallback(
     async (group: SplitGroupDetail) => {
       const link = buildInvitePath(group);
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+
       try {
-        if (navigator?.clipboard?.writeText) {
-          await navigator.clipboard.writeText(link);
+        if (!navigator?.clipboard?.writeText) {
+          throw new Error("Clipboard API unavailable");
         }
+        await navigator.clipboard.writeText(link);
         setCopiedGroupId(group.id);
+        setCopyStatusText("Copied");
         pushToast({
           tone: "success",
           title: "Invite link copied",
           description: `Copied invitation URL for ${group.name}.`,
         });
-        window.setTimeout(() => {
+        copyTimerRef.current = window.setTimeout(() => {
           setCopiedGroupId((curr) => (curr === group.id ? null : curr));
+          setCopyStatusText("");
         }, 2000);
       } catch {
+        setCopiedGroupId(null);
+        setCopyStatusText("Copy failed");
         pushToast({
           tone: "info",
-          title: "Invite link ready",
+          title: "Copy failed",
           description: "Select and copy the invitation link manually.",
         });
+        copyTimerRef.current = window.setTimeout(() => {
+          setCopyStatusText("");
+        }, 2000);
       }
     },
     [pushToast],
+  );
+
+  const handleRegenerateInviteLink = React.useCallback(
+    async (group: SplitGroupDetail) => {
+      if (group.currentUserRole !== "ADMIN") return;
+      setRegeneratingGroupId(group.id);
+
+      try {
+        const response = await fetch(
+          `/api/groups/${encodeURIComponent(group.id)}/invite/regenerate`,
+          {
+            method: "POST",
+          },
+        );
+        const payload = (await response.json()) as {
+          error?: string;
+          inviteToken?: string;
+          inviteTokenVersion?: number;
+        };
+
+        if (!response.ok || !payload.inviteToken) {
+          pushToast({
+            tone: "error",
+            title: "Could not regenerate link",
+            description:
+              payload.error ||
+              "Failed to rotate invite link. Please try again.",
+          });
+          return;
+        }
+
+        setGroupOverrides((prev) => ({
+          ...prev,
+          [group.id]: {
+            ...prev[group.id],
+            inviteToken: payload.inviteToken,
+            inviteTokenVersion: payload.inviteTokenVersion,
+          },
+        }));
+        setCopiedGroupId(null);
+        pushToast({
+          tone: "success",
+          title: "Invite link regenerated",
+          description: "All previous invite links for this group are now revoked.",
+        });
+        router.refresh();
+      } catch {
+        pushToast({
+          tone: "error",
+          title: "Network error",
+          description: "Could not regenerate invite link. Please try again.",
+        });
+      } finally {
+        setRegeneratingGroupId(null);
+      }
+    },
+    [pushToast, router],
+  );
+
+  const handleRatiosSaved = React.useCallback(
+    (result: {
+      groupId: string;
+      groupStatus: GroupStatus;
+      defaultSplitMode: SplitMode;
+      memberShares: Array<{ userId: string; sharePercentage: number }>;
+    }) => {
+      const shareByUser = new Map(
+        result.memberShares.map((item) => [item.userId, item.sharePercentage]),
+      );
+
+      setGroupOverrides((prev) => {
+        const currentGroup = activeGroups.find((g) => g.id === result.groupId);
+        if (!currentGroup) return prev;
+        return {
+          ...prev,
+          [result.groupId]: {
+            ...prev[result.groupId],
+            status: result.groupStatus,
+            defaultSplitMode: result.defaultSplitMode,
+            members: currentGroup.members.map((member) => ({
+              ...member,
+              sharePercentage:
+                shareByUser.get(member.userId) ?? member.sharePercentage,
+            })),
+          },
+        };
+      });
+
+      pushToast({
+        tone: "success",
+        title: "Split ratios updated",
+        description:
+          result.defaultSplitMode === "EQUAL"
+            ? "Equal split allocation saved for all active members."
+            : "Custom split ratios saved and group status restored to active.",
+      });
+      router.refresh();
+    },
+    [activeGroups, pushToast, router],
   );
 
   const handleGroupCreated = React.useCallback(
@@ -296,6 +422,18 @@ export function SplitGroupsClient({
               tone="warning"
               title="Custom split ratios need review"
               description="A new member joined in CUSTOM_RATIOS mode with a 0% default share. Review member allocations so active percentages sum to 100%."
+              action={
+                selectedGroup.currentUserRole === "ADMIN" ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setEditRatiosModalOpen(true)}
+                  >
+                    Edit Ratios
+                  </Button>
+                ) : undefined
+              }
             />
           )}
 
@@ -320,7 +458,19 @@ export function SplitGroupsClient({
               </p>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              {selectedGroup.currentUserRole === "ADMIN" &&
+                selectedGroup.status !== "ARCHIVED" && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    leftIcon={<SlidersHorizontal className="h-3.5 w-3.5" />}
+                    onClick={() => setEditRatiosModalOpen(true)}
+                  >
+                    Edit Ratios
+                  </Button>
+                )}
               <Button
                 type="button"
                 variant="secondary"
@@ -495,6 +645,7 @@ export function SplitGroupsClient({
             <Card
               variant="sub-card"
               padding="md"
+              data-testid="member-invitation-gateway"
               className="flex flex-col justify-between gap-3 lg:col-span-6"
             >
               <div className="flex flex-col gap-1">
@@ -512,7 +663,7 @@ export function SplitGroupsClient({
                   {selectedGroup.name} using{" "}
                   {selectedGroup.defaultSplitMode === "EQUAL"
                     ? "equal split shares"
-                    : "custom split ratios"}
+                    : "custom split ratios (0% initial share until reviewed)"}
                   .
                 </p>
               </div>
@@ -523,6 +674,7 @@ export function SplitGroupsClient({
                   aria-hidden="true"
                 />
                 <input
+                  id="invite-link-input"
                   type="text"
                   readOnly
                   aria-label="Group invite link"
@@ -544,15 +696,28 @@ export function SplitGroupsClient({
                 >
                   {copiedGroupId === selectedGroup.id ? "Copied" : "Copy"}
                 </Button>
+                <span role="status" aria-live="polite" className="sr-only">
+                  {copyStatusText}
+                </span>
               </div>
 
               <div className="flex items-center justify-between border-t border-hairline pt-2 text-[11px] text-ink-muted-48">
                 <span>Slug: {selectedGroup.slug}</span>
-                <span>
-                  {selectedGroup.currentUserRole === "ADMIN"
-                    ? "Admin access"
-                    : "Member view"}
-                </span>
+                {selectedGroup.currentUserRole === "ADMIN" &&
+                selectedGroup.status !== "ARCHIVED" ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    loading={regeneratingGroupId === selectedGroup.id}
+                    onClick={() => void handleRegenerateInviteLink(selectedGroup)}
+                    className="h-7 px-2.5 text-[11px] font-semibold text-[#0066cc]"
+                  >
+                    Regenerate Link
+                  </Button>
+                ) : (
+                  <span>Member view · Copy only</span>
+                )}
               </div>
             </Card>
           </div>
@@ -666,6 +831,16 @@ export function SplitGroupsClient({
         defaultCurrency={defaultCurrency}
         onCreated={handleGroupCreated}
       />
+
+      {selectedGroup && (
+        <EditRatiosModal
+          key={`${selectedGroup.id}-${selectedGroup.members.length}-${selectedGroup.defaultSplitMode}`}
+          open={editRatiosModalOpen}
+          onClose={() => setEditRatiosModalOpen(false)}
+          group={selectedGroup}
+          onSaved={handleRatiosSaved}
+        />
+      )}
 
       <Dialog
         open={archiveModalOpen}

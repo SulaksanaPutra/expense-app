@@ -13,6 +13,7 @@ import type {
   SplitGroupMemberDetail,
   SplitGroupsPageData,
 } from "./types";
+import { createSignedInviteToken } from "./invite-token";
 
 const VALID_GROUP_TYPES: readonly GroupType[] = [
   "RESIDENTIAL",
@@ -313,7 +314,12 @@ export async function createSplitGroup(
 ): Promise<CreateSplitGroupResult> {
   const groupId = crypto.randomUUID();
   const slug = buildGroupSlug(input.name);
-  const inviteToken = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
+  const inviteTokenVersion = 1;
+  const inviteToken = createSignedInviteToken({
+    groupId,
+    slug,
+    version: inviteTokenVersion,
+  });
 
   const { error: groupInsertError } = await supabase.from("groups").insert({
     id: groupId,
@@ -328,6 +334,7 @@ export async function createSplitGroup(
     billing_cycle_anchor_day: input.billing_cycle_anchor_day,
     lease_end_date: input.lease_end_date,
     invite_token: inviteToken,
+    invite_token_version: inviteTokenVersion,
     created_by: authUser.id,
   });
 
@@ -426,6 +433,7 @@ export async function createSplitGroup(
     billingCycleAnchorDay: input.billing_cycle_anchor_day,
     leaseEndDate: input.lease_end_date,
     inviteToken,
+    inviteTokenVersion,
     cycleTurnoverCents: 0,
     cycleTransactionCount: 0,
     userNetLedgerCents: 0,
@@ -461,7 +469,7 @@ export async function getSplitGroupsPageData(
     const { data: groupRows, error: groupsError } = await supabase
       .from("groups")
       .select(
-        "id, name, slug, group_type, status, base_currency, default_split_mode, simplify_debts, operational_budget_cents, billing_cycle_anchor_day, lease_end_date, invite_token, created_at",
+        "id, name, slug, group_type, status, base_currency, default_split_mode, simplify_debts, operational_budget_cents, billing_cycle_anchor_day, lease_end_date, invite_token, invite_token_version, created_at",
       )
       .order("created_at", { ascending: true });
 
@@ -628,6 +636,7 @@ export async function getSplitGroupsPageData(
         billingCycleAnchorDay: g.billing_cycle_anchor_day,
         leaseEndDate: g.lease_end_date,
         inviteToken: g.invite_token,
+        inviteTokenVersion: g.invite_token_version ?? 1,
         cycleTurnoverCents: metrics.cycleTurnoverCents,
         cycleTransactionCount: metrics.cycleTransactionCount,
         userNetLedgerCents: metrics.userNetLedgerCents,
