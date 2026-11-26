@@ -40,6 +40,14 @@ export interface SplitGroupDetail {
   operationalBudgetCents: number | null;
   billingCycleAnchorDay: number;
   leaseEndDate: string | null;
+  tripAutoArchiveEnabled?: boolean;
+  tripAutoArchiveDays?: number;
+  residentialLeasePromptEnabled?: boolean;
+  zeroBalanceSince?: string | null;
+  leasePromptSnoozedUntil?: string | null;
+  shouldPromptLeaseArchive?: boolean;
+  daysSinceLeaseEnd?: number | null;
+  archivedAt?: string | null;
   inviteToken: string;
   inviteTokenVersion?: number;
   cycleTurnoverCents: number;

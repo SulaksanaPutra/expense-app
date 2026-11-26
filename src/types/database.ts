@@ -17,11 +17,15 @@ export type GroupAuditEventType =
   | "NEEDS_RATIO_UPDATE_CLEARED"
   | "MEMBER_JOINED"
   | "MEMBER_REJOINED"
+  | "MEMBER_LEFT"
   | "MEMBER_REMOVED"
+  | "MEMBER_MARKED_FORMER"
   | "MEMBER_ROLE_CHANGED"
   | "INVITE_LINK_REGENERATED"
   | "BILLING_CYCLE_CLOSED"
-  | "GROUP_ARCHIVED";
+  | "ARCHIVE_RULES_UPDATED"
+  | "GROUP_ARCHIVED"
+  | "GROUP_UNARCHIVED";
 
 export interface NotificationPrefs {
   new_expense: boolean;
@@ -105,6 +109,13 @@ export interface Database {
           operational_budget_cents: number | null;
           billing_cycle_anchor_day: number;
           lease_end_date: string | null;
+          trip_auto_archive_enabled: boolean;
+          trip_auto_archive_days: number;
+          residential_lease_prompt_enabled: boolean;
+          zero_balance_since: string | null;
+          lease_prompt_snoozed_until: string | null;
+          archived_at: string | null;
+          archived_by: string | null;
           invite_token: string;
           invite_token_version: number;
           created_by: string | null;
@@ -123,6 +134,13 @@ export interface Database {
           operational_budget_cents?: number | null;
           billing_cycle_anchor_day?: number;
           lease_end_date?: string | null;
+          trip_auto_archive_enabled?: boolean;
+          trip_auto_archive_days?: number;
+          residential_lease_prompt_enabled?: boolean;
+          zero_balance_since?: string | null;
+          lease_prompt_snoozed_until?: string | null;
+          archived_at?: string | null;
+          archived_by?: string | null;
           invite_token?: string;
           invite_token_version?: number;
           created_by?: string | null;
@@ -141,6 +159,13 @@ export interface Database {
           operational_budget_cents?: number | null;
           billing_cycle_anchor_day?: number;
           lease_end_date?: string | null;
+          trip_auto_archive_enabled?: boolean;
+          trip_auto_archive_days?: number;
+          residential_lease_prompt_enabled?: boolean;
+          zero_balance_since?: string | null;
+          lease_prompt_snoozed_until?: string | null;
+          archived_at?: string | null;
+          archived_by?: string | null;
           invite_token?: string;
           invite_token_version?: number;
           created_by?: string | null;
@@ -635,6 +660,14 @@ export interface Database {
       };
       is_group_not_archived: {
         Args: { p_group_id: string };
+        Returns: boolean;
+      };
+      get_member_net_balance_cents: {
+        Args: { p_group_id: string; p_user_id: string };
+        Returns: number;
+      };
+      user_has_unsettled_group_balance: {
+        Args: { p_user_id?: string };
         Returns: boolean;
       };
     };

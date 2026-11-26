@@ -143,6 +143,40 @@ export function extractAuditDetails(
     details.push(`Assigned initial share: ${metadata.joined_share_percentage}%`);
   }
 
+  if (typeof metadata.former_member_balance_cents === "number" && typeof metadata.base_currency === "string") {
+    const formatted = formatMinorUnits(
+      metadata.former_member_balance_cents,
+      metadata.base_currency,
+      { showPlus: true },
+    );
+    details.push(`Preserved unsettled balance: ${formatted}`);
+    details.push("Excluded from future default splits; settlements remain enabled.");
+  }
+
+  if (typeof metadata.trip_auto_archive_enabled === "boolean") {
+    const days =
+      typeof metadata.trip_auto_archive_days === "number"
+        ? metadata.trip_auto_archive_days
+        : 14;
+    details.push(
+      metadata.trip_auto_archive_enabled
+        ? `Trip auto-archive: Enabled (${days} days at zero balance)`
+        : "Trip auto-archive: Disabled",
+    );
+  }
+
+  if (typeof metadata.residential_lease_prompt_enabled === "boolean") {
+    details.push(
+      metadata.residential_lease_prompt_enabled
+        ? "Residential lease prompt: Enabled (7 days post-lease)"
+        : "Residential lease prompt: Disabled",
+    );
+  }
+
+  if (typeof metadata.archive_reason === "string" && metadata.archive_reason.trim()) {
+    details.push(metadata.archive_reason);
+  }
+
   return details;
 }
 

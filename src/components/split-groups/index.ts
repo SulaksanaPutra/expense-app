@@ -1,3 +1,5 @@
+export { ArchiveRulesModal } from "./ArchiveRulesModal";
+export type { ArchiveRulesModalProps, ArchiveRulesSavedPayload } from "./ArchiveRulesModal";
 export { AuditLogDrawer } from "./AuditLogDrawer";
 export type { AuditLogDrawerProps } from "./AuditLogDrawer";
 

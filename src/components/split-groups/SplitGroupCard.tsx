@@ -8,6 +8,7 @@ import {
   ChevronRight,
   Copy,
   Layers,
+  LogOut,
   Zap,
 } from "lucide-react";
 import {
@@ -38,6 +39,7 @@ export interface SplitGroupCardProps {
   onManageGroup: (groupId: string) => void;
   onQuickSplit: (groupId: string) => void;
   onCopyInviteLink: (group: SplitGroupDetail) => void;
+  onLeaveGroup?: (group: SplitGroupDetail) => void;
 }
 
 export function SplitGroupCard({
@@ -46,8 +48,10 @@ export function SplitGroupCard({
   onManageGroup,
   onQuickSplit,
   onCopyInviteLink,
+  onLeaveGroup,
 }: SplitGroupCardProps) {
   const typeMeta = GROUP_TYPE_BADGE[group.groupType];
+  const isArchived = group.status === "ARCHIVED";
   const activeMembers = React.useMemo(
     () => group.members.filter((m) => m.status === "ACTIVE"),
     [group.members],
@@ -62,20 +66,26 @@ export function SplitGroupCard({
     showPlus: true,
   });
 
-  const menuItems = React.useMemo<DropdownItem[]>(
-    () => [
+  const menuItems = React.useMemo<DropdownItem[]>(() => {
+    const items: DropdownItem[] = [
       {
         id: "manage-group",
         label: "Manage Group",
         icon: <Layers className="h-4 w-4" aria-hidden="true" />,
         onSelect: () => onManageGroup(group.id),
       },
-      {
+    ];
+
+    if (!isArchived) {
+      items.push({
         id: "quick-split",
         label: "Quick Split",
         icon: <Zap className="h-4 w-4" aria-hidden="true" />,
         onSelect: () => onQuickSplit(group.id),
-      },
+      });
+    }
+
+    items.push(
       { id: "divider", separator: true },
       {
         id: "copy-invite",
@@ -83,9 +93,20 @@ export function SplitGroupCard({
         icon: <Copy className="h-4 w-4" aria-hidden="true" />,
         onSelect: () => onCopyInviteLink(group),
       },
-    ],
-    [group, onCopyInviteLink, onManageGroup, onQuickSplit],
-  );
+    );
+
+    if (!isArchived && onLeaveGroup) {
+      items.push({
+        id: "leave-group",
+        label: "Leave Group",
+        danger: true,
+        icon: <LogOut className="h-4 w-4" aria-hidden="true" />,
+        onSelect: () => onLeaveGroup(group),
+      });
+    }
+
+    return items;
+  }, [group, isArchived, onCopyInviteLink, onLeaveGroup, onManageGroup, onQuickSplit]);
 
   const memberCountLabel = `${activeMembers.length} ${
     activeMembers.length === 1 ? "member" : "members"
@@ -223,6 +244,7 @@ export function SplitGroupCard({
           type="button"
           variant="secondary"
           size="sm"
+          disabled={isArchived}
           aria-label={`Quick Split for ${group.name}`}
           onClick={() => onQuickSplit(group.id)}
         >
