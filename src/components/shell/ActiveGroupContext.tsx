@@ -99,6 +99,10 @@ export interface ActiveGroupContextValue {
   unreadNotificationCount: number;
   markAllNotificationsRead: () => void;
   setActiveGroup: (groupId: string) => void;
+  upsertGroup: (
+    group: ShellGroupSummary,
+    options?: { activate?: boolean },
+  ) => void;
   setCycle: (cycle: string) => void;
   stepCycle: (deltaMonths: number) => void;
   buildNavHref: (
@@ -147,10 +151,22 @@ export function ActiveGroupProvider({
   const searchParams = useSearchParams();
   const searchKey = searchParams.toString();
 
-  const nonArchivedGroups = React.useMemo(
-    () => groups.filter((g) => g.status !== "ARCHIVED"),
-    [groups],
-  );
+  const [localGroups, setLocalGroups] = React.useState<ShellGroupSummary[]>([]);
+
+  const nonArchivedGroups = React.useMemo(() => {
+    const byId = new Map<string, ShellGroupSummary>();
+    for (const g of groups) {
+      if (g.status !== "ARCHIVED") {
+        byId.set(g.id, g);
+      }
+    }
+    for (const g of localGroups) {
+      if (g.status !== "ARCHIVED" && !byId.has(g.id)) {
+        byId.set(g.id, g);
+      }
+    }
+    return Array.from(byId.values());
+  }, [groups, localGroups]);
 
   const availableIds = React.useMemo(
     () => nonArchivedGroups.map((g) => g.id),
@@ -212,6 +228,40 @@ export function ActiveGroupProvider({
   const activeGroup = React.useMemo(
     () => nonArchivedGroups.find((g) => g.id === activeGroupId) ?? null,
     [activeGroupId, nonArchivedGroups],
+  );
+
+  const upsertGroup = React.useCallback(
+    (group: ShellGroupSummary, options?: { activate?: boolean }) => {
+      setLocalGroups((prev) => {
+        const idx = prev.findIndex((item) => item.id === group.id);
+        if (idx === -1) {
+          return [...prev, group];
+        }
+        const next = [...prev];
+        next[idx] = group;
+        return next;
+      });
+
+      if (options?.activate && group.status !== "ARCHIVED") {
+        const nextCycleParam = hasCycleInNav ? cycle : undefined;
+
+        setOptimistic((prev) => ({
+          forSearchKey: searchKey,
+          group: group.id,
+          cycle:
+            prev.forSearchKey === searchKey
+              ? (prev.cycle ?? nextCycleParam)
+              : nextCycleParam,
+        }));
+
+        const nextHref = mergeShellSearchParams(pathname, searchParams, {
+          group: group.id,
+          ...(nextCycleParam ? { cycle: nextCycleParam } : {}),
+        });
+        router.replace(nextHref, { scroll: false });
+      }
+    },
+    [cycle, hasCycleInNav, pathname, router, searchKey, searchParams],
   );
 
   const setActiveGroup = React.useCallback(
@@ -366,6 +416,7 @@ export function ActiveGroupProvider({
       unreadNotificationCount,
       markAllNotificationsRead,
       setActiveGroup,
+      upsertGroup,
       setCycle,
       stepCycle,
       buildNavHref,
@@ -396,6 +447,7 @@ export function ActiveGroupProvider({
       pathname,
       searchOpen,
       setActiveGroup,
+      upsertGroup,
       setCycle,
       setSidebarCollapsed,
       sidebarCollapsed,
