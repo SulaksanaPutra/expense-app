@@ -34,6 +34,7 @@ const REQUIRED_TABLES = [
   "billing_cycles",
   "recurring_rules",
   "reminder_logs",
+  "group_audit_logs",
 ] as const;
 
 describe("Supabase Postgres Schema & RLS Migrations", () => {
@@ -129,6 +130,9 @@ describe("Supabase Postgres Schema & RLS Migrations", () => {
     );
     expect(fullSql).toMatch(
       /ON public\.settlements[\s\S]*?FOR SELECT[\s\S]*?public\.is_group_member\(group_id\)/i,
+    );
+    expect(fullSql).toMatch(
+      /ON public\.group_audit_logs[\s\S]*?FOR SELECT[\s\S]*?public\.is_group_member\(group_id\)/i,
     );
 
     // ADMIN-only mutations enforced at DB/RLS level

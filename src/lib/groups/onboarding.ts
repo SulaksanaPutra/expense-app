@@ -16,6 +16,11 @@ import {
   validateCustomRatios,
   type MemberRatioInput,
 } from "./invite-utils";
+import {
+  buildRatioAuditPayload,
+  recordGroupAuditEvent,
+  type GroupAuditLogEntry,
+} from "./audit-log";
 
 export interface InviteAuthUser {
   id: string;
@@ -118,6 +123,17 @@ export async function regenerateGroupInviteLink(
       message: updateError.message || "Failed to update invite token.",
     };
   }
+
+  await recordGroupAuditEvent(supabase, {
+    groupId: group.id,
+    actorId: userId,
+    eventType: "INVITE_LINK_REGENERATED",
+    summary: `Regenerated invite link (v${nextVersion}) and revoked prior links`,
+    metadata: {
+      invite_token_version: nextVersion,
+      previous_invite_token_version: group.invite_token_version ?? 1,
+    },
+  });
 
   return {
     ok: true,
@@ -491,6 +507,27 @@ export async function acceptGroupInvite(
       }
     }
 
+    const joinedShare = equalShares.get(params.authUser.id) ?? 0;
+    const memberDisplayName =
+      params.authUser.fullName?.trim() ||
+      params.authUser.email ||
+      "New Member";
+    await recordGroupAuditEvent(adminSupabase, {
+      groupId: group.id,
+      actorId: params.authUser.id,
+      actorName: memberDisplayName,
+      eventType:
+        existingSelf && existingSelf.status === "FORMER_MEMBER"
+          ? "MEMBER_REJOINED"
+          : "MEMBER_JOINED",
+      summary: `${memberDisplayName} joined group via invite (${joinedShare}% equal share)`,
+      metadata: {
+        joined_share_percentage: joinedShare,
+        next_split_mode: "EQUAL",
+        flagged_needs_ratio_update: false,
+      },
+    });
+
     return {
       ok: true,
       alreadyMember: false,
@@ -499,7 +536,7 @@ export async function acceptGroupInvite(
       groupName: group.name,
       groupStatus: group.status,
       defaultSplitMode: "EQUAL",
-      sharePercentage: equalShares.get(params.authUser.id) ?? 0,
+      sharePercentage: joinedShare,
       activeMemberCount: orderedActiveMemberIds.length,
       memberShares: orderedActiveMemberIds.map((userId) => ({
         userId,
@@ -524,6 +561,26 @@ export async function acceptGroupInvite(
         "Failed to mark group for split ratio update.",
     };
   }
+
+  const memberDisplayName =
+    params.authUser.fullName?.trim() ||
+    params.authUser.email ||
+    "New Member";
+  await recordGroupAuditEvent(adminSupabase, {
+    groupId: group.id,
+    actorId: params.authUser.id,
+    actorName: memberDisplayName,
+    eventType:
+      existingSelf && existingSelf.status === "FORMER_MEMBER"
+        ? "MEMBER_REJOINED"
+        : "MEMBER_JOINED",
+    summary: `${memberDisplayName} joined in CUSTOM_RATIOS mode (0% initial share; review required)`,
+    metadata: {
+      joined_share_percentage: 0,
+      next_split_mode: "CUSTOM_RATIOS",
+      flagged_needs_ratio_update: true,
+    },
+  });
 
   const memberShares = [
     ...currentActiveRows.map((m) => ({
@@ -554,6 +611,7 @@ export type UpdateGroupRatiosResult =
       groupStatus: GroupStatus;
       defaultSplitMode: SplitMode;
       memberShares: Array<{ userId: string; sharePercentage: number }>;
+      auditEntry?: GroupAuditLogEntry;
     }
   | { ok: false; status: number; message: string };
 
@@ -595,7 +653,7 @@ export async function updateGroupSplitRatios(
 
   const { data: group, error: groupError } = await supabase
     .from("groups")
-    .select("id, status")
+    .select("id, status, default_split_mode")
     .eq("id", groupId)
     .maybeSingle();
 
@@ -625,7 +683,7 @@ export async function updateGroupSplitRatios(
 
   const { data: memberRows, error: membersError } = await supabase
     .from("group_members")
-    .select("user_id, status, joined_at")
+    .select("user_id, status, share_percentage, joined_at")
     .eq("group_id", groupId)
     .eq("status", "ACTIVE")
     .order("joined_at", { ascending: true });
@@ -699,6 +757,49 @@ export async function updateGroupSplitRatios(
     };
   }
 
+  const userNamesById = new Map<string, string>();
+  try {
+    const usersTable = supabase.from("users") as unknown as {
+      select?: (cols: string) => {
+        in?: (col: string, vals: string[]) => Promise<{
+          data: Array<{ id: string; full_name: string; email: string }> | null;
+          error: unknown;
+        }>;
+      };
+    };
+    const selector = usersTable?.select?.("id, full_name, email");
+    if (selector && typeof selector.in === "function") {
+      const { data: userRows } = await selector.in("id", activeMemberIds);
+      for (const u of userRows ?? []) {
+        userNamesById.set(u.id, u.full_name || u.email);
+      }
+    }
+  } catch {
+    // Ignore profile lookup errors in partial mocks.
+  }
+
+  const ratioAuditPayload = buildRatioAuditPayload({
+    previousSplitMode: group.default_split_mode ?? "EQUAL",
+    nextSplitMode: input.defaultSplitMode,
+    previousStatus: group.status,
+    nextStatus: "ACTIVE",
+    memberChanges: (memberRows ?? []).map((row) => ({
+      userId: row.user_id,
+      name: userNamesById.get(row.user_id),
+      previousSharePercentage: Number(row.share_percentage ?? 0),
+      nextSharePercentage: resolvedMap.get(row.user_id) ?? 0,
+    })),
+  });
+
+  const auditEntry = await recordGroupAuditEvent(supabase, {
+    groupId,
+    actorId: userId,
+    actorName: userNamesById.get(userId) ?? "Group Admin",
+    eventType: ratioAuditPayload.eventType,
+    summary: ratioAuditPayload.summary,
+    metadata: ratioAuditPayload.metadata,
+  });
+
   return {
     ok: true,
     groupId,
@@ -708,5 +809,6 @@ export async function updateGroupSplitRatios(
       userId: memberId,
       sharePercentage: resolvedMap.get(memberId) ?? 0,
     })),
+    auditEntry,
   };
 }

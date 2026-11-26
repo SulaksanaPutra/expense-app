@@ -12,6 +12,7 @@ import {
   SegmentedControl,
 } from "@/components/ui";
 import { computeEqualSharePercentages } from "@/lib/groups/invite-utils";
+import type { GroupAuditLogEntry } from "@/lib/groups/audit-log";
 import type { SplitGroupDetail } from "@/lib/groups/types";
 import type { GroupStatus, SplitMode } from "@/types/database";
 
@@ -24,6 +25,7 @@ export interface EditRatiosModalProps {
     groupStatus: GroupStatus;
     defaultSplitMode: SplitMode;
     memberShares: Array<{ userId: string; sharePercentage: number }>;
+    auditEntry?: GroupAuditLogEntry;
   }) => void;
 }
 
@@ -39,6 +41,8 @@ export function EditRatiosModal({
   onSaved,
 }: EditRatiosModalProps) {
   const formId = React.useId();
+  const isAdmin =
+    group.currentUserRole === "ADMIN" && group.status !== "ARCHIVED";
 
   const activeMembers = React.useMemo(
     () => group.members.filter((m) => m.status === "ACTIVE"),
@@ -101,6 +105,10 @@ export function EditRatiosModal({
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!isAdmin) {
+      setError("Only active group admins can update split ratios.");
+      return;
+    }
     setError(null);
 
     const allocations = activeMembers.map((member) => {
@@ -156,6 +164,7 @@ export function EditRatiosModal({
         groupStatus?: GroupStatus;
         defaultSplitMode?: SplitMode;
         memberShares?: Array<{ userId: string; sharePercentage: number }>;
+        auditEntry?: GroupAuditLogEntry;
       };
 
       if (!response.ok || !payload.memberShares || !payload.groupStatus) {
@@ -169,6 +178,7 @@ export function EditRatiosModal({
         groupStatus: payload.groupStatus,
         defaultSplitMode: payload.defaultSplitMode ?? splitMode,
         memberShares: payload.memberShares,
+        auditEntry: payload.auditEntry,
       });
       setIsSubmitting(false);
       onClose();
@@ -178,35 +188,56 @@ export function EditRatiosModal({
     }
   };
 
+  const modeOptions = React.useMemo(
+    () =>
+      SPLIT_MODE_OPTIONS.map((option) => ({
+        ...option,
+        disabled: !isAdmin,
+      })),
+    [isAdmin],
+  );
+
   return (
     <Dialog
       open={open}
       onClose={handleClose}
-      title="Edit Split Rules & Ratios"
-      description={`Configure default split mode and active member shares for ${group.name}. Past expense snapshots are never modified.`}
+      title={
+        isAdmin ? "Edit Split Rules & Ratios" : "Split Rules & Ratios (View Only)"
+      }
+      description={
+        isAdmin
+          ? `Configure default split mode and active member shares for ${group.name}. Past expense snapshots are never modified.`
+          : `Inspect default split mode and active member shares for ${group.name}. Future expenses use these ratios; historical snapshots remain immutable.`
+      }
       size="md"
       closeOnBackdropClick={!isSubmitting}
       closeOnEscape={!isSubmitting}
       footer={
-        <>
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={handleClose}
-            disabled={isSubmitting}
-          >
-            Cancel
+        isAdmin ? (
+          <>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={handleClose}
+              disabled={isSubmitting}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              form={formId}
+              variant="primary"
+              loading={isSubmitting}
+              disabled={splitMode === "CUSTOM_RATIOS" && !isCustomBalanced}
+            >
+              Save Ratios
+            </Button>
+          </>
+        ) : (
+          <Button type="button" variant="primary" onClick={handleClose}>
+            Close
           </Button>
-          <Button
-            type="submit"
-            form={formId}
-            variant="primary"
-            loading={isSubmitting}
-            disabled={splitMode === "CUSTOM_RATIOS" && !isCustomBalanced}
-          >
-            Save Ratios
-          </Button>
-        </>
+        )
       }
     >
       <form
@@ -215,6 +246,18 @@ export function EditRatiosModal({
         onSubmit={handleSubmit}
         className="flex flex-col gap-5"
       >
+        {!isAdmin && (
+          <AlertBanner
+            tone="info"
+            title="View-only split ratios"
+            description={
+              group.status === "ARCHIVED"
+                ? "This archived group is read-only. Split rules and ratios cannot be modified."
+                : "Only a Group Admin can modify split modes or member ratios. You can review the active allocation below."
+            }
+          />
+        )}
+
         {error && (
           <AlertBanner
             tone="error"
@@ -228,10 +271,11 @@ export function EditRatiosModal({
             Default Split Mode
           </span>
           <SegmentedControl
-            aria-label="Default Split Mode"
-            options={SPLIT_MODE_OPTIONS}
+            ariaLabel="Default Split Mode"
+            options={modeOptions}
             value={splitMode}
             onChange={(val) => {
+              if (!isAdmin) return;
               setSplitMode(val as SplitMode);
               setError(null);
             }}
@@ -264,6 +308,10 @@ export function EditRatiosModal({
                   <Badge tone="neutral" size="md">
                     {equalValue}%
                   </Badge>
+                ) : !isAdmin ? (
+                  <Badge tone="neutral" size="md">
+                    {member.sharePercentage}%
+                  </Badge>
                 ) : (
                   <div className="w-28 shrink-0">
                     <Input
@@ -291,19 +339,26 @@ export function EditRatiosModal({
         </div>
 
         {splitMode === "CUSTOM_RATIOS" && (
-          <div className="flex items-center justify-between rounded-md border border-hairline bg-canvas-parchment px-3.5 py-2.5 text-[13px]">
-            <span className="font-medium text-ink-muted-80">
-              Total Allocation
-            </span>
-            <span
-              className={
-                isCustomBalanced
-                  ? "font-semibold tabular-nums text-emerald-700"
-                  : "font-semibold tabular-nums text-amber-700"
-              }
-            >
-              {(customTotalBps / 100).toFixed(2)}% of 100.00%
-            </span>
+          <div className="flex flex-col gap-1 rounded-md border border-hairline bg-canvas-parchment px-3.5 py-2.5 text-[13px]">
+            <div className="flex items-center justify-between">
+              <span className="font-medium text-ink-muted-80">
+                Total Allocation
+              </span>
+              <span
+                className={
+                  isCustomBalanced
+                    ? "font-semibold tabular-nums text-emerald-700"
+                    : "font-semibold tabular-nums text-amber-700"
+                }
+              >
+                {(customTotalBps / 100).toFixed(2)}% of 100.00%
+              </span>
+            </div>
+            {!isCustomBalanced && isAdmin && (
+              <p className="text-[12px] font-medium text-amber-700" role="status">
+                Custom split ratios must sum to 100.00% before saving.
+              </p>
+            )}
           </div>
         )}
       </form>

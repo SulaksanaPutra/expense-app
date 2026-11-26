@@ -1,3 +1,5 @@
+import type { SplitBreakdownItem, SplitMode } from "@/types/database";
+
 export function buildInviteJoinPath(slug: string, token: string): string {
   const safeSlug = encodeURIComponent(slug);
   const safeToken = encodeURIComponent(token);
@@ -131,4 +133,63 @@ export function validateCustomRatios(
   }
 
   return { ok: true, normalized: byUser };
+}
+
+/**
+ * Computes a deterministic integer-cents SplitBreakdownItem[] for a future expense
+ * from the group's current defaultSplitMode and active member ratios.
+ * Enforces Zero Penny-Bleed Conservation Law: SUM(share_cents) == amountCents.
+ */
+export function buildDefaultSplitBreakdownFromGroup(params: {
+  amountCents: number;
+  paidBy: string;
+  defaultSplitMode: SplitMode;
+  activeMembers: ReadonlyArray<{ userId: string; sharePercentage: number }>;
+}): SplitBreakdownItem[] {
+  const { amountCents, paidBy, defaultSplitMode, activeMembers } = params;
+  const safeAmount = Math.trunc(amountCents);
+  const count = activeMembers.length;
+  if (count === 0) return [];
+
+  const memberIds = activeMembers.map((m) => m.userId);
+  const equalMap =
+    defaultSplitMode === "EQUAL"
+      ? computeEqualSharePercentages(memberIds)
+      : null;
+
+  const sharesBps = activeMembers.map((member) => {
+    const pct =
+      defaultSplitMode === "EQUAL"
+        ? (equalMap?.get(member.userId) ?? 0)
+        : member.sharePercentage;
+    return Math.max(0, Math.round(pct * 100));
+  });
+
+  const totalBps = sharesBps.reduce((sum, bps) => sum + bps, 0) || 10_000;
+  const flooredShares = sharesBps.map((bps) =>
+    Math.floor((safeAmount * bps) / totalBps),
+  );
+  const allocatedSum = flooredShares.reduce((sum, val) => sum + val, 0);
+  let remainder = safeAmount - allocatedSum;
+
+  const payerIndex = memberIds.indexOf(paidBy);
+  if (remainder !== 0 && payerIndex >= 0) {
+    const step = remainder > 0 ? 1 : -1;
+    flooredShares[payerIndex] += step;
+    remainder -= step;
+  }
+
+  let cursor = 0;
+  while (remainder !== 0) {
+    const step = remainder > 0 ? 1 : -1;
+    flooredShares[cursor % count] += step;
+    remainder -= step;
+    cursor += 1;
+  }
+
+  return activeMembers.map((member, index) => ({
+    user_id: member.userId,
+    share_cents: flooredShares[index],
+    percentage: sharesBps[index] / 100,
+  }));
 }

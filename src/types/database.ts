@@ -9,6 +9,19 @@ export type PaymentRail = "VENMO" | "APPLE_CARD" | "CASH" | "OTHER";
 export type BillingCycleStatus = "OPEN" | "CLOSED";
 export type RecurringFrequency = "MONTHLY";
 export type ReminderChannel = "PUSH" | "EMAIL" | "SMS";
+export type GroupAuditEventType =
+  | "GROUP_CREATED"
+  | "RATIOS_UPDATED"
+  | "SPLIT_MODE_CHANGED"
+  | "NEEDS_RATIO_UPDATE_FLAGGED"
+  | "NEEDS_RATIO_UPDATE_CLEARED"
+  | "MEMBER_JOINED"
+  | "MEMBER_REJOINED"
+  | "MEMBER_REMOVED"
+  | "MEMBER_ROLE_CHANGED"
+  | "INVITE_LINK_REGENERATED"
+  | "BILLING_CYCLE_CLOSED"
+  | "GROUP_ARCHIVED";
 
 export interface NotificationPrefs {
   new_expense: boolean;
@@ -556,6 +569,51 @@ export interface Database {
             columns: ["group_id"];
             isOneToOne: false;
             referencedRelation: "groups";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      group_audit_logs: {
+        Row: {
+          id: string;
+          group_id: string;
+          actor_id: string | null;
+          event_type: GroupAuditEventType;
+          summary: string;
+          metadata: Json;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          group_id: string;
+          actor_id?: string | null;
+          event_type: GroupAuditEventType;
+          summary: string;
+          metadata?: Json;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          group_id?: string;
+          actor_id?: string | null;
+          event_type?: GroupAuditEventType;
+          summary?: string;
+          metadata?: Json;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "group_audit_logs_group_id_fkey";
+            columns: ["group_id"];
+            isOneToOne: false;
+            referencedRelation: "groups";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "group_audit_logs_actor_id_fkey";
+            columns: ["actor_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
             referencedColumns: ["id"];
           },
         ];

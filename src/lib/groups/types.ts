@@ -5,6 +5,7 @@ import type {
   MemberStatus,
   SplitMode,
 } from "@/types/database";
+import type { GroupAuditLogEntry } from "./audit-log";
 
 export interface CreateGroupInput {
   name: string;
@@ -48,6 +49,7 @@ export interface SplitGroupDetail {
   isFullySettled: boolean;
   members: SplitGroupMemberDetail[];
   currentUserRole: MemberRole | null;
+  auditLogs?: GroupAuditLogEntry[];
 }
 
 export interface SplitGroupsPageData {
