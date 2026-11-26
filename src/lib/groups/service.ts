@@ -15,6 +15,11 @@ import type {
 } from "./types";
 import { createSignedInviteToken } from "./invite-token";
 import {
+  DEFAULT_TRIP_AUTO_ARCHIVE_DAYS,
+  evaluateResidentialLeasePrompt,
+  evaluateTripAutoArchive,
+} from "./archive";
+import {
   classifyAuditCategory,
   extractAuditDetails,
   recordGroupAuditEvent,
@@ -453,6 +458,14 @@ export async function createSplitGroup(
     operationalBudgetCents: input.operational_budget_cents,
     billingCycleAnchorDay: input.billing_cycle_anchor_day,
     leaseEndDate: input.lease_end_date,
+    tripAutoArchiveEnabled: true,
+    tripAutoArchiveDays: DEFAULT_TRIP_AUTO_ARCHIVE_DAYS,
+    residentialLeasePromptEnabled: true,
+    zeroBalanceSince: null,
+    leasePromptSnoozedUntil: null,
+    shouldPromptLeaseArchive: false,
+    daysSinceLeaseEnd: null,
+    archivedAt: null,
     inviteToken,
     inviteTokenVersion,
     cycleTurnoverCents: 0,
@@ -491,7 +504,7 @@ export async function getSplitGroupsPageData(
     const { data: groupRows, error: groupsError } = await supabase
       .from("groups")
       .select(
-        "id, name, slug, group_type, status, base_currency, default_split_mode, simplify_debts, operational_budget_cents, billing_cycle_anchor_day, lease_end_date, invite_token, invite_token_version, created_at",
+        "id, name, slug, group_type, status, base_currency, default_split_mode, simplify_debts, operational_budget_cents, billing_cycle_anchor_day, lease_end_date, trip_auto_archive_enabled, trip_auto_archive_days, residential_lease_prompt_enabled, zero_balance_since, lease_prompt_snoozed_until, archived_at, invite_token, invite_token_version, created_at",
       )
       .order("created_at", { ascending: true });
 
@@ -679,6 +692,8 @@ export async function getSplitGroupsPageData(
 
     const activeGroups: SplitGroupDetail[] = [];
     const archivedGroups: SplitGroupDetail[] = [];
+    const now = new Date();
+    const nowIso = now.toISOString();
 
     for (const g of groupRows) {
       const groupMembers = membersByGroup.get(g.id) ?? [];
@@ -692,6 +707,94 @@ export async function getSplitGroupsPageData(
         cycleSlug,
         anchorDay: g.billing_cycle_anchor_day,
       });
+
+      const tripAutoArchiveEnabled = g.trip_auto_archive_enabled ?? true;
+      const tripAutoArchiveDays =
+        g.trip_auto_archive_days ?? DEFAULT_TRIP_AUTO_ARCHIVE_DAYS;
+      const residentialLeasePromptEnabled =
+        g.residential_lease_prompt_enabled ?? true;
+      let zeroBalanceSince = g.zero_balance_since ?? null;
+      const leasePromptSnoozedUntil = g.lease_prompt_snoozed_until ?? null;
+      let effectiveStatus = g.status;
+      let archivedAt = g.archived_at ?? null;
+
+      if (g.group_type === "TRIP" && effectiveStatus !== "ARCHIVED") {
+        const tripEval = evaluateTripAutoArchive(
+          {
+            groupType: g.group_type,
+            status: effectiveStatus,
+            tripAutoArchiveEnabled,
+            tripAutoArchiveDays,
+            isFullySettled: metrics.isFullySettled,
+            zeroBalanceSince,
+          },
+          now,
+        );
+
+        if (tripEval.shouldAutoArchive) {
+          effectiveStatus = "ARCHIVED";
+          archivedAt = nowIso;
+          zeroBalanceSince = tripEval.nextZeroBalanceSince;
+          try {
+            const groupsTable = supabase.from("groups") as unknown as {
+              update?: (patch: Record<string, unknown>) => {
+                eq?: (col: string, val: string) => Promise<{ error: unknown }>;
+              };
+            };
+            const updater = groupsTable?.update?.({
+              status: "ARCHIVED",
+              archived_at: nowIso,
+              zero_balance_since: zeroBalanceSince,
+            });
+            if (updater && typeof updater.eq === "function") {
+              await updater.eq("id", g.id);
+              const autoArchiveEntry = await recordGroupAuditEvent(supabase, {
+                groupId: g.id,
+                actorId: null,
+                actorName: "System",
+                eventType: "GROUP_ARCHIVED",
+                summary: `Auto-archived ${g.name} after ${tripEval.daysAtZeroBalance} days at zero balance`,
+                metadata: {
+                  archive_reason: `Trip auto-archive triggered (${tripEval.daysAtZeroBalance} days at $0.00 balance).`,
+                },
+              });
+              const list = auditLogsByGroup.get(g.id) ?? [];
+              list.unshift(autoArchiveEntry);
+              auditLogsByGroup.set(g.id, list);
+            }
+          } catch {
+            // Non-fatal in read-only or partial mock contexts.
+          }
+        } else if (tripEval.nextZeroBalanceSince !== zeroBalanceSince) {
+          zeroBalanceSince = tripEval.nextZeroBalanceSince;
+          try {
+            const groupsTable = supabase.from("groups") as unknown as {
+              update?: (patch: Record<string, unknown>) => {
+                eq?: (col: string, val: string) => Promise<{ error: unknown }>;
+              };
+            };
+            const updater = groupsTable?.update?.({
+              zero_balance_since: zeroBalanceSince,
+            });
+            if (updater && typeof updater.eq === "function") {
+              await updater.eq("id", g.id);
+            }
+          } catch {
+            // Non-fatal in read-only or partial mock contexts.
+          }
+        }
+      }
+
+      const leaseEval = evaluateResidentialLeasePrompt(
+        {
+          groupType: g.group_type,
+          status: effectiveStatus,
+          residentialLeasePromptEnabled,
+          leaseEndDate: g.lease_end_date,
+          leasePromptSnoozedUntil,
+        },
+        now,
+      );
 
       const members: SplitGroupMemberDetail[] = groupMembers.map((m) => {
         const profile = usersById.get(m.user_id);
@@ -715,13 +818,21 @@ export async function getSplitGroupsPageData(
         name: g.name,
         slug: g.slug,
         groupType: g.group_type,
-        status: g.status,
+        status: effectiveStatus,
         baseCurrency: g.base_currency,
         defaultSplitMode: g.default_split_mode,
         simplifyDebts: g.simplify_debts,
         operationalBudgetCents: g.operational_budget_cents,
         billingCycleAnchorDay: g.billing_cycle_anchor_day,
         leaseEndDate: g.lease_end_date,
+        tripAutoArchiveEnabled,
+        tripAutoArchiveDays,
+        residentialLeasePromptEnabled,
+        zeroBalanceSince,
+        leasePromptSnoozedUntil,
+        shouldPromptLeaseArchive: leaseEval.shouldPromptLeaseArchive,
+        daysSinceLeaseEnd: leaseEval.daysSinceLeaseEnd,
+        archivedAt,
         inviteToken: g.invite_token,
         inviteTokenVersion: g.invite_token_version ?? 1,
         cycleTurnoverCents: metrics.cycleTurnoverCents,
@@ -734,7 +845,7 @@ export async function getSplitGroupsPageData(
         auditLogs: auditLogsByGroup.get(g.id),
       };
 
-      if (g.status === "ARCHIVED") {
+      if (effectiveStatus === "ARCHIVED") {
         archivedGroups.push(detail);
       } else {
         activeGroups.push(detail);

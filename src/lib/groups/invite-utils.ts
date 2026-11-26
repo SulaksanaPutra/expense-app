@@ -1,4 +1,4 @@
-import type { SplitBreakdownItem, SplitMode } from "@/types/database";
+import type { MemberStatus, SplitBreakdownItem, SplitMode } from "@/types/database";
 
 export function buildInviteJoinPath(slug: string, token: string): string {
   const safeSlug = encodeURIComponent(slug);
@@ -192,4 +192,39 @@ export function buildDefaultSplitBreakdownFromGroup(params: {
     share_cents: flooredShares[index],
     percentage: sharesBps[index] / 100,
   }));
+}
+
+export interface GroupMemberSplitCandidate {
+  userId: string;
+  status: MemberStatus;
+  sharePercentage: number;
+}
+
+/**
+ * Filters out FORMER_MEMBER accounts so they are strictly excluded from all
+ * future default expense splits and recurring rule participant defaults.
+ */
+export function filterEligibleSplitMembers<
+  T extends { status: MemberStatus },
+>(members: readonly T[]): T[] {
+  return members.filter((member) => member.status === "ACTIVE");
+}
+
+/**
+ * Computes default expense/recurring split breakdown from full group membership,
+ * guaranteeing FORMER_MEMBER entries are excluded while preserving Zero Penny-Bleed.
+ */
+export function buildDefaultSplitExcludingFormerMembers(params: {
+  amountCents: number;
+  paidBy: string;
+  defaultSplitMode: SplitMode;
+  members: readonly GroupMemberSplitCandidate[];
+}): SplitBreakdownItem[] {
+  const activeMembers = filterEligibleSplitMembers(params.members);
+  return buildDefaultSplitBreakdownFromGroup({
+    amountCents: params.amountCents,
+    paidBy: params.paidBy,
+    defaultSplitMode: params.defaultSplitMode,
+    activeMembers,
+  });
 }
