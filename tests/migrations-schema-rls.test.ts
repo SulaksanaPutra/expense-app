@@ -34,6 +34,7 @@ const REQUIRED_TABLES = [
   "billing_cycles",
   "recurring_rules",
   "reminder_logs",
+  "group_audit_logs",
 ] as const;
 
 describe("Supabase Postgres Schema & RLS Migrations", () => {
@@ -130,6 +131,9 @@ describe("Supabase Postgres Schema & RLS Migrations", () => {
     expect(fullSql).toMatch(
       /ON public\.settlements[\s\S]*?FOR SELECT[\s\S]*?public\.is_group_member\(group_id\)/i,
     );
+    expect(fullSql).toMatch(
+      /ON public\.group_audit_logs[\s\S]*?FOR SELECT[\s\S]*?public\.is_group_member\(group_id\)/i,
+    );
 
     // ADMIN-only mutations enforced at DB/RLS level
     expect(fullSql).toMatch(
@@ -154,5 +158,42 @@ describe("Supabase Postgres Schema & RLS Migrations", () => {
     // Locked expense & non-archived guards
     expect(fullSql).toMatch(/is_locked = FALSE/i);
     expect(fullSql).toMatch(/public\.is_group_not_archived/i);
+  });
+
+  it("enforces member departure balance guards, archive rules columns, and ARCHIVED read-only triggers across expenses, settlements, and recurring_rules", () => {
+    expect(fullSql).toMatch(/trip_auto_archive_enabled\s+BOOLEAN/i);
+    expect(fullSql).toMatch(/trip_auto_archive_days\s+INTEGER/i);
+    expect(fullSql).toMatch(/residential_lease_prompt_enabled\s+BOOLEAN/i);
+    expect(fullSql).toMatch(/zero_balance_since\s+TIMESTAMPTZ/i);
+    expect(fullSql).toMatch(/lease_prompt_snoozed_until\s+TIMESTAMPTZ/i);
+
+    expect(fullSql).toMatch(
+      /CREATE OR REPLACE FUNCTION public\.get_member_net_balance_cents/i,
+    );
+    expect(fullSql).toMatch(
+      /CREATE OR REPLACE FUNCTION public\.user_has_unsettled_group_balance/i,
+    );
+    expect(fullSql).toMatch(
+      /ON public\.users[\s\S]*?FOR DELETE[\s\S]*?NOT public\.user_has_unsettled_group_balance/i,
+    );
+    expect(fullSql).toMatch(
+      /ON public\.group_members[\s\S]*?FOR DELETE[\s\S]*?public\.get_member_net_balance_cents\(group_id,\s*user_id\)\s*=\s*0/i,
+    );
+    expect(fullSql).toMatch(
+      /ON public\.recurring_rules[\s\S]*?FOR DELETE[\s\S]*?public\.is_group_not_archived\(group_id\)/i,
+    );
+
+    expect(fullSql).toMatch(
+      /CREATE TRIGGER trg_expenses_reject_archived[\s\S]*?BEFORE INSERT OR UPDATE OR DELETE ON public\.expenses/i,
+    );
+    expect(fullSql).toMatch(
+      /CREATE TRIGGER trg_settlements_reject_archived[\s\S]*?BEFORE INSERT OR UPDATE OR DELETE ON public\.settlements/i,
+    );
+    expect(fullSql).toMatch(
+      /CREATE TRIGGER trg_recurring_rules_reject_archived[\s\S]*?BEFORE INSERT OR UPDATE OR DELETE ON public\.recurring_rules/i,
+    );
+    expect(fullSql).toMatch(
+      /CREATE TRIGGER trg_group_members_departure_guard[\s\S]*?BEFORE DELETE ON public\.group_members/i,
+    );
   });
 });

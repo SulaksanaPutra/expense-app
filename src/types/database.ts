@@ -9,6 +9,23 @@ export type PaymentRail = "VENMO" | "APPLE_CARD" | "CASH" | "OTHER";
 export type BillingCycleStatus = "OPEN" | "CLOSED";
 export type RecurringFrequency = "MONTHLY";
 export type ReminderChannel = "PUSH" | "EMAIL" | "SMS";
+export type GroupAuditEventType =
+  | "GROUP_CREATED"
+  | "RATIOS_UPDATED"
+  | "SPLIT_MODE_CHANGED"
+  | "NEEDS_RATIO_UPDATE_FLAGGED"
+  | "NEEDS_RATIO_UPDATE_CLEARED"
+  | "MEMBER_JOINED"
+  | "MEMBER_REJOINED"
+  | "MEMBER_LEFT"
+  | "MEMBER_REMOVED"
+  | "MEMBER_MARKED_FORMER"
+  | "MEMBER_ROLE_CHANGED"
+  | "INVITE_LINK_REGENERATED"
+  | "BILLING_CYCLE_CLOSED"
+  | "ARCHIVE_RULES_UPDATED"
+  | "GROUP_ARCHIVED"
+  | "GROUP_UNARCHIVED";
 
 export interface NotificationPrefs {
   new_expense: boolean;
@@ -92,7 +109,15 @@ export interface Database {
           operational_budget_cents: number | null;
           billing_cycle_anchor_day: number;
           lease_end_date: string | null;
+          trip_auto_archive_enabled: boolean;
+          trip_auto_archive_days: number;
+          residential_lease_prompt_enabled: boolean;
+          zero_balance_since: string | null;
+          lease_prompt_snoozed_until: string | null;
+          archived_at: string | null;
+          archived_by: string | null;
           invite_token: string;
+          invite_token_version: number;
           created_by: string | null;
           created_at: string;
           updated_at: string;
@@ -109,7 +134,15 @@ export interface Database {
           operational_budget_cents?: number | null;
           billing_cycle_anchor_day?: number;
           lease_end_date?: string | null;
+          trip_auto_archive_enabled?: boolean;
+          trip_auto_archive_days?: number;
+          residential_lease_prompt_enabled?: boolean;
+          zero_balance_since?: string | null;
+          lease_prompt_snoozed_until?: string | null;
+          archived_at?: string | null;
+          archived_by?: string | null;
           invite_token?: string;
+          invite_token_version?: number;
           created_by?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -126,7 +159,15 @@ export interface Database {
           operational_budget_cents?: number | null;
           billing_cycle_anchor_day?: number;
           lease_end_date?: string | null;
+          trip_auto_archive_enabled?: boolean;
+          trip_auto_archive_days?: number;
+          residential_lease_prompt_enabled?: boolean;
+          zero_balance_since?: string | null;
+          lease_prompt_snoozed_until?: string | null;
+          archived_at?: string | null;
+          archived_by?: string | null;
           invite_token?: string;
+          invite_token_version?: number;
           created_by?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -557,6 +598,51 @@ export interface Database {
           },
         ];
       };
+      group_audit_logs: {
+        Row: {
+          id: string;
+          group_id: string;
+          actor_id: string | null;
+          event_type: GroupAuditEventType;
+          summary: string;
+          metadata: Json;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          group_id: string;
+          actor_id?: string | null;
+          event_type: GroupAuditEventType;
+          summary: string;
+          metadata?: Json;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          group_id?: string;
+          actor_id?: string | null;
+          event_type?: GroupAuditEventType;
+          summary?: string;
+          metadata?: Json;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "group_audit_logs_group_id_fkey";
+            columns: ["group_id"];
+            isOneToOne: false;
+            referencedRelation: "groups";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "group_audit_logs_actor_id_fkey";
+            columns: ["actor_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
     };
     Views: Record<string, never>;
     Functions: {
@@ -574,6 +660,14 @@ export interface Database {
       };
       is_group_not_archived: {
         Args: { p_group_id: string };
+        Returns: boolean;
+      };
+      get_member_net_balance_cents: {
+        Args: { p_group_id: string; p_user_id: string };
+        Returns: number;
+      };
+      user_has_unsettled_group_balance: {
+        Args: { p_user_id?: string };
         Returns: boolean;
       };
     };
