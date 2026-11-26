@@ -34,6 +34,7 @@ vi.mock("next/link", () => ({
 
 import {
   AppShell,
+  LiveSyncPill,
   SIDEBAR_COLLAPSED_STORAGE_KEY,
   buildShellHref,
   formatCycleLabel,
@@ -354,12 +355,32 @@ describe("AppShell", () => {
     expect(submitSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("supports Global Search Cmd+K trigger, Notification Bell mark-all-read, Live Sync pill, and Add Expense CTA", async () => {
+  it("supports Global Search Cmd+K trigger, Notification Bell mark-all-read, Add Expense CTA, and Page Header LiveSyncPill (not in TopBar)", async () => {
     const user = userEvent.setup();
     const onAddExpense = vi.fn();
-    renderShell({ onAddExpense });
+    render(
+      <AppShell
+        groups={TEST_GROUPS}
+        user={TEST_USER}
+        onAddExpense={onAddExpense}
+        initialNotifications={[
+          {
+            id: "notif-1",
+            title: "New Expense Logged",
+            description: "Alex added Trader Joe's ($46.05 your share)",
+            timestamp: "2h ago",
+            unread: true,
+          },
+        ]}
+      >
+        <LiveSyncPill />
+      </AppShell>,
+    );
 
-    // Live Sync pill
+    // Live Sync pill lives in page header content, NOT inside <header> TopBar
+    const topBar = document.querySelector("header");
+    expect(topBar).not.toBeNull();
+    expect(within(topBar as HTMLElement).queryByText("Live Sync")).not.toBeInTheDocument();
     expect(screen.getByText("Live Sync")).toBeInTheDocument();
 
     // Notification bell
