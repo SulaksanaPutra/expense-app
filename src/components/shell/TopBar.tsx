@@ -1,0 +1,506 @@
+"use client";
+
+import * as React from "react";
+import { useRouter } from "next/navigation";
+import {
+  Bell,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  LogOut,
+  Menu,
+  Plus,
+  Search,
+  Settings,
+} from "lucide-react";
+import {
+  Avatar,
+  Badge,
+  Button,
+  Dialog,
+  Dropdown,
+  SearchInput,
+  Select,
+  StatusPill,
+} from "@/components/ui";
+import type { DropdownItem } from "@/components/ui";
+import { cn } from "@/lib/cn";
+import { useActiveGroup } from "./ActiveGroupContext";
+import { formatCycleLabel, getCyclePickerOptions } from "./url-state";
+
+export interface TopBarProps {
+  mobileMenuButtonRef?: React.RefObject<HTMLButtonElement | null>;
+}
+
+export function TopBar({ mobileMenuButtonRef }: TopBarProps) {
+  const router = useRouter();
+  const {
+    groups,
+    activeGroup,
+    cycle,
+    user,
+    liveSyncStatus,
+    notifications,
+    unreadNotificationCount,
+    markAllNotificationsRead,
+    setCycle,
+    stepCycle,
+    buildNavHref,
+    mobileDrawerOpen,
+    setMobileDrawerOpen,
+    searchOpen,
+    setSearchOpen,
+    addExpenseOpen,
+    openAddExpense,
+    closeAddExpense,
+  } = useActiveGroup();
+
+  const [notifOpen, setNotifOpen] = React.useState(false);
+  const [searchQuery, setSearchQuery] = React.useState("");
+  const notifContainerRef = React.useRef<HTMLDivElement>(null);
+  const signOutFormRef = React.useRef<HTMLFormElement>(null);
+
+  const cycleOptions = React.useMemo(
+    () => getCyclePickerOptions(cycle),
+    [cycle],
+  );
+
+  React.useEffect(() => {
+    const handleGlobalKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setSearchOpen(true);
+      }
+    };
+    window.addEventListener("keydown", handleGlobalKeyDown);
+    return () => window.removeEventListener("keydown", handleGlobalKeyDown);
+  }, [setSearchOpen]);
+
+  React.useEffect(() => {
+    if (!notifOpen) return;
+
+    const handleOutside = (event: MouseEvent) => {
+      if (
+        notifContainerRef.current &&
+        !notifContainerRef.current.contains(event.target as Node)
+      ) {
+        setNotifOpen(false);
+      }
+    };
+
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setNotifOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleOutside);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleOutside);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [notifOpen]);
+
+  const handleSignOut = React.useCallback(() => {
+    const form = signOutFormRef.current;
+    if (!form) return;
+    if (typeof form.requestSubmit === "function") {
+      try {
+        form.requestSubmit();
+        return;
+      } catch {
+        // Fallback to submit() when requestSubmit is unsupported.
+      }
+    }
+    form.submit();
+  }, []);
+
+  const displayName = user?.fullName?.trim() || user?.email || "LedgerSplit User";
+
+  const profileMenuItems = React.useMemo<DropdownItem[]>(
+    () => [
+      {
+        id: "settings",
+        label: "Settings",
+        icon: <Settings className="h-4 w-4" aria-hidden="true" />,
+        onSelect: () => {
+          router.push(buildNavHref("/settings"));
+        },
+      },
+      { id: "profile-divider", separator: true },
+      {
+        id: "sign-out",
+        label: "Sign Out",
+        danger: true,
+        icon: <LogOut className="h-4 w-4" aria-hidden="true" />,
+        onSelect: handleSignOut,
+      },
+    ],
+    [buildNavHref, handleSignOut, router],
+  );
+
+  const syncMeta = React.useMemo(() => {
+    if (liveSyncStatus === "syncing") {
+      return { tone: "warning" as const, label: "Syncing..." };
+    }
+    if (liveSyncStatus === "offline") {
+      return { tone: "neutral" as const, label: "Offline" };
+    }
+    return { tone: "success" as const, label: "Live Sync" };
+  }, [liveSyncStatus]);
+
+  const filteredGroups = React.useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return groups;
+    return groups.filter((g) => g.name.toLowerCase().includes(q));
+  }, [groups, searchQuery]);
+
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = searchQuery.trim();
+    setSearchOpen(false);
+    setSearchQuery("");
+    router.push(
+      buildNavHref("/expenses", trimmed ? { q: trimmed } : undefined),
+    );
+  };
+
+  return (
+    <>
+      <header className="sticky top-0 z-30 border-b border-hairline bg-canvas/85 backdrop-blur-xl">
+        <div className="flex h-16 w-full items-center justify-between gap-2 px-3 sm:px-6 lg:px-8">
+          <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+            <Button
+              ref={mobileMenuButtonRef}
+              type="button"
+              variant="icon-circle"
+              size="sm"
+              aria-label="Open navigation menu"
+              aria-expanded={mobileDrawerOpen}
+              aria-controls="mobile-nav-drawer"
+              onClick={() => setMobileDrawerOpen(true)}
+              className="shrink-0 lg:hidden"
+            >
+              <Menu className="h-4 w-4" aria-hidden="true" />
+            </Button>
+
+            <div
+              role="group"
+              aria-label="Billing cycle picker"
+              className="flex min-w-0 items-center gap-0.5 rounded-pill border border-hairline bg-canvas-parchment px-1 py-0.5"
+            >
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                aria-label="Previous billing cycle"
+                onClick={() => stepCycle(-1)}
+                className="h-7 w-7 shrink-0 px-0 text-ink-muted-80 hover:bg-canvas"
+              >
+                <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+              </Button>
+              <Select
+                aria-label="Select billing cycle"
+                variant="pill-select"
+                options={cycleOptions}
+                value={cycle}
+                onChange={setCycle}
+                className="h-7 min-w-0 border-transparent bg-transparent px-1.5 text-[12px] font-semibold tracking-tight text-ink hover:bg-canvas sm:px-2.5"
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                aria-label="Next billing cycle"
+                onClick={() => stepCycle(1)}
+                className="h-7 w-7 shrink-0 px-0 text-ink-muted-80 hover:bg-canvas"
+              >
+                <ChevronRight className="h-4 w-4" aria-hidden="true" />
+              </Button>
+            </div>
+          </div>
+
+          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2.5">
+            <StatusPill
+              tone={syncMeta.tone}
+              size="sm"
+              dot
+              className="hidden md:inline-flex"
+            >
+              {syncMeta.label}
+            </StatusPill>
+
+            <button
+              type="button"
+              aria-label="Search expenses and groups"
+              aria-haspopup="dialog"
+              onClick={() => setSearchOpen(true)}
+              className="hidden h-9 items-center gap-2 rounded-pill border border-hairline bg-canvas-parchment px-3 text-[12px] text-ink-muted-48 transition-colors hover:border-ink-muted-48/40 hover:bg-canvas hover:text-ink focus-visible:outline-2 focus-visible:outline-primary-focus focus-visible:outline-offset-2 md:inline-flex"
+            >
+              <Search className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span className="w-32 truncate text-left lg:w-40">
+                Search transactions...
+              </span>
+              <kbd className="rounded-xs border border-hairline bg-canvas px-1.5 py-0.5 font-sans text-[10px] font-medium text-ink-muted-48">
+                ⌘K
+              </kbd>
+            </button>
+
+            <Button
+              type="button"
+              variant="icon-circle"
+              size="sm"
+              aria-label="Search expenses and groups"
+              aria-haspopup="dialog"
+              onClick={() => setSearchOpen(true)}
+              className="md:hidden"
+            >
+              <Search className="h-4 w-4" aria-hidden="true" />
+            </Button>
+
+            <div ref={notifContainerRef} className="relative">
+              <Button
+                type="button"
+                variant="icon-circle"
+                size="sm"
+                aria-label={
+                  unreadNotificationCount > 0
+                    ? `Notifications (${unreadNotificationCount} unread)`
+                    : "Notifications"
+                }
+                aria-expanded={notifOpen}
+                aria-haspopup="true"
+                onClick={() => setNotifOpen((prev) => !prev)}
+                className="relative"
+              >
+                <Bell className="h-4 w-4" aria-hidden="true" />
+                {unreadNotificationCount > 0 && (
+                  <span
+                    aria-hidden="true"
+                    className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-red-500 ring-2 ring-canvas"
+                  />
+                )}
+              </Button>
+
+              {notifOpen && (
+                <div
+                  role="region"
+                  aria-label="Notifications"
+                  className="absolute top-full right-0 z-40 mt-2 w-80 max-w-[calc(100vw-1.5rem)] rounded-[18px] border border-hairline bg-canvas p-3 shadow-[0_12px_32px_rgba(0,0,0,0.1)]"
+                >
+                  <div className="mb-2 flex items-center justify-between gap-2 border-b border-divider-soft pb-2">
+                    <span className="text-[13px] font-semibold text-ink">
+                      Notifications
+                    </span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={markAllNotificationsRead}
+                      disabled={unreadNotificationCount === 0}
+                      className="h-7 px-2 text-[12px] text-[#0066cc]"
+                    >
+                      Mark all read
+                    </Button>
+                  </div>
+                  {notifications.length === 0 ? (
+                    <p className="py-4 text-center text-[12px] leading-relaxed text-ink-muted-48">
+                      All caught up. New expenses, share revisions, and
+                      settlement nudges appear here.
+                    </p>
+                  ) : (
+                    <ul className="flex max-h-64 flex-col gap-1 overflow-y-auto">
+                      {notifications.map((item) => (
+                        <li
+                          key={item.id}
+                          className={cn(
+                            "rounded-sm px-2.5 py-2 text-left transition-colors",
+                            item.unread ? "bg-canvas-parchment" : "bg-canvas",
+                          )}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[12px] font-semibold text-ink">
+                              {item.title}
+                            </span>
+                            <span className="text-[11px] text-ink-muted-48">
+                              {item.timestamp}
+                            </span>
+                          </div>
+                          <p className="mt-0.5 text-[12px] text-ink-muted-80">
+                            {item.description}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              aria-label="Add Expense"
+              onClick={openAddExpense}
+              leftIcon={<Plus className="h-4 w-4" aria-hidden="true" />}
+              className="px-3 sm:px-3.5"
+            >
+              <span className="hidden sm:inline">Add Expense</span>
+              <span className="sm:hidden">Add</span>
+            </Button>
+
+            <Dropdown
+              align="right"
+              variant="button"
+              triggerAriaLabel="User profile menu"
+              items={profileMenuItems}
+              className="[&>button]:h-9 [&>button]:border-transparent [&>button]:bg-transparent [&>button]:px-1 [&>button]:hover:bg-canvas-parchment"
+              trigger={
+                <span className="inline-flex items-center gap-1">
+                  <Avatar
+                    name={displayName}
+                    src={user?.avatarUrl}
+                    size="md"
+                  />
+                  <ChevronDown
+                    className="h-3.5 w-3.5 text-ink-muted-48"
+                    aria-hidden="true"
+                  />
+                </span>
+              }
+            />
+
+            <form
+              ref={signOutFormRef}
+              action="/auth/signout"
+              method="POST"
+              className="hidden"
+              aria-hidden="true"
+            />
+          </div>
+        </div>
+      </header>
+
+      <Dialog
+        open={searchOpen}
+        onClose={() => {
+          setSearchOpen(false);
+          setSearchQuery("");
+        }}
+        title="Quick Search"
+        description="Jump to expenses or switch into an active split group."
+        size="md"
+      >
+        <form onSubmit={handleSearchSubmit} className="flex flex-col gap-4">
+          <SearchInput
+            autoFocus
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onClear={() => setSearchQuery("")}
+            placeholder="Search expenses, merchants, or split groups..."
+            shortcut="Enter"
+          />
+
+          {searchQuery.trim().length > 0 && (
+            <Button
+              type="submit"
+              variant="secondary"
+              size="sm"
+              className="justify-between"
+            >
+              <span>
+                Search expenses for &ldquo;{searchQuery.trim()}&rdquo;
+              </span>
+              <Badge tone="info" size="sm">
+                Expenses
+              </Badge>
+            </Button>
+          )}
+
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted-48">
+              Split Groups
+            </span>
+            {filteredGroups.length === 0 ? (
+              <p className="rounded-sm bg-canvas-parchment px-3 py-3 text-[13px] text-ink-muted-48">
+                No matching groups found.
+              </p>
+            ) : (
+              <ul className="flex flex-col gap-1">
+                {filteredGroups.map((group) => (
+                  <li key={group.id}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSearchOpen(false);
+                        setSearchQuery("");
+                        router.push(
+                          buildNavHref("/split-groups", { group: group.id }),
+                        );
+                      }}
+                      className="flex w-full items-center justify-between rounded-sm px-3 py-2 text-left text-[13px] text-ink transition-colors hover:bg-canvas-parchment focus-visible:outline-2 focus-visible:outline-primary-focus"
+                    >
+                      <span className="font-medium">{group.name}</span>
+                      <span className="text-[12px] text-ink-muted-48">
+                        {group.activeSplitCount} splits · {group.baseCurrency}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </form>
+      </Dialog>
+
+      <Dialog
+        open={addExpenseOpen}
+        onClose={closeAddExpense}
+        title="Add Expense"
+        description={
+          activeGroup
+            ? `Logging to ${activeGroup.name} (${formatCycleLabel(cycle)})`
+            : `Select a group to log an expense for ${formatCycleLabel(cycle)}`
+        }
+        size="md"
+        footer={
+          <>
+            <Button variant="secondary" size="sm" onClick={closeAddExpense}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                closeAddExpense();
+                router.push(buildNavHref("/expenses"));
+              }}
+            >
+              Go to Expenses Ledger
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-3 text-[14px] text-ink-muted-80">
+          <p>
+            Active scope:{" "}
+            <strong className="font-semibold text-ink">
+              {activeGroup ? activeGroup.name : "All Groups"}
+            </strong>{" "}
+            for{" "}
+            <strong className="font-semibold text-ink">
+              {formatCycleLabel(cycle)}
+            </strong>
+            .
+          </p>
+          <p className="text-[13px] text-ink-muted-48">
+            Expense creation opens the shared Add/Edit Expense modal once
+            expenses data wiring is enabled for this workspace.
+          </p>
+        </div>
+      </Dialog>
+    </>
+  );
+}
