@@ -93,6 +93,7 @@ export interface Database {
           billing_cycle_anchor_day: number;
           lease_end_date: string | null;
           invite_token: string;
+          invite_token_version: number;
           created_by: string | null;
           created_at: string;
           updated_at: string;
@@ -110,6 +111,7 @@ export interface Database {
           billing_cycle_anchor_day?: number;
           lease_end_date?: string | null;
           invite_token?: string;
+          invite_token_version?: number;
           created_by?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -127,6 +129,7 @@ export interface Database {
           billing_cycle_anchor_day?: number;
           lease_end_date?: string | null;
           invite_token?: string;
+          invite_token_version?: number;
           created_by?: string | null;
           created_at?: string;
           updated_at?: string;

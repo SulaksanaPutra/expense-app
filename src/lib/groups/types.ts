@@ -40,6 +40,7 @@ export interface SplitGroupDetail {
   billingCycleAnchorDay: number;
   leaseEndDate: string | null;
   inviteToken: string;
+  inviteTokenVersion?: number;
   cycleTurnoverCents: number;
   cycleTransactionCount: number;
   userNetLedgerCents: number;
