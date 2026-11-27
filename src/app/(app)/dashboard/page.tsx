@@ -25,7 +25,7 @@ export default async function DashboardPage() {
         const { data: expenseRows } = await supabase
           .from("expenses")
           .select(
-            "id, group_id, paid_by, description, category, expense_date, amount_cents, currency, original_amount_cents, original_currency, split_method, split_breakdown",
+            "id, group_id, paid_by, description, category, expense_date, amount_cents, currency, original_amount_cents, original_currency, split_method, split_breakdown, receipt_url",
           )
           .in("group_id", groupIds)
           .is("deleted_at", null)
@@ -67,6 +67,7 @@ export default async function DashboardPage() {
             splitBreakdown: Array.isArray(row.split_breakdown)
               ? (row.split_breakdown as unknown as SplitBreakdownItem[])
               : [],
+            receiptUrl: row.receipt_url ?? null,
           };
         });
       }

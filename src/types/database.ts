@@ -670,6 +670,14 @@ export interface Database {
         Args: { p_user_id?: string };
         Returns: boolean;
       };
+      reserve_receipt_storage_bytes: {
+        Args: { p_file_bytes: number; p_quota_bytes?: number };
+        Returns: Array<{ allowed: boolean; used_bytes: number }>;
+      };
+      release_receipt_storage_bytes: {
+        Args: { p_file_bytes: number };
+        Returns: number;
+      };
     };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;

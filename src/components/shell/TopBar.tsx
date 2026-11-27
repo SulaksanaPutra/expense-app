@@ -41,6 +41,7 @@ export function TopBar({ mobileMenuButtonRef }: TopBarProps) {
     activeGroupId,
     cycle,
     user,
+    updateReceiptStorageUsedBytes,
     notifications,
     unreadNotificationCount,
     markAllNotificationsRead,
@@ -461,6 +462,7 @@ export function TopBar({ mobileMenuButtonRef }: TopBarProps) {
         activeGroupId={activeGroupId}
         currentUser={user}
         cycle={cycle}
+        onReceiptStorageUsedBytesChange={updateReceiptStorageUsedBytes}
         onCreated={(expense) => {
           pushToast({
             tone: "success",

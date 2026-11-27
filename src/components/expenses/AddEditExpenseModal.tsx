@@ -57,6 +57,7 @@ export interface AddEditExpenseModalProps {
   activeGroupId: string;
   currentUser: ShellUserSummary | null;
   cycle?: string;
+  onReceiptStorageUsedBytesChange?: (usedBytes: number) => void;
   onCreated?: (expense: Database["public"]["Tables"]["expenses"]["Row"]) => void;
 }
 
@@ -181,10 +182,15 @@ function AddEditExpenseModalInner({
   activeGroupId,
   currentUser,
   cycle,
+  onReceiptStorageUsedBytesChange,
   onCreated,
 }: AddEditExpenseModalProps) {
   const formId = React.useId();
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const uploadedReceiptRef = React.useRef<{
+    file: File;
+    receiptUrl: string;
+  } | null>(null);
 
   const nonArchivedGroups = React.useMemo(
     () => groups.filter((g) => g.status !== "ARCHIVED"),
@@ -272,6 +278,7 @@ function AddEditExpenseModalInner({
       setCategory(EXPENSE_CATEGORIES[0]);
       setExpenseDate(getTodayIsoDate());
       setAttachedFile(null);
+      uploadedReceiptRef.current = null;
       setReceiptWarning(null);
       setTouched({});
       setServerError(null);
@@ -765,6 +772,7 @@ function AddEditExpenseModalInner({
     }
 
     setReceiptWarning(null);
+    uploadedReceiptRef.current = null;
     setAttachedFile(file);
   };
 
@@ -814,30 +822,59 @@ function AddEditExpenseModalInner({
     try {
       let receiptUrl: string | null = null;
       if (attachedFile) {
-        const formData = new FormData();
-        formData.append("file", attachedFile);
-        formData.append("groupId", selectedGroup.id);
+        if (uploadedReceiptRef.current?.file === attachedFile) {
+          receiptUrl = uploadedReceiptRef.current.receiptUrl;
+        } else {
+          const formData = new FormData();
+          formData.append("file", attachedFile);
+          formData.append("groupId", selectedGroup.id);
 
-        try {
-          const uploadRes = await fetch("/api/receipts", {
-            method: "POST",
-            body: formData,
-          });
-          const uploadPayload = (await uploadRes.json()) as {
+          let uploadOk = false;
+          let uploadPayload: {
             ok?: boolean;
+            code?: string;
             receiptUrl?: string;
+            usedBytes?: number;
             error?: string;
-          };
-          if (uploadRes.ok && uploadPayload.receiptUrl) {
+          } | null = null;
+
+          try {
+            const uploadRes = await fetch("/api/receipts", {
+              method: "POST",
+              body: formData,
+            });
+            uploadOk = uploadRes.ok;
+            uploadPayload = (await uploadRes.json().catch(() => null)) as {
+              ok?: boolean;
+              code?: string;
+              receiptUrl?: string;
+              usedBytes?: number;
+              error?: string;
+            } | null;
+          } catch {
+            uploadOk = false;
+          }
+
+          if (typeof uploadPayload?.usedBytes === "number") {
+            onReceiptStorageUsedBytesChange?.(uploadPayload.usedBytes);
+          }
+
+          if (uploadOk && uploadPayload?.receiptUrl) {
             receiptUrl = uploadPayload.receiptUrl;
+            uploadedReceiptRef.current = {
+              file: attachedFile,
+              receiptUrl,
+            };
           } else {
+            uploadedReceiptRef.current = null;
+            setAttachedFile(null);
             setReceiptWarning(
-              uploadPayload.error ||
+              uploadPayload?.error ||
                 "Receipt storage full (500 MB). Expense will be logged without receipt.",
             );
+            setIsSubmitting(false);
+            return;
           }
-        } catch {
-          // Non-blocking fallback
         }
       }
 
@@ -951,66 +988,80 @@ function AddEditExpenseModalInner({
       closeOnBackdropClick={!isSubmitting}
       closeOnEscape={!isSubmitting}
       footer={
-        <div className="flex w-full flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*,application/pdf"
-              aria-label="Upload receipt file"
-              className="hidden"
-              onChange={handleReceiptFileChange}
+        <div className="flex w-full flex-col gap-3">
+          {receiptWarning && (
+            <AlertBanner
+              tone="warning"
+              title="Receipt upload skipped"
+              description={receiptWarning}
+              onDismiss={() => setReceiptWarning(null)}
             />
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={isSubmitting}
-              leftIcon={<Paperclip className="h-4 w-4" aria-hidden="true" />}
-              onClick={handleAttachReceiptClick}
-            >
-              Attach Receipt
-            </Button>
-            {attachedFile && (
-              <span className="inline-flex max-w-[180px] items-center gap-1.5 rounded-pill border border-hairline bg-canvas-parchment px-2.5 py-1 text-[11px] font-medium text-ink">
-                <span className="truncate">{attachedFile.name}</span>
-                <span className="shrink-0 text-ink-muted-48">
-                  ({formatFileSize(attachedFile.size)})
+          )}
+          <div className="flex w-full flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*,application/pdf"
+                aria-label="Upload receipt file"
+                tabIndex={-1}
+                className="sr-only"
+                onChange={handleReceiptFileChange}
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={isSubmitting}
+                leftIcon={<Paperclip className="h-4 w-4" aria-hidden="true" />}
+                onClick={handleAttachReceiptClick}
+              >
+                Attach Receipt
+              </Button>
+              {attachedFile && (
+                <span className="inline-flex max-w-[200px] items-center gap-1.5 rounded-pill border border-hairline bg-canvas-parchment py-0.5 pr-1 pl-2.5 text-[11px] font-medium text-ink">
+                  <span className="truncate">{attachedFile.name}</span>
+                  <span className="shrink-0 text-ink-muted-48">
+                    ({formatFileSize(attachedFile.size)})
+                  </span>
+                  <button
+                    type="button"
+                    aria-label="Remove attached receipt"
+                    onClick={() => {
+                      uploadedReceiptRef.current = null;
+                      setAttachedFile(null);
+                    }}
+                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink-muted-48 transition-colors hover:bg-canvas hover:text-red-600 focus-visible:outline-2 focus-visible:outline-primary-focus"
+                  >
+                    <Trash2 className="h-3 w-3" aria-hidden="true" />
+                  </button>
                 </span>
-                <button
-                  type="button"
-                  aria-label="Remove attached receipt"
-                  onClick={() => setAttachedFile(null)}
-                  className="text-ink-muted-48 hover:text-red-600"
-                >
-                  <Trash2 className="h-3 w-3" aria-hidden="true" />
-                </button>
-              </span>
-            )}
-          </div>
+              )}
+            </div>
 
-          <div className="flex items-center gap-2.5">
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              disabled={isSubmitting}
-              onClick={handleClose}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              form={formId}
-              variant="primary"
-              size="sm"
-              loading={isSubmitting}
-              disabled={!isFormValid || isSubmitting}
-              leftIcon={<Check className="h-4 w-4" aria-hidden="true" />}
-              className="tabular-nums"
-            >
-              {saveLabel}
-            </Button>
+            <div className="flex items-center gap-2.5">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={isSubmitting}
+                onClick={handleClose}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                form={formId}
+                variant="primary"
+                size="sm"
+                loading={isSubmitting}
+                disabled={!isFormValid || isSubmitting}
+                leftIcon={<Check className="h-4 w-4" aria-hidden="true" />}
+                className="tabular-nums"
+              >
+                {saveLabel}
+              </Button>
+            </div>
           </div>
         </div>
       }
@@ -1026,15 +1077,6 @@ function AddEditExpenseModalInner({
             tone="error"
             title="Could not save expense"
             description={serverError}
-          />
-        )}
-
-        {receiptWarning && (
-          <AlertBanner
-            tone="warning"
-            title="Receipt upload skipped"
-            description={receiptWarning}
-            onDismiss={() => setReceiptWarning(null)}
           />
         )}
 

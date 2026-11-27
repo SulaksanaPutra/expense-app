@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Plus, ReceiptText } from "lucide-react";
+import { Paperclip, Plus, ReceiptText } from "lucide-react";
 import {
   Avatar,
   Badge,
@@ -41,6 +41,7 @@ export interface DashboardExpenseItem {
   originalCurrency: string | null;
   splitMethod: ExpenseSplitMethod;
   splitBreakdown: SplitBreakdownItem[];
+  receiptUrl?: string | null;
 }
 
 export interface DashboardClientProps {
@@ -240,9 +241,22 @@ export function DashboardClient({
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-col">
-                          <span className="text-[13px] font-semibold text-ink">
-                            {exp.description}
-                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[13px] font-semibold text-ink">
+                              {exp.description}
+                            </span>
+                            {exp.receiptUrl && (
+                              <a
+                                href={`/api/receipts?path=${encodeURIComponent(exp.receiptUrl)}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                aria-label={`View receipt for ${exp.description}`}
+                                className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink-muted-48 transition-colors hover:bg-canvas-parchment hover:text-[#0066cc] focus-visible:outline-2 focus-visible:outline-primary-focus focus-visible:outline-offset-2"
+                              >
+                                <Paperclip className="h-3.5 w-3.5" aria-hidden="true" />
+                              </a>
+                            )}
+                          </div>
                           <span className="text-[11px] text-ink-muted-48">
                             {exp.groupName}
                           </span>
