@@ -158,7 +158,7 @@ export function TopBar({ mobileMenuButtonRef }: TopBarProps) {
     <>
       <header className="sticky top-0 z-30 border-b border-hairline bg-canvas/85 backdrop-blur-xl">
         <div className="flex h-16 w-full items-center justify-between gap-1.5 px-3 sm:gap-2 sm:px-6 lg:px-8">
-          <div className="flex min-w-0 items-center gap-1.5 sm:gap-3">
+          <div className="flex min-w-0 flex-1 items-center gap-1.5 sm:flex-none sm:gap-3">
             <Button
               ref={mobileMenuButtonRef}
               type="button"
@@ -176,18 +176,20 @@ export function TopBar({ mobileMenuButtonRef }: TopBarProps) {
             <div
               role="group"
               aria-label="Billing cycle picker"
-              className="flex min-w-0 items-center gap-0.5 rounded-pill border border-hairline bg-canvas-parchment px-1 py-0.5"
+              className="flex min-w-0 flex-1 items-center gap-0.5 rounded-pill border border-hairline bg-canvas-parchment px-1 py-0.5 sm:flex-none"
             >
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                aria-label="Previous billing cycle"
-                onClick={() => stepCycle(-1)}
-                className="hidden h-7 w-7 shrink-0 px-0 text-ink-muted-80 hover:bg-canvas sm:inline-flex"
-              >
-                <ChevronLeft className="h-4 w-4" aria-hidden="true" />
-              </Button>
+              <span className="hidden shrink-0 sm:inline-flex">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  aria-label="Previous billing cycle"
+                  onClick={() => stepCycle(-1)}
+                  className="h-7 w-7 px-0 text-ink-muted-80 hover:bg-canvas"
+                >
+                  <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+                </Button>
+              </span>
               <Select
                 aria-label="Select billing cycle"
                 variant="pill-select"
@@ -197,16 +199,18 @@ export function TopBar({ mobileMenuButtonRef }: TopBarProps) {
                 containerClassName="min-w-0 flex-1 sm:flex-none"
                 className="h-7 w-full min-w-0 max-w-full border-transparent bg-transparent !px-2 text-[11px] font-semibold tracking-tight text-ink hover:bg-canvas sm:w-auto sm:!px-2.5 sm:text-[12px]"
               />
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                aria-label="Next billing cycle"
-                onClick={() => stepCycle(1)}
-                className="hidden h-7 w-7 shrink-0 px-0 text-ink-muted-80 hover:bg-canvas sm:inline-flex"
-              >
-                <ChevronRight className="h-4 w-4" aria-hidden="true" />
-              </Button>
+              <span className="hidden shrink-0 sm:inline-flex">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  aria-label="Next billing cycle"
+                  onClick={() => stepCycle(1)}
+                  className="h-7 w-7 px-0 text-ink-muted-80 hover:bg-canvas"
+                >
+                  <ChevronRight className="h-4 w-4" aria-hidden="true" />
+                </Button>
+              </span>
             </div>
           </div>
 
