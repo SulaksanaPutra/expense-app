@@ -332,4 +332,175 @@ describe("AddEditExpenseModal (create mode) & Entry Point Triggers", () => {
       await within(dialog).findByText("$108.00 USD"),
     ).toBeInTheDocument();
   });
+
+  it("uploads receipt, persists receipt_url, and updates user storage quota across groups", async () => {
+    const user = userEvent.setup();
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            receiptUrl: "receipts://usr-alex/grp-apt-4b/1700000000-receipt.png",
+            sizeBytes: 2048,
+            usedBytes: RECEIPT_STORAGE_QUOTA_BYTES,
+          }),
+          { status: 201, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            expense: {
+              id: "exp-102",
+              group_id: "grp-apt-4b",
+              description: "Trader Joe's",
+              amount_cents: 4500,
+              currency: "USD",
+              receipt_url: "receipts://usr-alex/grp-apt-4b/1700000000-receipt.png",
+            },
+          }),
+          { status: 201, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+
+    render(
+      <AppShell
+        groups={THREE_MEMBER_GROUPS}
+        user={{
+          ...CURRENT_USER,
+          receiptStorageUsedBytes: RECEIPT_STORAGE_QUOTA_BYTES - 2048,
+        }}
+      >
+        <div>Workspace</div>
+      </AppShell>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Add Expense" }));
+    const dialog = screen.getByRole("dialog", { name: "Add Expense" });
+
+    const fileInput = within(dialog).getByLabelText("Upload receipt file") as HTMLInputElement;
+    const receiptFile = new File([new Uint8Array(2048)], "receipt.png", {
+      type: "image/png",
+    });
+    await user.upload(fileInput, receiptFile);
+
+    expect(within(dialog).getByText("receipt.png")).toBeInTheDocument();
+
+    await user.type(within(dialog).getByLabelText(/Total Bill Amount/i), "45.00");
+    await user.type(within(dialog).getByLabelText(/Description/i), "Trader Joe's");
+
+    await user.click(within(dialog).getByRole("button", { name: /Save Expense/i }));
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(fetchSpy.mock.calls[0][0]).toBe("/api/receipts");
+    expect(fetchSpy.mock.calls[1][0]).toBe("/api/groups/grp-apt-4b/expenses");
+    expect(JSON.parse(String(fetchSpy.mock.calls[1][1]?.body)).receipt_url).toBe(
+      "receipts://usr-alex/grp-apt-4b/1700000000-receipt.png",
+    );
+
+    // Re-open in a different group (Tokyo Trip) — updated quota (500 MB) must carry over across groups!
+    mockSearchParams = new URLSearchParams("cycle=2026-11&group=grp-tokyo");
+    await user.click(screen.getByRole("button", { name: "Add Expense" }));
+    const secondDialog = screen.getByRole("dialog", { name: "Add Expense" });
+    await user.click(
+      within(secondDialog).getByRole("button", { name: /Attach Receipt/i }),
+    );
+    expect(
+      within(secondDialog).getByText(
+        "Receipt storage full (500 MB). Expense will be logged without receipt.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("rejects file selection exceeding 500 MB and handles server 413 non-blockingly", async () => {
+    const user = userEvent.setup();
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            ok: false,
+            code: "RECEIPT_QUOTA_EXCEEDED",
+            error:
+              "Receipt storage full (500 MB). Expense will be logged without receipt.",
+            usedBytes: RECEIPT_STORAGE_QUOTA_BYTES,
+          }),
+          { status: 413, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            expense: {
+              id: "exp-103",
+              group_id: "grp-apt-4b",
+              description: "Corner Market",
+              amount_cents: 2500,
+              currency: "USD",
+              receipt_url: null,
+            },
+          }),
+          { status: 201, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+
+    render(
+      <AppShell
+        groups={THREE_MEMBER_GROUPS}
+        user={{
+          ...CURRENT_USER,
+          receiptStorageUsedBytes: RECEIPT_STORAGE_QUOTA_BYTES - 500,
+        }}
+      >
+        <div>Workspace</div>
+      </AppShell>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Add Expense" }));
+    const dialog = screen.getByRole("dialog", { name: "Add Expense" });
+    const fileInput = within(dialog).getByLabelText("Upload receipt file") as HTMLInputElement;
+
+    // 1. Selecting 1024-byte file when only 500 bytes remain rejects only the file upload
+    await user.upload(
+      fileInput,
+      new File([new Uint8Array(1024)], "overflow.png", { type: "image/png" }),
+    );
+    expect(
+      within(dialog).getByText(
+        "Receipt storage full (500 MB). Expense will be logged without receipt.",
+      ),
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByText("overflow.png")).not.toBeInTheDocument();
+
+    // 2. Selecting 400-byte file passes client check, but server returns 413 -> shows AlertBanner and allows saving without receipt
+    await user.upload(
+      fileInput,
+      new File([new Uint8Array(400)], "stale-client.png", { type: "image/png" }),
+    );
+    expect(within(dialog).getByText("stale-client.png")).toBeInTheDocument();
+
+    await user.type(within(dialog).getByLabelText(/Total Bill Amount/i), "25.00");
+    await user.type(within(dialog).getByLabelText(/Description/i), "Corner Market");
+
+    const saveBtn = within(dialog).getByRole("button", { name: /Save Expense/i });
+    await user.click(saveBtn);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(
+      await within(dialog).findByText(
+        "Receipt storage full (500 MB). Expense will be logged without receipt.",
+      ),
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByText("stale-client.png")).not.toBeInTheDocument();
+
+    // Saving Expense without receipt succeeds even when storage quota is at 100%
+    expect(saveBtn).toBeEnabled();
+    await user.click(saveBtn);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(String(fetchSpy.mock.calls[1][1]?.body)).receipt_url).toBeNull();
+  });
 });

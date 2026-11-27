@@ -94,6 +94,7 @@ export interface ActiveGroupContextValue {
   activeGroup: ShellGroupSummary | null;
   cycle: string;
   user: ShellUserSummary | null;
+  updateReceiptStorageUsedBytes: (usedBytes: number) => void;
   liveSyncStatus: LiveSyncStatus;
   notifications: ShellNotificationItem[];
   unreadNotificationCount: number;
@@ -380,6 +381,38 @@ export function ActiveGroupProvider({
   const [addExpenseOpen, setAddExpenseOpen] = React.useState(false);
   const [notifications, setNotifications] =
     React.useState<ShellNotificationItem[]>(initialNotifications);
+  const [userStorageOverride, setUserStorageOverride] = React.useState<{
+    userId: string;
+    baseBytes: number | undefined;
+    overrideBytes: number;
+  } | null>(null);
+
+  const effectiveUser = React.useMemo<ShellUserSummary | null>(() => {
+    if (!user) return null;
+    if (
+      userStorageOverride &&
+      userStorageOverride.userId === user.id &&
+      userStorageOverride.baseBytes === user.receiptStorageUsedBytes
+    ) {
+      return {
+        ...user,
+        receiptStorageUsedBytes: userStorageOverride.overrideBytes,
+      };
+    }
+    return user;
+  }, [user, userStorageOverride]);
+
+  const updateReceiptStorageUsedBytes = React.useCallback(
+    (usedBytes: number) => {
+      if (!user || !Number.isFinite(usedBytes) || usedBytes < 0) return;
+      setUserStorageOverride({
+        userId: user.id,
+        baseBytes: user.receiptStorageUsedBytes,
+        overrideBytes: Math.trunc(usedBytes),
+      });
+    },
+    [user],
+  );
 
   const markAllNotificationsRead = React.useCallback(() => {
     setNotifications((prev) => prev.map((item) => ({ ...item, unread: false })));
@@ -410,7 +443,8 @@ export function ActiveGroupProvider({
       activeGroupId,
       activeGroup,
       cycle,
-      user,
+      user: effectiveUser,
+      updateReceiptStorageUsedBytes,
       liveSyncStatus,
       notifications,
       unreadNotificationCount,
@@ -454,7 +488,8 @@ export function ActiveGroupProvider({
       stepCycle,
       toggleSidebarCollapsed,
       unreadNotificationCount,
-      user,
+      effectiveUser,
+      updateReceiptStorageUsedBytes,
     ],
   );
 

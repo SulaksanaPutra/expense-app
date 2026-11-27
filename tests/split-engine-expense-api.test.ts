@@ -136,6 +136,11 @@ function createInMemorySupabase(db: InMemoryDb) {
     storage: {
       from: () => ({
         upload: async () => ({ data: { path: "mock/receipt.png" }, error: null }),
+        remove: async () => ({ data: [], error: null }),
+        createSignedUrl: async (storagePath: string) => ({
+          data: { signedUrl: `https://storage.example.test/${storagePath}?token=signed` },
+          error: null,
+        }),
       }),
     },
     from: (table: keyof InMemoryDb) => {
@@ -161,7 +166,7 @@ vi.mock("@/lib/supabase/server", () => ({
 
 import { POST as expensePost } from "@/app/api/groups/[groupId]/expenses/route";
 import { GET as fxGet } from "@/app/api/fx/route";
-import { POST as receiptsPost } from "@/app/api/receipts/route";
+import { GET as receiptsGet, POST as receiptsPost } from "@/app/api/receipts/route";
 
 describe("BIGINT Minor-Unit Split Engine", () => {
   it("splits $100.00 (10000 cents) 3 ways assigning 3334 to payer and 3333 to non-payers", () => {
@@ -573,5 +578,157 @@ describe("Expense Create API, FX Audit & Receipt Quota", () => {
     const json = await res.json();
     expect(json.rate).toBe(1);
     expect(json.source).toBe("API");
+  });
+
+  it("increments User.receipt_storage_used_bytes cumulatively across multiple groups and authorizes signed downloads", async () => {
+    const sharedGroupUuid = "11111111-1111-4111-8111-111111111111";
+    const privateGroupUuid = "22222222-2222-4222-8222-222222222222";
+    activeDb.groups.push(
+      {
+        id: sharedGroupUuid,
+        name: "Shared Apt",
+        slug: "shared-apt",
+        group_type: "RESIDENTIAL",
+        status: "ACTIVE",
+        base_currency: "USD",
+        default_split_mode: "EQUAL",
+      },
+      {
+        id: privateGroupUuid,
+        name: "Tokyo Trip",
+        slug: "tokyo-trip",
+        group_type: "TRIP",
+        status: "ACTIVE",
+        base_currency: "USD",
+        default_split_mode: "EQUAL",
+      },
+    );
+    activeDb.group_members.push(
+      {
+        group_id: sharedGroupUuid,
+        user_id: "u-alex",
+        role: "ADMIN",
+        status: "ACTIVE",
+        share_percentage: 50,
+        joined_at: "2026-10-04T00:00:00.000Z",
+      },
+      {
+        group_id: sharedGroupUuid,
+        user_id: "u-elena",
+        role: "MEMBER",
+        status: "ACTIVE",
+        share_percentage: 50,
+        joined_at: "2026-10-04T00:00:00.000Z",
+      },
+      {
+        group_id: privateGroupUuid,
+        user_id: "u-alex",
+        role: "ADMIN",
+        status: "ACTIVE",
+        share_percentage: 100,
+        joined_at: "2026-10-04T00:00:00.000Z",
+      },
+    );
+
+    // 1. Upload 1200-byte receipt in sharedGroupUuid
+    getUserMock.mockResolvedValueOnce({
+      data: { user: { id: "u-alex", email: "alex@example.com" } },
+      error: null,
+    });
+    const fd1 = new FormData();
+    fd1.append(
+      "file",
+      new File([new Uint8Array(1200)], "groceries.png", { type: "image/png" }),
+    );
+    fd1.append("groupId", sharedGroupUuid);
+    const res1 = await receiptsPost(
+      new NextRequest("http://localhost:3000/api/receipts", {
+        method: "POST",
+        body: fd1,
+      }),
+    );
+    expect(res1.status).toBe(201);
+    const json1 = await res1.json();
+    expect(json1.sizeBytes).toBe(1200);
+    expect(json1.usedBytes).toBe(1200);
+    expect(json1.receiptUrl).toMatch(
+      new RegExp(`^receipts://u-alex/${sharedGroupUuid}/`),
+    );
+
+    // 2. Upload 800-byte receipt in privateGroupUuid -> accumulates to 2000 bytes
+    getUserMock.mockResolvedValueOnce({
+      data: { user: { id: "u-alex", email: "alex@example.com" } },
+      error: null,
+    });
+    const fd2 = new FormData();
+    fd2.append(
+      "file",
+      new File([new Uint8Array(800)], "train.pdf", { type: "application/pdf" }),
+    );
+    fd2.append("groupId", privateGroupUuid);
+    const res2 = await receiptsPost(
+      new NextRequest("http://localhost:3000/api/receipts", {
+        method: "POST",
+        body: fd2,
+      }),
+    );
+    expect(res2.status).toBe(201);
+    const json2 = await res2.json();
+    expect(json2.usedBytes).toBe(2000);
+    expect(
+      activeDb.users.find((u) => u.id === "u-alex")?.receipt_storage_used_bytes,
+    ).toBe(2000);
+
+    // 3. Group member (u-elena) can access signed URL for sharedGroupUuid receipt, but not privateGroupUuid receipt
+    getUserMock.mockResolvedValueOnce({
+      data: { user: { id: "u-elena", email: "elena@example.com" } },
+      error: null,
+    });
+    const allowedGet = await receiptsGet(
+      new NextRequest(
+        `http://localhost:3000/api/receipts?format=json&path=${encodeURIComponent(json1.receiptUrl)}`,
+      ),
+    );
+    expect(allowedGet.status).toBe(200);
+    expect((await allowedGet.json()).signedUrl).toContain("token=signed");
+
+    getUserMock.mockResolvedValueOnce({
+      data: { user: { id: "u-elena", email: "elena@example.com" } },
+      error: null,
+    });
+    const forbiddenGet = await receiptsGet(
+      new NextRequest(
+        `http://localhost:3000/api/receipts?format=json&path=${encodeURIComponent(json2.receiptUrl)}`,
+      ),
+    );
+    expect(forbiddenGet.status).toBe(403);
+  });
+
+  it("rejects partial overflow exceeding 500 MB quota while keeping Expense creation without receipt working", async () => {
+    const alex = activeDb.users.find((u) => u.id === "u-alex")!;
+    alex.receipt_storage_used_bytes = RECEIPT_STORAGE_QUOTA_BYTES - 500;
+
+    getUserMock.mockResolvedValueOnce({
+      data: { user: { id: "u-alex", email: "alex@example.com" } },
+      error: null,
+    });
+
+    const fd = new FormData();
+    fd.append(
+      "file",
+      new File([new Uint8Array(1024)], "too-big.png", { type: "image/png" }),
+    );
+    fd.append("groupId", "grp-apt4b");
+
+    const uploadRes = await receiptsPost(
+      new NextRequest("http://localhost:3000/api/receipts", {
+        method: "POST",
+        body: fd,
+      }),
+    );
+    expect(uploadRes.status).toBe(413);
+    const uploadJson = await uploadRes.json();
+    expect(uploadJson.code).toBe("RECEIPT_QUOTA_EXCEEDED");
+    expect(alex.receipt_storage_used_bytes).toBe(RECEIPT_STORAGE_QUOTA_BYTES - 500);
   });
 });
