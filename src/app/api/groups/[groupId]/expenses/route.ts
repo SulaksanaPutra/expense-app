@@ -12,6 +12,66 @@ interface RouteContext {
   params: Promise<{ groupId: string }>;
 }
 
+export async function GET(_request: NextRequest, context: RouteContext) {
+  if (!hasSupabaseEnv()) {
+    return NextResponse.json(
+      { error: "Supabase environment is not configured." },
+      { status: 503 },
+    );
+  }
+
+  const { groupId } = await context.params;
+  if (!groupId || !groupId.trim()) {
+    return NextResponse.json(
+      { error: "Group ID is required." },
+      { status: 400 },
+    );
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !user) {
+    return NextResponse.json(
+      { error: "Authentication required." },
+      { status: 401 },
+    );
+  }
+
+  const { data: member } = await supabase
+    .from("group_members")
+    .select("user_id")
+    .eq("group_id", groupId.trim())
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (!member) {
+    return NextResponse.json(
+      { error: "You are not a member of this split group." },
+      { status: 403 },
+    );
+  }
+
+  const { data: expenses, error } = await supabase
+    .from("expenses")
+    .select("*")
+    .eq("group_id", groupId.trim())
+    .is("deleted_at", null)
+    .order("expense_date", { ascending: false });
+
+  if (error) {
+    return NextResponse.json(
+      { error: error.message || "Unable to load group expenses." },
+      { status: 500 },
+    );
+  }
+
+  return NextResponse.json({ ok: true, expenses: expenses ?? [] }, { status: 200 });
+}
+
 export async function POST(request: NextRequest, context: RouteContext) {
   if (!hasSupabaseEnv()) {
     return NextResponse.json(

@@ -429,6 +429,69 @@ export async function getGroupAuditLogs(
     // Ignore if settlements isn't mocked.
   }
 
+  let expenseRows: Array<{
+    id: string;
+    description?: string;
+    currency?: string;
+  }> = [];
+  let revisionRows: Array<
+    Database["public"]["Tables"]["expense_revisions"]["Row"]
+  > = [];
+
+  try {
+    const expensesTable = supabase.from("expenses") as unknown as {
+      select?: (cols: string) => {
+        eq?: (col: string, val: string) => Promise<{
+          data: Array<{
+            id: string;
+            description?: string;
+            currency?: string;
+          }> | null;
+          error: { message?: string } | null;
+        }>;
+      };
+    };
+    const expSel = expensesTable?.select?.("id, description, currency");
+    if (expSel && typeof expSel.eq === "function") {
+      const { data, error } = await expSel.eq("group_id", groupId);
+      if (!error && Array.isArray(data)) {
+        expenseRows = data;
+      }
+    }
+
+    const expenseIds = expenseRows.map((e) => e.id).filter(Boolean);
+    if (expenseIds.length > 0) {
+      const revisionsTable = supabase.from("expense_revisions") as unknown as {
+        select?: (cols: string) => {
+          in?: (col: string, vals: string[]) => {
+            order?: (
+              col: string,
+              opts: { ascending: boolean },
+            ) => Promise<{
+              data: Array<
+                Database["public"]["Tables"]["expense_revisions"]["Row"]
+              > | null;
+              error: { message?: string } | null;
+            }>;
+          };
+        };
+      };
+      const revIn = revisionsTable
+        ?.select?.("id, expense_id, updated_by, old_snapshot, new_snapshot, created_at")
+        ?.in?.("expense_id", expenseIds);
+      if (revIn && typeof revIn.order === "function") {
+        const { data, error } = await revIn.order("created_at", {
+          ascending: false,
+        });
+        if (!error && Array.isArray(data)) {
+          revisionRows = data;
+        }
+      }
+    }
+  } catch {
+    // Ignore if expenses or expense_revisions isn't mocked.
+  }
+
   const userIds = new Set<string>();
   for (const row of auditRows) {
     if (row.actor_id) userIds.add(row.actor_id);
@@ -447,6 +510,25 @@ export async function getGroupAuditLogs(
   for (const s of settlementRows) {
     userIds.add(s.payer_id);
     userIds.add(s.recipient_id);
+  }
+  for (const rev of revisionRows) {
+    if (rev.updated_by) userIds.add(rev.updated_by);
+    for (const snap of [rev.old_snapshot, rev.new_snapshot]) {
+      if (snap && typeof snap === "object" && !Array.isArray(snap)) {
+        const breakdown = (snap as Record<string, unknown>).split_breakdown;
+        if (Array.isArray(breakdown)) {
+          for (const item of breakdown) {
+            if (
+              item &&
+              typeof item === "object" &&
+              typeof (item as { user_id?: unknown }).user_id === "string"
+            ) {
+              userIds.add((item as { user_id: string }).user_id);
+            }
+          }
+        }
+      }
+    }
   }
 
   const usersById = new Map<string, { full_name: string; email: string }>();
@@ -522,6 +604,89 @@ export async function getGroupAuditLogs(
       summary: `${payerName} settled ${formattedAmount} with ${recipientName}`,
       details: [`Payment rail: ${settlement.payment_rail}`],
       createdAt: settlement.settled_at,
+    });
+  }
+
+  const expensesById = new Map(expenseRows.map((e) => [e.id, e]));
+  for (const rev of revisionRows) {
+    const actor = usersById.get(rev.updated_by);
+    const actorName = actor?.full_name || actor?.email || "Member";
+    const exp = expensesById.get(rev.expense_id);
+    const oldSnap =
+      rev.old_snapshot &&
+      typeof rev.old_snapshot === "object" &&
+      !Array.isArray(rev.old_snapshot)
+        ? (rev.old_snapshot as Record<string, unknown>)
+        : {};
+    const newSnap =
+      rev.new_snapshot &&
+      typeof rev.new_snapshot === "object" &&
+      !Array.isArray(rev.new_snapshot)
+        ? (rev.new_snapshot as Record<string, unknown>)
+        : {};
+
+    const desc =
+      (typeof newSnap.description === "string" && newSnap.description) ||
+      (typeof oldSnap.description === "string" && oldSnap.description) ||
+      exp?.description ||
+      "Expense";
+    const currency =
+      (typeof newSnap.currency === "string" && newSnap.currency) ||
+      (typeof oldSnap.currency === "string" && oldSnap.currency) ||
+      exp?.currency ||
+      group.base_currency;
+
+    const details: string[] = [];
+    const oldAmt =
+      typeof oldSnap.amount_cents === "number" ? oldSnap.amount_cents : null;
+    const newAmt =
+      typeof newSnap.amount_cents === "number" ? newSnap.amount_cents : null;
+    if (oldAmt !== null && newAmt !== null && oldAmt !== newAmt) {
+      details.push(
+        `Total: ${formatMinorUnits(oldAmt, currency)} -> ${formatMinorUnits(newAmt, currency)}`,
+      );
+    }
+
+    const oldShares =
+      oldSnap.shares_by_user &&
+      typeof oldSnap.shares_by_user === "object" &&
+      !Array.isArray(oldSnap.shares_by_user)
+        ? (oldSnap.shares_by_user as Record<string, unknown>)
+        : {};
+    const newShares =
+      newSnap.shares_by_user &&
+      typeof newSnap.shares_by_user === "object" &&
+      !Array.isArray(newSnap.shares_by_user)
+        ? (newSnap.shares_by_user as Record<string, unknown>)
+        : {};
+
+    for (const uid of new Set([
+      ...Object.keys(oldShares),
+      ...Object.keys(newShares),
+    ])) {
+      const prevShare = Number(oldShares[uid] ?? 0);
+      const nextShare = Number(newShares[uid] ?? 0);
+      if (prevShare !== nextShare) {
+        const uName =
+          usersById.get(uid)?.full_name ||
+          usersById.get(uid)?.email ||
+          "Member";
+        details.push(
+          `${uName} share: ${formatMinorUnits(prevShare, currency)} -> ${formatMinorUnits(nextShare, currency)}`,
+        );
+      }
+    }
+
+    entries.push({
+      id: `revision-${rev.id}`,
+      groupId,
+      category: "LEDGER",
+      eventType: "EXPENSE_REVISION",
+      actorId: rev.updated_by,
+      actorName,
+      summary: `${actorName} edited "${desc}"`,
+      details,
+      createdAt: rev.created_at,
     });
   }
 

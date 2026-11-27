@@ -42,6 +42,7 @@ import {
   getCurrencySymbol,
   parseCurrencyInputToMinorUnits,
 } from "@/lib/money";
+import type { ExpenseLedgerRecord } from "@/lib/expenses/ledger";
 import type {
   Database,
   ExchangeRateSource,
@@ -52,13 +53,19 @@ import type {
 export interface AddEditExpenseModalProps {
   open: boolean;
   onClose: () => void;
-  mode?: "create";
+  mode?: "create" | "edit";
+  expense?: ExpenseLedgerRecord | null;
   groups: ShellGroupSummary[];
   activeGroupId: string;
   currentUser: ShellUserSummary | null;
   cycle?: string;
   onReceiptStorageUsedBytesChange?: (usedBytes: number) => void;
   onCreated?: (expense: Database["public"]["Tables"]["expenses"]["Row"]) => void;
+  onUpdated?: (payload: {
+    expense: Database["public"]["Tables"]["expenses"]["Row"];
+    revision?: Database["public"]["Tables"]["expense_revisions"]["Row"];
+    notifications?: Database["public"]["Tables"]["notifications"]["Row"][];
+  }) => void;
 }
 
 const SPLIT_METHOD_OPTIONS: Array<SegmentedOption<ExpenseSplitMethod>> = [
@@ -184,28 +191,151 @@ function buildInitialGroupState(
   };
 }
 
+function buildInitialEditState(
+  group: ShellGroupSummary | null,
+  expense: ExpenseLedgerRecord,
+  currentUser: ShellUserSummary | null,
+): {
+  amountInput: string;
+  currency: string;
+  exchangeRateInput: string;
+  exchangeRateSource: ExchangeRateSource;
+  description: string;
+  category: string;
+  expenseDate: string;
+  paidBy: string;
+  splitMethod: ExpenseSplitMethod;
+  includedMemberIds: string[];
+  percentageInputs: Record<string, string>;
+  exactInputs: Record<string, string>;
+  existingReceiptUrl: string | null;
+} {
+  const baseDefaults = buildInitialGroupState(group, currentUser);
+  const members = group?.members ?? [];
+  const activeMemberSet = new Set(members.map((m) => m.id));
+  const baseCurrency = group?.baseCurrency ?? expense.currency;
+
+  const isForeign =
+    expense.originalAmountCents !== null &&
+    Boolean(expense.originalCurrency) &&
+    expense.originalCurrency !== baseCurrency;
+
+  const currency = isForeign
+    ? (expense.originalCurrency ?? baseCurrency)
+    : expense.currency;
+  const amountInput = isForeign
+    ? formatMinorUnitsPlain(
+        expense.originalAmountCents ?? expense.amountCents,
+        currency,
+      )
+    : formatMinorUnitsPlain(expense.amountCents, currency);
+
+  const exchangeRateInput =
+    isForeign && expense.exchangeRate !== null
+      ? String(expense.exchangeRate)
+      : "1";
+  const exchangeRateSource: ExchangeRateSource =
+    isForeign && expense.exchangeRateSource
+      ? expense.exchangeRateSource
+      : "API";
+
+  const breakdownByUserId = new Map(
+    expense.splitBreakdown.map((item) => [item.user_id, item]),
+  );
+  const matchingActiveIds = expense.splitBreakdown
+    .map((item) => item.user_id)
+    .filter((id) => activeMemberSet.has(id));
+  const includedMemberIds =
+    matchingActiveIds.length > 0
+      ? matchingActiveIds
+      : baseDefaults.includedMemberIds;
+
+  const equalMap = computeEqualSharePercentages(includedMemberIds);
+  const percentageInputs: Record<string, string> = {};
+  const exactInputs: Record<string, string> = {};
+
+  for (const m of members) {
+    const entry = breakdownByUserId.get(m.id);
+    if (entry) {
+      const derivedPct =
+        entry.percentage !== undefined
+          ? entry.percentage
+          : expense.amountCents > 0
+            ? Math.round((entry.share_cents / expense.amountCents) * 10_000) /
+              100
+            : (equalMap.get(m.id) ?? 0);
+      percentageInputs[m.id] = String(derivedPct);
+      exactInputs[m.id] = formatMinorUnitsPlain(entry.share_cents, baseCurrency);
+    } else {
+      percentageInputs[m.id] = "0";
+      exactInputs[m.id] = "";
+    }
+  }
+
+  const paidBy = activeMemberSet.has(expense.paidBy)
+    ? expense.paidBy
+    : baseDefaults.paidBy;
+
+  const parsedDate = expense.expenseDate.slice(0, 10);
+  const expenseDate = isValidIsoDateInput(parsedDate)
+    ? parsedDate
+    : getTodayIsoDate();
+
+  return {
+    amountInput,
+    currency,
+    exchangeRateInput,
+    exchangeRateSource,
+    description: expense.description,
+    category: expense.category,
+    expenseDate,
+    paidBy,
+    splitMethod: expense.splitMethod,
+    includedMemberIds,
+    percentageInputs,
+    exactInputs,
+    existingReceiptUrl: expense.receiptUrl ?? null,
+  };
+}
+
 export function AddEditExpenseModal(props: AddEditExpenseModalProps) {
+  const isEditMode = props.mode === "edit" && Boolean(props.expense);
   if (!props.open) {
     return (
-      <Dialog open={false} onClose={props.onClose} title="Add Expense">
+      <Dialog
+        open={false}
+        onClose={props.onClose}
+        title={isEditMode ? "Edit Expense" : "Add Expense"}
+      >
         {null}
       </Dialog>
     );
   }
 
-  return <AddEditExpenseModalInner key={props.activeGroupId} {...props} />;
+  const modalKey =
+    isEditMode && props.expense
+      ? `edit-${props.expense.id}`
+      : `create-${props.activeGroupId}`;
+
+  return <AddEditExpenseModalInner key={modalKey} {...props} />;
 }
 
 function AddEditExpenseModalInner({
   open,
   onClose,
+  mode = "create",
+  expense = null,
   groups,
   activeGroupId,
   currentUser,
   cycle,
   onReceiptStorageUsedBytesChange,
   onCreated,
+  onUpdated,
 }: AddEditExpenseModalProps) {
+  const isEditMode = mode === "edit" && expense !== null;
+  const isLockedExpense = isEditMode && Boolean(expense?.isLocked);
+
   const formId = React.useId();
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const uploadedReceiptRef = React.useRef<{
@@ -218,10 +348,11 @@ function AddEditExpenseModalInner({
     [groups],
   );
 
-  const initialGroupId =
-    activeGroupId &&
-    activeGroupId !== "all" &&
-    nonArchivedGroups.some((g) => g.id === activeGroupId)
+  const initialGroupId = isEditMode && expense
+    ? expense.groupId
+    : activeGroupId &&
+        activeGroupId !== "all" &&
+        nonArchivedGroups.some((g) => g.id === activeGroupId)
       ? activeGroupId
       : "";
 
@@ -233,41 +364,76 @@ function AddEditExpenseModalInner({
     [nonArchivedGroups, selectedGroupId],
   );
 
-  const initialSeed = React.useMemo(
-    () =>
-      buildInitialGroupState(
-        nonArchivedGroups.find((g) => g.id === initialGroupId) ?? null,
-        currentUser,
-      ),
-    [currentUser, initialGroupId, nonArchivedGroups],
+  const initialGroup = React.useMemo(
+    () => nonArchivedGroups.find((g) => g.id === initialGroupId) ?? null,
+    [initialGroupId, nonArchivedGroups],
   );
 
-  const [amountInput, setAmountInput] = React.useState("");
-  const [currency, setCurrency] = React.useState(initialSeed.currency);
-  const [exchangeRateInput, setExchangeRateInput] = React.useState("1");
+  const initialEditSeed = React.useMemo(
+    () =>
+      isEditMode && expense
+        ? buildInitialEditState(initialGroup, expense, currentUser)
+        : null,
+    [currentUser, expense, initialGroup, isEditMode],
+  );
+
+  const initialSeed = React.useMemo(
+    () => buildInitialGroupState(initialGroup, currentUser),
+    [currentUser, initialGroup],
+  );
+
+  const [amountInput, setAmountInput] = React.useState(
+    initialEditSeed?.amountInput ?? "",
+  );
+  const [currency, setCurrency] = React.useState(
+    initialEditSeed?.currency ?? initialSeed.currency,
+  );
+  const [exchangeRateInput, setExchangeRateInput] = React.useState(
+    initialEditSeed?.exchangeRateInput ?? "1",
+  );
   const [exchangeRateSource, setExchangeRateSource] =
-    React.useState<ExchangeRateSource>("API");
+    React.useState<ExchangeRateSource>(
+      initialEditSeed?.exchangeRateSource ?? "API",
+    );
+  const skipFxAutoFetchForCurrencyRef = React.useRef<string | null>(
+    initialEditSeed &&
+      initialGroup &&
+      initialEditSeed.currency !== initialGroup.baseCurrency
+      ? initialEditSeed.currency
+      : null,
+  );
   const [fxLoading, setFxLoading] = React.useState(false);
   const [fxError, setFxError] = React.useState<string | null>(null);
   const fxAbortRef = React.useRef<AbortController | null>(null);
   const fxRequestSeqRef = React.useRef(0);
 
-  const [description, setDescription] = React.useState("");
-  const [category, setCategory] = React.useState<string>(EXPENSE_CATEGORIES[0]);
-  const [expenseDate, setExpenseDate] = React.useState<string>(getTodayIsoDate);
-  const [paidBy, setPaidBy] = React.useState<string>(initialSeed.paidBy);
+  const [description, setDescription] = React.useState(
+    initialEditSeed?.description ?? "",
+  );
+  const [category, setCategory] = React.useState<string>(
+    initialEditSeed?.category ?? EXPENSE_CATEGORIES[0],
+  );
+  const [expenseDate, setExpenseDate] = React.useState<string>(
+    initialEditSeed?.expenseDate ?? getTodayIsoDate(),
+  );
+  const [paidBy, setPaidBy] = React.useState<string>(
+    initialEditSeed?.paidBy ?? initialSeed.paidBy,
+  );
   const [splitMethod, setSplitMethod] = React.useState<ExpenseSplitMethod>(
-    initialSeed.splitMethod,
+    initialEditSeed?.splitMethod ?? initialSeed.splitMethod,
   );
   const [includedMemberIds, setIncludedMemberIds] = React.useState<string[]>(
-    initialSeed.includedMemberIds,
+    initialEditSeed?.includedMemberIds ?? initialSeed.includedMemberIds,
   );
   const [percentageInputs, setPercentageInputs] = React.useState<
     Record<string, string>
-  >(initialSeed.percentageInputs);
+  >(initialEditSeed?.percentageInputs ?? initialSeed.percentageInputs);
   const [exactInputs, setExactInputs] = React.useState<Record<string, string>>(
-    initialSeed.exactInputs,
+    initialEditSeed?.exactInputs ?? initialSeed.exactInputs,
   );
+  const [existingReceiptUrl, setExistingReceiptUrl] = React.useState<
+    string | null
+  >(initialEditSeed?.existingReceiptUrl ?? null);
 
   const [attachedFile, setAttachedFile] = React.useState<File | null>(null);
   const [receiptWarning, setReceiptWarning] = React.useState<string | null>(
@@ -380,6 +546,11 @@ function AddEditExpenseModalInner({
 
   React.useEffect(() => {
     if (!open || !selectedGroup || currency === selectedGroup.baseCurrency) {
+      return;
+    }
+
+    if (skipFxAutoFetchForCurrencyRef.current === currency) {
+      skipFxAutoFetchForCurrencyRef.current = null;
       return;
     }
 
@@ -834,6 +1005,7 @@ function AddEditExpenseModalInner({
     effectiveBaseAmountCents !== null && effectiveBaseAmountCents > 0;
 
   const isFormValid =
+    !isLockedExpense &&
     selectedGroup !== null &&
     selectedGroup.status !== "ARCHIVED" &&
     isDescriptionValid &&
@@ -848,7 +1020,9 @@ function AddEditExpenseModalInner({
 
   const handleClose = () => {
     if (isSubmitting) return;
-    resetAllState(initialGroupId);
+    if (!isEditMode) {
+      resetAllState(initialGroupId);
+    }
     onClose();
   };
 
@@ -870,7 +1044,7 @@ function AddEditExpenseModalInner({
     setIsSubmitting(true);
 
     try {
-      let receiptUrl: string | null = null;
+      let receiptUrl: string | null = existingReceiptUrl;
       if (attachedFile) {
         if (uploadedReceiptRef.current?.file === attachedFile) {
           receiptUrl = uploadedReceiptRef.current.receiptUrl;
@@ -928,36 +1102,45 @@ function AddEditExpenseModalInner({
         }
       }
 
-      const response = await fetch(
-        `/api/groups/${encodeURIComponent(selectedGroup.id)}/expenses`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            paid_by: paidBy,
-            description: description.trim(),
-            category,
-            amount_cents: effectiveBaseAmountCents,
-            expense_date: `${expenseDate}T12:00:00.000Z`,
-            split_method: splitMethod,
-            split_breakdown: splitEvaluation.breakdown,
-            original_amount_cents: isForeignCurrency
-              ? parsedInputAmountCents
-              : null,
-            original_currency: isForeignCurrency ? currency : null,
-            exchange_rate: isForeignCurrency ? parsedExchangeRate : null,
-            exchange_rate_source: isForeignCurrency
-              ? exchangeRateSource
-              : null,
-            receipt_url: receiptUrl,
-          }),
-        },
-      );
+      const endpoint =
+        isEditMode && expense
+          ? `/api/groups/${encodeURIComponent(selectedGroup.id)}/expenses/${encodeURIComponent(expense.id)}`
+          : `/api/groups/${encodeURIComponent(selectedGroup.id)}/expenses`;
+
+      const resolvedExpenseDate =
+        isEditMode &&
+        expense &&
+        expense.expenseDate.slice(0, 10) === expenseDate
+          ? expense.expenseDate
+          : `${expenseDate}T12:00:00.000Z`;
+
+      const response = await fetch(endpoint, {
+        method: isEditMode ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          paid_by: paidBy,
+          description: description.trim(),
+          category,
+          amount_cents: effectiveBaseAmountCents,
+          expense_date: resolvedExpenseDate,
+          split_method: splitMethod,
+          split_breakdown: splitEvaluation.breakdown,
+          original_amount_cents: isForeignCurrency
+            ? parsedInputAmountCents
+            : null,
+          original_currency: isForeignCurrency ? currency : null,
+          exchange_rate: isForeignCurrency ? parsedExchangeRate : null,
+          exchange_rate_source: isForeignCurrency ? exchangeRateSource : null,
+          receipt_url: receiptUrl,
+        }),
+      });
 
       const payload = (await response.json()) as {
         ok?: boolean;
         error?: string;
         expense?: Database["public"]["Tables"]["expenses"]["Row"];
+        revision?: Database["public"]["Tables"]["expense_revisions"]["Row"];
+        notifications?: Database["public"]["Tables"]["notifications"]["Row"][];
       };
 
       if (!response.ok || !payload.expense) {
@@ -968,8 +1151,16 @@ function AddEditExpenseModalInner({
         return;
       }
 
-      onCreated?.(payload.expense);
-      resetAllState(initialGroupId);
+      if (isEditMode) {
+        onUpdated?.({
+          expense: payload.expense,
+          revision: payload.revision,
+          notifications: payload.notifications,
+        });
+      } else {
+        onCreated?.(payload.expense);
+        resetAllState(initialGroupId);
+      }
       onClose();
     } catch {
       setServerError("Network error while saving expense. Please try again.");
@@ -986,6 +1177,13 @@ function AddEditExpenseModalInner({
       })),
     [nonArchivedGroups],
   );
+
+  const categoryOptions = React.useMemo<SelectOption[]>(() => {
+    if (!category || CATEGORY_OPTIONS.some((opt) => opt.value === category)) {
+      return CATEGORY_OPTIONS;
+    }
+    return [{ value: category, label: category }, ...CATEGORY_OPTIONS];
+  }, [category]);
 
   const memberOptions = React.useMemo<SelectOption[]>(
     () =>
@@ -1044,10 +1242,11 @@ function AddEditExpenseModalInner({
   const dateError =
     touched.date && !isDateValid ? "Enter a valid YYYY-MM-DD date." : undefined;
 
+  const saveBaseLabel = isEditMode ? "Save Changes" : "Save Expense";
   const saveLabel =
     effectiveBaseAmountCents && effectiveBaseAmountCents > 0
-      ? `Save Expense (${formatMinorUnits(effectiveBaseAmountCents, baseCurrency)})`
-      : "Save Expense";
+      ? `${saveBaseLabel} (${formatMinorUnits(effectiveBaseAmountCents, baseCurrency)})`
+      : saveBaseLabel;
 
   const remainingCents =
     effectiveBaseAmountCents !== null
@@ -1058,11 +1257,15 @@ function AddEditExpenseModalInner({
     <Dialog
       open={open}
       onClose={handleClose}
-      title="Add Expense"
+      title={isEditMode ? "Edit Expense" : "Add Expense"}
       description={
-        selectedGroup
-          ? `Logging to ${selectedGroup.name} (${cycleLabel})`
-          : `Select a split group to log an expense for ${cycleLabel}`
+        isEditMode
+          ? selectedGroup
+            ? `Editing expense in ${selectedGroup.name} · records an ExpenseRevision snapshot`
+            : "Editing shared expense"
+          : selectedGroup
+            ? `Logging to ${selectedGroup.name} (${cycleLabel})`
+            : `Select a split group to log an expense for ${cycleLabel}`
       }
       size="lg"
       closeOnBackdropClick={!isSubmitting}
@@ -1092,7 +1295,7 @@ function AddEditExpenseModalInner({
                 type="button"
                 variant="ghost"
                 size="sm"
-                disabled={isSubmitting}
+                disabled={isSubmitting || isLockedExpense}
                 leftIcon={<Paperclip className="h-4 w-4" aria-hidden="true" />}
                 onClick={handleAttachReceiptClick}
               >
@@ -1111,6 +1314,19 @@ function AddEditExpenseModalInner({
                       uploadedReceiptRef.current = null;
                       setAttachedFile(null);
                     }}
+                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink-muted-48 transition-colors hover:bg-canvas hover:text-red-600 focus-visible:outline-2 focus-visible:outline-primary-focus"
+                  >
+                    <Trash2 className="h-3 w-3" aria-hidden="true" />
+                  </button>
+                </span>
+              )}
+              {!attachedFile && existingReceiptUrl && (
+                <span className="inline-flex max-w-[200px] items-center gap-1.5 rounded-pill border border-hairline bg-canvas-parchment py-0.5 pr-1 pl-2.5 text-[11px] font-medium text-ink">
+                  <span className="truncate">Existing receipt</span>
+                  <button
+                    type="button"
+                    aria-label="Remove existing receipt"
+                    onClick={() => setExistingReceiptUrl(null)}
                     className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink-muted-48 transition-colors hover:bg-canvas hover:text-red-600 focus-visible:outline-2 focus-visible:outline-primary-focus"
                   >
                     <Trash2 className="h-3 w-3" aria-hidden="true" />
@@ -1152,6 +1368,14 @@ function AddEditExpenseModalInner({
         onSubmit={handleSubmit}
         className="flex flex-col gap-4"
       >
+        {isLockedExpense && (
+          <AlertBanner
+            tone="warning"
+            title="Expense is locked"
+            description="This expense is covered by a closed billing cycle or pairwise settlement watermark and cannot be edited."
+          />
+        )}
+
         {serverError && (
           <AlertBanner
             tone="error"
@@ -1167,6 +1391,7 @@ function AddEditExpenseModalInner({
             description="Create or join an active split group before logging an expense."
           />
         ) : (
+          !isEditMode &&
           (activeGroupId === "all" || nonArchivedGroups.length > 1) && (
             <Select
               label="Split Group"
@@ -1223,6 +1448,7 @@ function AddEditExpenseModalInner({
                 options={CURRENCY_OPTIONS}
                 value={currency}
                 onChange={(nextCur) => {
+                  skipFxAutoFetchForCurrencyRef.current = null;
                   setCurrency(nextCur);
                   if (selectedGroup && nextCur === selectedGroup.baseCurrency) {
                     cancelPendingFxFetch();
@@ -1415,7 +1641,7 @@ function AddEditExpenseModalInner({
           <Select
             label="Category"
             aria-label="Category"
-            options={CATEGORY_OPTIONS}
+            options={categoryOptions}
             value={category}
             onChange={setCategory}
           />

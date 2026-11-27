@@ -214,6 +214,7 @@ async function deleteGroupsAndChildren(
   ids: string[],
 ) {
   if (ids.length === 0) return;
+  await admin.from("notifications").delete().in("group_id", ids);
   await admin.from("reminder_logs").delete().in("group_id", ids);
   await admin.from("settlements").delete().in("group_id", ids);
   await admin.from("expenses").delete().in("group_id", ids);
