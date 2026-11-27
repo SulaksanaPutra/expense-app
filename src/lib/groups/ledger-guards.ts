@@ -642,6 +642,114 @@ export async function createGroupExpense(
     };
   }
 
+  // Persist NEW_EXPENSE notifications for other active group members who have new_expense enabled.
+  try {
+    const notifTable = supabase.from("notifications");
+    if (notifTable && typeof notifTable.insert === "function") {
+      const { data: activeMembers } = await supabase
+        .from("group_members")
+        .select("user_id")
+        .eq("group_id", params.groupId)
+        .eq("status", "ACTIVE");
+
+      const recipientIds = (activeMembers ?? [])
+        .map((m) => m.user_id)
+        .filter((uid) => uid !== params.userId);
+
+      if (recipientIds.length > 0) {
+        const usersToLookup = Array.from(
+          new Set([params.userId, ...recipientIds]),
+        );
+        let actorName = "A group member";
+        const newExpensePrefByUser = new Map<string, boolean>();
+
+        try {
+          const usersTable = supabase.from("users");
+          if (usersTable && typeof usersTable.select === "function") {
+            const { data: userRows } = await usersTable
+              .select("id, full_name, email, notification_prefs")
+              .in("id", usersToLookup);
+            for (const row of userRows ?? []) {
+              if (row.id === params.userId) {
+                if (row.full_name?.trim()) {
+                  actorName = row.full_name.trim();
+                } else if (row.email) {
+                  actorName = row.email;
+                }
+              }
+              const prefs =
+                row.notification_prefs &&
+                typeof row.notification_prefs === "object"
+                  ? (row.notification_prefs as unknown as Record<string, unknown>)
+                  : null;
+              newExpensePrefByUser.set(
+                row.id,
+                prefs?.new_expense === false ? false : true,
+              );
+            }
+          }
+        } catch {
+          // Non-fatal in minimal unit-test mocks.
+        }
+
+        const eligibleRecipients = recipientIds.filter(
+          (uid) => newExpensePrefByUser.get(uid) !== false,
+        );
+
+        if (eligibleRecipients.length > 0) {
+          const shareByUser = new Map<string, number>();
+          for (const item of normalized.splitBreakdown) {
+            if (item && typeof item.user_id === "string") {
+              shareByUser.set(item.user_id, Math.trunc(item.share_cents ?? 0));
+            }
+          }
+
+          const cycleSlug = getCycleSlugForDate(
+            inserted.expense_date,
+            guard.group.billing_cycle_anchor_day,
+          );
+          const href = `/expenses?group=${encodeURIComponent(params.groupId)}&cycle=${encodeURIComponent(cycleSlug)}`;
+          const nowIso = new Date().toISOString();
+          const totalFormatted = formatMinorUnits(
+            Number(inserted.amount_cents),
+            inserted.currency,
+          );
+
+          const payloads: Database["public"]["Tables"]["notifications"]["Insert"][] =
+            eligibleRecipients.map((uid) => {
+              const shareCents = shareByUser.get(uid) ?? 0;
+              const shareSuffix =
+                shareCents !== 0
+                  ? `, your share ${formatMinorUnits(Math.abs(shareCents), inserted.currency)}`
+                  : "";
+              return {
+                id: crypto.randomUUID(),
+                user_id: uid,
+                group_id: params.groupId,
+                actor_id: params.userId,
+                expense_id: inserted.id,
+                revision_id: null,
+                type: "NEW_EXPENSE",
+                title: adjustmentForExpenseId
+                  ? "Offsetting adjustment logged"
+                  : "New Expense Logged",
+                description: `${actorName} added "${inserted.description}" in ${guard.group.name} (${totalFormatted}${shareSuffix}).`,
+                delta_cents: shareCents !== 0 ? shareCents : null,
+                currency: inserted.currency,
+                href,
+                is_read: false,
+                created_at: nowIso,
+              };
+            });
+
+          await notifTable.insert(payloads);
+        }
+      }
+    }
+  } catch {
+    // Non-fatal so expense creation succeeds even if notifications mock is absent.
+  }
+
   return { ok: true, expense: inserted };
 }
 
@@ -1585,6 +1693,91 @@ export async function createGroupSettlement(
     }
   } catch {
     // Non-fatal in minimal unit-test mocks; DB trigger handles real Postgres writes.
+  }
+
+  // Persist SETTLEMENT_CONFIRMATION notifications for involved counterparties.
+  try {
+    const notifClient =
+      guard.member.status === "FORMER_MEMBER" && hasSupabaseAdminEnv()
+        ? createAdminClient()
+        : supabase;
+    const notifTable = notifClient.from("notifications");
+    if (notifTable && typeof notifTable.insert === "function") {
+      const recipientIds = Array.from(new Set([payerId, recipientId])).filter(
+        (uid) => uid !== params.userId,
+      );
+
+      if (recipientIds.length > 0) {
+        const usersToLookup = Array.from(
+          new Set([params.userId, payerId, recipientId]),
+        );
+        const nameByUser = new Map<string, string>();
+        const prefByUser = new Map<string, boolean>();
+
+        try {
+          const usersTable = notifClient.from("users");
+          if (usersTable && typeof usersTable.select === "function") {
+            const { data: userRows } = await usersTable
+              .select("id, full_name, email, notification_prefs")
+              .in("id", usersToLookup);
+            for (const row of userRows ?? []) {
+              const displayName =
+                row.full_name?.trim() || row.email || "A group member";
+              nameByUser.set(row.id, displayName);
+              const prefs =
+                row.notification_prefs &&
+                typeof row.notification_prefs === "object"
+                  ? (row.notification_prefs as unknown as Record<string, unknown>)
+                  : null;
+              prefByUser.set(
+                row.id,
+                prefs?.settlement_confirmation === false ? false : true,
+              );
+            }
+          }
+        } catch {
+          // Non-fatal in minimal unit-test mocks.
+        }
+
+        const eligibleRecipients = recipientIds.filter(
+          (uid) => prefByUser.get(uid) !== false,
+        );
+
+        if (eligibleRecipients.length > 0) {
+          const actorName = nameByUser.get(params.userId) ?? "A group member";
+          const payerName = nameByUser.get(payerId) ?? "Member";
+          const recipientName = nameByUser.get(recipientId) ?? "Member";
+          const amountFormatted = formatMinorUnits(
+            amountCents,
+            guard.group.base_currency,
+          );
+          const nowIso = new Date().toISOString();
+          const href = `/dashboard?group=${encodeURIComponent(params.groupId)}`;
+
+          const payloads: Database["public"]["Tables"]["notifications"]["Insert"][] =
+            eligibleRecipients.map((uid) => ({
+              id: crypto.randomUUID(),
+              user_id: uid,
+              group_id: params.groupId,
+              actor_id: params.userId,
+              expense_id: null,
+              revision_id: null,
+              type: "SETTLEMENT_CONFIRMATION",
+              title: "Settlement confirmed",
+              description: `${actorName} recorded a ${amountFormatted} settlement (${payerName} to ${recipientName}) in ${guard.group.name}.`,
+              delta_cents: amountCents,
+              currency: guard.group.base_currency,
+              href,
+              is_read: false,
+              created_at: nowIso,
+            }));
+
+          await notifTable.insert(payloads);
+        }
+      }
+    }
+  } catch {
+    // Non-fatal so settlement creation succeeds even if notifications mock is absent.
   }
 
   return { ok: true, settlement: inserted };

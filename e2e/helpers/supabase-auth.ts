@@ -217,6 +217,12 @@ async function deleteGroupsAndChildren(
   await admin.from("notifications").delete().in("group_id", ids);
   await admin.from("reminder_logs").delete().in("group_id", ids);
   await admin.from("settlements").delete().in("group_id", ids);
+  // Delete offsetting adjustments before parent expenses (adjustment_for_expense_id has ON DELETE RESTRICT)
+  await admin
+    .from("expenses")
+    .delete()
+    .in("group_id", ids)
+    .not("adjustment_for_expense_id", "is", null);
   await admin.from("expenses").delete().in("group_id", ids);
   await admin.from("recurring_rules").delete().in("group_id", ids);
   await admin.from("billing_cycles").delete().in("group_id", ids);
@@ -225,36 +231,74 @@ async function deleteGroupsAndChildren(
   await admin.from("groups").delete().in("id", ids);
 }
 
+export async function deleteE2EUsersById(userIds: string[]) {
+  const admin = createAdminSupabase();
+  for (const uid of userIds) {
+    if (!uid) continue;
+    await cleanupE2EReceiptsForUser(uid).catch(() => {});
+    await admin.from("notifications").delete().eq("user_id", uid);
+    await admin.from("reminder_logs").delete().eq("creditor_id", uid);
+    await admin.from("reminder_logs").delete().eq("debtor_id", uid);
+    await admin.from("users").delete().eq("id", uid);
+    await admin.auth.admin.deleteUser(uid).catch(() => {});
+  }
+}
+
 export async function cleanupAllE2EData(options?: { deleteUsers?: boolean }) {
   const admin = createAdminSupabase();
 
-  const { data: e2eGroups } = await admin
+  const allUsers: Array<{ id: string; email?: string }> = [];
+  let page = 1;
+  while (true) {
+    const { data: listed } = await admin.auth.admin.listUsers({
+      page,
+      perPage: 200,
+    });
+    const batch = listed?.users ?? [];
+    allUsers.push(...batch);
+    if (batch.length < 200) break;
+    page += 1;
+  }
+
+  const e2eUsers = allUsers.filter((u) =>
+    /^e2e-.*@ledgersplit\.test$/i.test(u.email ?? ""),
+  );
+  const e2eUserIds = e2eUsers.map((u) => u.id);
+
+  const groupIdSet = new Set<string>();
+  const { data: e2eNamedGroups } = await admin
     .from("groups")
     .select("id")
     .ilike("name", "[E2E]%");
-
-  if (e2eGroups && e2eGroups.length > 0) {
-    await deleteGroupsAndChildren(
-      admin,
-      e2eGroups.map((g) => g.id),
-    );
+  for (const g of e2eNamedGroups ?? []) {
+    groupIdSet.add(g.id);
   }
 
-  const { data: listed } = await admin.auth.admin.listUsers({
-    page: 1,
-    perPage: 200,
-  });
-  const e2eUsers = (listed?.users ?? []).filter((u) =>
-    /^e2e-.*@ledgersplit\.test$/i.test(u.email ?? ""),
-  );
+  if (e2eUserIds.length > 0) {
+    const { data: createdGroups } = await admin
+      .from("groups")
+      .select("id")
+      .in("created_by", e2eUserIds);
+    for (const g of createdGroups ?? []) {
+      groupIdSet.add(g.id);
+    }
+  }
+
+  if (groupIdSet.size > 0) {
+    await deleteGroupsAndChildren(admin, Array.from(groupIdSet));
+  }
 
   for (const user of e2eUsers) {
     await cleanupE2EReceiptsForUser(user.id);
+    await admin.from("notifications").delete().eq("user_id", user.id);
+    await admin.from("reminder_logs").delete().eq("creditor_id", user.id);
+    await admin.from("reminder_logs").delete().eq("debtor_id", user.id);
   }
 
   if (options?.deleteUsers) {
     for (const user of e2eUsers) {
-      await admin.auth.admin.deleteUser(user.id);
+      await admin.from("users").delete().eq("id", user.id);
+      await admin.auth.admin.deleteUser(user.id).catch(() => {});
     }
   }
 }

@@ -27,6 +27,8 @@ export interface RecordSettlementModalProps {
   debts: SimplifiedDebtEdge[];
   currentUserId: string;
   initialDebtKey?: string | null;
+  defaultPaymentRail?: PaymentRail;
+  currentUserInstantTag?: string | null;
   onSettled?: (settlement: Database["public"]["Tables"]["settlements"]["Row"]) => void;
 }
 
@@ -69,6 +71,8 @@ function RecordSettlementModalInner({
   debts,
   currentUserId,
   initialDebtKey,
+  defaultPaymentRail = "VENMO",
+  currentUserInstantTag = null,
   onSettled,
 }: RecordSettlementModalProps) {
   const formId = React.useId();
@@ -95,7 +99,8 @@ function RecordSettlementModalInner({
       ? formatMinorPlain(selectedDebt.amountCents, selectedDebt.currency)
       : "",
   );
-  const [paymentRail, setPaymentRail] = React.useState<PaymentRail>("VENMO");
+  const [paymentRail, setPaymentRail] =
+    React.useState<PaymentRail>(defaultPaymentRail);
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
 
@@ -111,14 +116,19 @@ function RecordSettlementModalInner({
   const currency = selectedDebt?.currency ?? "USD";
   const parsedAmountCents = parseCurrencyInputToMinorUnits(amountInput, currency);
   const isAmountValid = parsedAmountCents !== null && parsedAmountCents > 0;
-  const recipientDisplayTag = formatSettlementTag(
-    selectedDebt?.recipientInstantTag,
-  );
+  const effectiveRecipientTag =
+    selectedDebt?.recipientInstantTag ??
+    (selectedDebt?.recipientId === currentUserId ? currentUserInstantTag : null);
+  const recipientDisplayTag = formatSettlementTag(effectiveRecipientTag);
+  const selfPayerDisplayTag =
+    selectedDebt?.payerId === currentUserId
+      ? formatSettlementTag(currentUserInstantTag)
+      : null;
 
   const venmoDeepLink = React.useMemo(() => {
     if (!selectedDebt || !isAmountValid || parsedAmountCents === null) return null;
-    const recipientHandle = selectedDebt.recipientInstantTag
-      ? selectedDebt.recipientInstantTag.trim().replace(/^@+/, "")
+    const recipientHandle = effectiveRecipientTag
+      ? effectiveRecipientTag.trim().replace(/^@+/, "")
       : "";
     const majorAmount = formatMinorPlain(parsedAmountCents, currency);
     const note = encodeURIComponent(
@@ -128,7 +138,7 @@ function RecordSettlementModalInner({
       ? `&recipients=${encodeURIComponent(recipientHandle)}`
       : "";
     return `venmo://paycharge?txn=pay${recParam}&amount=${majorAmount}&note=${note}`;
-  }, [currency, isAmountValid, parsedAmountCents, selectedDebt]);
+  }, [currency, effectiveRecipientTag, isAmountValid, parsedAmountCents, selectedDebt]);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -371,6 +381,14 @@ function RecordSettlementModalInner({
                       ? `Recipient handle: ${recipientDisplayTag}`
                       : "No @instant_settlement_tag saved — records ledger settlement only."}
                   </span>
+                  {selfPayerDisplayTag && (
+                    <span
+                      data-testid="self-settlement-tag"
+                      className="block truncate text-ink-muted-48"
+                    >
+                      Your handle: {selfPayerDisplayTag}
+                    </span>
+                  )}
                 </div>
                 {venmoDeepLink && (
                   <a

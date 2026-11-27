@@ -1,7 +1,10 @@
 import type {
+  ExpenseSplitMethod,
   GroupStatus,
   GroupType,
   MemberStatus,
+  NotificationType,
+  PaymentRail,
   SplitMode,
 } from "@/types/database";
 
@@ -21,6 +24,7 @@ export interface ShellGroupSummary {
   groupType: GroupType;
   baseCurrency: string;
   defaultSplitMode?: SplitMode;
+  simplifyDebts?: boolean;
   currentUserStatus?: MemberStatus | null;
   activeSplitCount: number;
   members: ShellGroupMember[];
@@ -31,6 +35,11 @@ export interface ShellUserSummary {
   fullName: string;
   email: string;
   avatarUrl?: string | null;
+  baseCurrency?: string;
+  instantSettlementTag?: string | null;
+  personalShareCapCents?: number | null;
+  defaultSplitMethod?: ExpenseSplitMethod;
+  defaultPaymentRail?: PaymentRail;
   receiptStorageUsedBytes?: number;
 }
 
@@ -39,8 +48,19 @@ export interface ShellNotificationItem {
   title: string;
   description: string;
   timestamp: string;
+  createdAt?: string;
   unread: boolean;
   href?: string;
+  type?: NotificationType;
+  deltaCents?: number | null;
+  currency?: string | null;
 }
 
 export type LiveSyncStatus = "subscribed" | "syncing" | "offline";
+
+export interface RealtimeLedgerChangeDetail {
+  table: string;
+  eventType: "INSERT" | "UPDATE" | "DELETE";
+  newRow: Record<string, unknown> | null;
+  oldRow: Record<string, unknown> | null;
+}

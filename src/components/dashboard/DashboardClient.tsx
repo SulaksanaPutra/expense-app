@@ -7,6 +7,7 @@ import {
   ArrowDownLeft,
   ArrowRight,
   ArrowUpRight,
+  BellRing,
   Car,
   CheckCircle2,
   Download,
@@ -54,11 +55,17 @@ import {
   RecordSettlementModal,
   getSettlementDebtKey,
 } from "@/components/expenses";
-import { LiveSyncPill, useActiveGroup } from "@/components/shell";
-import type { ShellGroupSummary } from "@/components/shell/types";
+import {
+  LiveSyncPill,
+  REALTIME_LEDGER_CHANGE_EVENT,
+  useActiveGroup,
+} from "@/components/shell";
+import type {
+  RealtimeLedgerChangeDetail,
+  ShellGroupSummary,
+} from "@/components/shell/types";
 import { ALL_GROUPS_VALUE, formatCycleLabel } from "@/components/shell/url-state";
 import {
-  buildExpensesCsv,
   computeExpensesKpiSummary,
   computePerGroupDebtEdges,
   evaluateExpenseLockAndSettlement,
@@ -70,6 +77,13 @@ import {
   type ExpenseSettlementRecord,
   type SimplifiedDebtEdge,
 } from "@/lib/expenses/ledger";
+import { cn } from "@/lib/cn";
+import {
+  formatCooldownLabel,
+  getReminderCooldownKey,
+  REMINDER_COOLDOWN_MS,
+  type ReminderCooldownInfo,
+} from "@/lib/groups/reminders";
 import { getBillingCycleWindow } from "@/lib/groups/service";
 import { formatMinorUnits } from "@/lib/money";
 import type {
@@ -115,6 +129,7 @@ export interface DashboardClientProps {
   initialGroups?: ExpenseGroupInfo[];
   initialSettlements?: ExpenseSettlementRecord[];
   initialBillingCycles?: ExpenseBillingCycleRecord[];
+  initialReminderCooldowns?: ReminderCooldownInfo[];
   loadError?: string | null;
 }
 
@@ -240,6 +255,7 @@ export function DashboardClient({
   initialGroups = [],
   initialSettlements = [],
   initialBillingCycles = [],
+  initialReminderCooldowns = [],
   loadError = null,
 }: DashboardClientProps) {
   const router = useRouter();
@@ -276,6 +292,15 @@ export function DashboardClient({
   const [addedSettlements, setAddedSettlements] = React.useState<
     ExpenseSettlementRecord[]
   >([]);
+  const [cooldownOverrides, setCooldownOverrides] = React.useState<
+    Record<string, ReminderCooldownInfo>
+  >({});
+  const [sendingReminderKeys, setSendingReminderKeys] = React.useState<
+    Record<string, boolean>
+  >({});
+  const [isSendingBatchReminders, setIsSendingBatchReminders] =
+    React.useState(false);
+  const [nowTickMs, setNowTickMs] = React.useState(() => Date.now());
 
   const [settlementModalOpen, setSettlementModalOpen] = React.useState(false);
   const [selectedDebtKey, setSelectedDebtKey] = React.useState<string | null>(
@@ -304,11 +329,33 @@ export function DashboardClient({
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  // Merge initialGroups with local simplifyOverrides for immediate reactive updates
+  const shellInstantTag = shellUser?.instantSettlementTag;
+
+  // Merge initialGroups with shellGroups & local simplifyOverrides for immediate reactive updates
   const effectiveGroups = React.useMemo<ExpenseGroupInfo[]>(() => {
+    const shellById = new Map(shellGroups.map((sg) => [sg.id, sg]));
     const baseGroups: ExpenseGroupInfo[] =
       initialGroups.length > 0
-        ? initialGroups
+        ? initialGroups.map((g) => {
+            const sg = shellById.get(g.id);
+            const nextMembers =
+              shellInstantTag !== undefined
+                ? g.members.map((m) =>
+                    m.userId === currentUserId
+                      ? {
+                          ...m,
+                          instantSettlementTag: shellInstantTag ?? null,
+                        }
+                      : m,
+                  )
+                : g.members;
+            return {
+              ...g,
+              defaultSplitMode: sg?.defaultSplitMode ?? g.defaultSplitMode,
+              simplifyDebts: sg?.simplifyDebts ?? g.simplifyDebts,
+              members: nextMembers,
+            };
+          })
         : shellGroups.map((sg) => ({
             id: sg.id,
             name: sg.name,
@@ -316,7 +363,7 @@ export function DashboardClient({
             status: sg.status,
             baseCurrency: sg.baseCurrency,
             defaultSplitMode: sg.defaultSplitMode ?? "EQUAL",
-            simplifyDebts: true,
+            simplifyDebts: sg.simplifyDebts ?? true,
             operationalBudgetCents: null,
             billingCycleAnchorDay: 1,
             currentUserRole: null,
@@ -325,7 +372,8 @@ export function DashboardClient({
               userId: m.id,
               name: m.name,
               status: "ACTIVE",
-              instantSettlementTag: null,
+              instantSettlementTag:
+                m.id === currentUserId ? (shellInstantTag ?? null) : null,
             })),
           }));
 
@@ -334,7 +382,13 @@ export function DashboardClient({
         ? { ...g, simplifyDebts: simplifyOverrides[g.id] }
         : g,
     );
-  }, [initialGroups, shellGroups, simplifyOverrides]);
+  }, [
+    currentUserId,
+    initialGroups,
+    shellGroups,
+    shellInstantTag,
+    simplifyOverrides,
+  ]);
 
   const settlements = React.useMemo(() => {
     const byId = new Map<string, ExpenseSettlementRecord>();
@@ -455,6 +509,62 @@ export function DashboardClient({
     return () =>
       window.removeEventListener("ledgersplit:expense-created", handleCreated);
   }, [effectiveGroups]);
+
+  React.useEffect(() => {
+    const handleRealtimeChange = (event: Event) => {
+      const detail = (event as CustomEvent<RealtimeLedgerChangeDetail>).detail;
+      if (!detail) return;
+      if (detail.table === "expenses") {
+        const expId =
+          (typeof detail.newRow?.id === "string" && detail.newRow.id) ||
+          (typeof detail.oldRow?.id === "string" && detail.oldRow.id) ||
+          null;
+        if (!expId) return;
+        const isSoftDeleted =
+          detail.eventType === "DELETE" ||
+          (detail.newRow?.deleted_at !== undefined &&
+            detail.newRow?.deleted_at !== null);
+        if (isSoftDeleted) {
+          setDeletedExpenseIds((prev) =>
+            prev.includes(expId) ? prev : [...prev, expId],
+          );
+          setAddedExpenses((prev) => prev.filter((item) => item.id !== expId));
+          setEditedExpenses((prev) => {
+            if (!(expId in prev)) return prev;
+            const next = { ...prev };
+            delete next[expId];
+            return next;
+          });
+        } else if (detail.eventType === "UPDATE") {
+          setEditedExpenses((prev) => {
+            if (!(expId in prev)) return prev;
+            const next = { ...prev };
+            delete next[expId];
+            return next;
+          });
+          setAddedExpenses((prev) => prev.filter((item) => item.id !== expId));
+        }
+      } else if (detail.table === "groups") {
+        const groupId =
+          typeof detail.newRow?.id === "string" ? detail.newRow.id : null;
+        if (groupId) {
+          setSimplifyOverrides((prev) => {
+            if (!(groupId in prev)) return prev;
+            const next = { ...prev };
+            delete next[groupId];
+            return next;
+          });
+        }
+      }
+    };
+
+    window.addEventListener(REALTIME_LEDGER_CHANGE_EVENT, handleRealtimeChange);
+    return () =>
+      window.removeEventListener(
+        REALTIME_LEDGER_CHANGE_EVENT,
+        handleRealtimeChange,
+      );
+  }, []);
 
   const modalGroups = React.useMemo<ShellGroupSummary[]>(() => {
     const shellById = new Map(shellGroups.map((g) => [g.id, g]));
@@ -741,22 +851,304 @@ export function DashboardClient({
     setSettlementModalOpen(true);
   };
 
+  React.useEffect(() => {
+    const timer = window.setInterval(() => {
+      setNowTickMs(Date.now());
+    }, 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const cooldownMap = React.useMemo(() => {
+    const map: Record<string, ReminderCooldownInfo> = {};
+    for (const item of initialReminderCooldowns) {
+      map[getReminderCooldownKey(item.groupId, item.debtorId)] = item;
+    }
+    for (const [key, item] of Object.entries(cooldownOverrides)) {
+      map[key] = item;
+    }
+    return map;
+  }, [cooldownOverrides, initialReminderCooldowns]);
+
+  const getActiveCooldown = React.useCallback(
+    (groupId: string, debtorId: string): ReminderCooldownInfo | null => {
+      const key = getReminderCooldownKey(groupId, debtorId);
+      const info = cooldownMap[key];
+      if (!info) return null;
+      const nextAllowedMs = Date.parse(info.nextAllowedAt);
+      if (!Number.isFinite(nextAllowedMs) || nextAllowedMs <= nowTickMs) {
+        return null;
+      }
+      const remainingMs = nextAllowedMs - nowTickMs;
+      const remainingHours = Math.max(1, Math.ceil(remainingMs / 3_600_000));
+      return {
+        ...info,
+        remainingMs,
+        remainingHours,
+      };
+    },
+    [cooldownMap, nowTickMs],
+  );
+
+  const buildCooldownFromErrorPayload = React.useCallback(
+    (
+      groupId: string,
+      debtorId: string,
+      payload: {
+        cooldown?: ReminderCooldownInfo;
+        remaining_hours?: number;
+        next_allowed_at?: string;
+        last_sent_at?: string;
+      },
+    ): ReminderCooldownInfo => {
+      if (payload.cooldown) return payload.cooldown;
+      const remainingHours = Math.max(
+        1,
+        Math.trunc(payload.remaining_hours ?? 24),
+      );
+      const remainingMs = remainingHours * 3_600_000;
+      const now = Date.now();
+      return {
+        groupId,
+        debtorId,
+        creditorId: currentUserId,
+        channel: "PUSH",
+        sentAt: payload.last_sent_at ?? new Date(now).toISOString(),
+        nextAllowedAt:
+          payload.next_allowed_at ??
+          new Date(now + Math.min(REMINDER_COOLDOWN_MS, remainingMs)).toISOString(),
+        remainingMs,
+        remainingHours,
+      };
+    },
+    [currentUserId],
+  );
+
+  const handleSendSingleReminder = React.useCallback(
+    async (
+      groupId: string,
+      debtorId: string,
+      debtorName: string,
+      amountCents: number,
+    ) => {
+      const key = getReminderCooldownKey(groupId, debtorId);
+      if (sendingReminderKeys[key]) return;
+
+      setSendingReminderKeys((prev) => ({ ...prev, [key]: true }));
+      try {
+        const response = await fetch(
+          `/api/groups/${encodeURIComponent(groupId)}/reminders`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              debtor_id: debtorId,
+              amount_cents: amountCents,
+            }),
+          },
+        );
+        const payload = (await response.json()) as {
+          ok?: boolean;
+          error?: string;
+          channel?: "PUSH" | "EMAIL" | "SMS";
+          cooldown?: ReminderCooldownInfo;
+          remaining_hours?: number;
+          next_allowed_at?: string;
+          last_sent_at?: string;
+        };
+
+        if (response.status === 429) {
+          const cooldown = buildCooldownFromErrorPayload(
+            groupId,
+            debtorId,
+            payload,
+          );
+          setCooldownOverrides((prev) => ({ ...prev, [key]: cooldown }));
+          pushToast({
+            tone: "warning",
+            title: "Reminder cooldown active",
+            description:
+              payload.error ||
+              `${debtorName}: ${formatCooldownLabel(cooldown.remainingHours)}.`,
+          });
+          return;
+        }
+
+        if (!response.ok || !payload.ok) {
+          pushToast({
+            tone: "error",
+            title: "Could not send reminder",
+            description: payload.error || "Unable to send settlement reminder.",
+          });
+          return;
+        }
+
+        const cooldown =
+          payload.cooldown ??
+          buildCooldownFromErrorPayload(groupId, debtorId, {
+            remaining_hours: 24,
+          });
+        setCooldownOverrides((prev) => ({ ...prev, [key]: cooldown }));
+        setNowTickMs(Date.now());
+
+        const viaSms = payload.channel === "SMS";
+        pushToast({
+          tone: "success",
+          title: viaSms ? "SMS reminder sent" : "Push reminder sent",
+          description: viaSms
+            ? `Dispatched SMS and in-app nudge to ${debtorName}.`
+            : `Sent Push/in-app settlement reminder to ${debtorName}.`,
+        });
+        router.refresh();
+      } catch {
+        pushToast({
+          tone: "error",
+          title: "Network error",
+          description: "Unable to send settlement reminder right now.",
+        });
+      } finally {
+        setSendingReminderKeys((prev) => {
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        });
+      }
+    },
+    [
+      buildCooldownFromErrorPayload,
+      pushToast,
+      router,
+      sendingReminderKeys,
+    ],
+  );
+
+  const handleSendBatchReminders = React.useCallback(
+    async (edges: SimplifiedDebtEdge[]) => {
+      if (isSendingBatchReminders || edges.length === 0) return;
+
+      setIsSendingBatchReminders(true);
+      try {
+        const response = await fetch("/api/reminders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            targets: edges.map((edge) => ({
+              group_id: edge.groupId,
+              debtor_id: edge.payerId,
+              amount_cents: edge.amountCents,
+            })),
+          }),
+        });
+
+        const payload = (await response.json()) as {
+          ok?: boolean;
+          error?: string;
+          cooldown?: ReminderCooldownInfo;
+          sent?: Array<{
+            channel: "PUSH" | "EMAIL" | "SMS";
+            cooldown: ReminderCooldownInfo;
+          }>;
+          rateLimited?: Array<{
+            groupId: string;
+            debtorId: string;
+            cooldown: ReminderCooldownInfo;
+          }>;
+        };
+
+        const nextOverrides: Record<string, ReminderCooldownInfo> = {};
+        for (const item of payload.sent ?? []) {
+          nextOverrides[
+            getReminderCooldownKey(
+              item.cooldown.groupId,
+              item.cooldown.debtorId,
+            )
+          ] = item.cooldown;
+        }
+        for (const item of payload.rateLimited ?? []) {
+          nextOverrides[getReminderCooldownKey(item.groupId, item.debtorId)] =
+            item.cooldown;
+        }
+        if (payload.cooldown) {
+          nextOverrides[
+            getReminderCooldownKey(
+              payload.cooldown.groupId,
+              payload.cooldown.debtorId,
+            )
+          ] = payload.cooldown;
+        }
+        if (Object.keys(nextOverrides).length > 0) {
+          setCooldownOverrides((prev) => ({ ...prev, ...nextOverrides }));
+          setNowTickMs(Date.now());
+        }
+
+        if (response.status === 429) {
+          const minHours = Math.min(
+            ...(payload.rateLimited ?? []).map((r) => r.cooldown.remainingHours),
+            payload.cooldown?.remainingHours ?? 24,
+          );
+          pushToast({
+            tone: "warning",
+            title: "Reminder cooldown active",
+            description:
+              payload.error || formatCooldownLabel(minHours),
+          });
+          return;
+        }
+
+        if (!response.ok) {
+          pushToast({
+            tone: "error",
+            title: "Could not send reminders",
+            description:
+              payload.error || "Unable to send settlement reminders.",
+          });
+          return;
+        }
+
+        const sentList = payload.sent ?? (payload.cooldown ? [{ channel: payload.cooldown.channel, cooldown: payload.cooldown }] : []);
+        const smsCount = sentList.filter((s) => s.channel === "SMS").length;
+        const pushCount = sentList.length - smsCount;
+        const channelSummary = [
+          smsCount > 0 ? `${smsCount} via SMS` : null,
+          pushCount > 0 ? `${pushCount} via Push/in-app` : null,
+        ]
+          .filter(Boolean)
+          .join(", ");
+
+        pushToast({
+          tone: "success",
+          title: `Sent ${sentList.length} ${sentList.length === 1 ? "reminder" : "reminders"}`,
+          description: channelSummary
+            ? `Delivered (${channelSummary}). Next reminder allowed in 24 hours.`
+            : "Settlement reminders dispatched.",
+        });
+        router.refresh();
+      } catch {
+        pushToast({
+          tone: "error",
+          title: "Network error",
+          description: "Unable to send settlement reminders right now.",
+        });
+      } finally {
+        setIsSendingBatchReminders(false);
+      }
+    },
+    [isSendingBatchReminders, pushToast, router],
+  );
+
   const handleExportCsv = () => {
-    const csv = buildExpensesCsv(visibleExpenses, currentUserId);
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
+    const scopeParam = activeGroupId || ALL_GROUPS_VALUE;
+    const url = `/api/expenses/export?group=${encodeURIComponent(scopeParam)}&cycle=${encodeURIComponent(cycle)}&format=csv`;
     const link = document.createElement("a");
     link.href = url;
     const scopeLabel = activeGroup?.slug ?? "all-groups";
-    link.download = `ledgersplit-dashboard-${scopeLabel}-${cycle}.csv`;
+    link.download = `ledgersplit-${scopeLabel}-${cycle}.csv`;
     document.body.appendChild(link);
     link.click();
     link.remove();
-    URL.revokeObjectURL(url);
     pushToast({
       tone: "success",
-      title: "CSV exported",
-      description: `Downloaded ${visibleExpenses.length} ${visibleExpenses.length === 1 ? "transaction" : "transactions"} for ${formatCycleLabel(cycle)}.`,
+      title: "CSV export started",
+      description: `Downloading ${activeGroup ? activeGroup.name : "All Groups"} transactions for ${formatCycleLabel(cycle)}.`,
     });
   };
 
@@ -1003,6 +1395,13 @@ export function DashboardClient({
       userStatus === "ACTIVE" && group.currentUserRole === "ADMIN";
     const canSettle =
       group.status !== "ARCHIVED" && (isYouOwe || isOwedToYou || isActiveAdmin);
+    const canRemind =
+      group.status !== "ARCHIVED" && isOwedToYou && userStatus === "ACTIVE";
+    const reminderKey = getReminderCooldownKey(edge.groupId, edge.payerId);
+    const reminderCooldown = canRemind
+      ? getActiveCooldown(edge.groupId, edge.payerId)
+      : null;
+    const isSendingReminder = Boolean(sendingReminderKeys[reminderKey]);
 
     const avatarName = isYouOwe
       ? edge.recipientName
@@ -1034,7 +1433,7 @@ export function DashboardClient({
         data-testid={`peer-balance-row-${edge.groupId}-${edge.payerId}-${edge.recipientId}`}
         className="flex flex-wrap items-center justify-between gap-3 rounded-[14px] border border-hairline bg-canvas-parchment p-3 transition-colors hover:border-[#c1c6d5]"
       >
-        <div className="flex min-w-0 flex-1 items-center gap-3">
+        <div className="flex min-w-[140px] flex-1 items-center gap-3">
           <Avatar name={avatarName} size="md" />
           <div className="min-w-0">
             <span className="block truncate text-[13px] font-semibold text-ink">
@@ -1050,7 +1449,7 @@ export function DashboardClient({
           </div>
         </div>
 
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex max-w-full flex-wrap items-center gap-2">
           <span
             data-testid={`peer-balance-amount-${edge.payerId}-${edge.recipientId}`}
             className={`text-[13px] font-semibold tabular-nums ${
@@ -1063,6 +1462,37 @@ export function DashboardClient({
           >
             {amountDisplay}
           </span>
+          {canRemind && (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              data-testid={`remind-peer-btn-${edge.groupId}-${edge.payerId}`}
+              loading={isSendingReminder}
+              disabled={Boolean(reminderCooldown) || isSendingReminder}
+              aria-label={
+                reminderCooldown
+                  ? `${formatCooldownLabel(reminderCooldown.remainingHours)} for ${edge.payerName}`
+                  : `Remind ${edge.payerName}`
+              }
+              onClick={() =>
+                void handleSendSingleReminder(
+                  edge.groupId,
+                  edge.payerId,
+                  edge.payerName,
+                  edge.amountCents,
+                )
+              }
+              className={cn(
+                "h-7 px-3 text-[12px]",
+                reminderCooldown ? "text-ink-muted-48" : "text-[#0066cc]",
+              )}
+            >
+              {reminderCooldown
+                ? formatCooldownLabel(reminderCooldown.remainingHours)
+                : "Remind"}
+            </Button>
+          )}
           {canSettle && (
             <Button
               type="button"
@@ -1078,6 +1508,35 @@ export function DashboardClient({
       </div>
     );
   };
+
+  const remindableOwedEdges = React.useMemo(() => {
+    const groupById = new Map(scopedGroups.map((g) => [g.id, g]));
+    return owedToYouEdges.filter((edge) => {
+      const grp = groupById.get(edge.groupId);
+      if (!grp || grp.status === "ARCHIVED") return false;
+      const member = grp.members.find((m) => m.userId === currentUserId);
+      const userStatus = grp.currentUserStatus ?? member?.status ?? null;
+      return userStatus === "ACTIVE";
+    });
+  }, [currentUserId, owedToYouEdges, scopedGroups]);
+
+  const eligibleRemindEdges = React.useMemo(
+    () =>
+      remindableOwedEdges.filter(
+        (edge) => !getActiveCooldown(edge.groupId, edge.payerId),
+      ),
+    [getActiveCooldown, remindableOwedEdges],
+  );
+
+  const minBatchCooldownHours = React.useMemo(() => {
+    if (remindableOwedEdges.length === 0 || eligibleRemindEdges.length > 0) {
+      return null;
+    }
+    const hoursList = remindableOwedEdges
+      .map((edge) => getActiveCooldown(edge.groupId, edge.payerId)?.remainingHours)
+      .filter((h): h is number => typeof h === "number");
+    return hoursList.length > 0 ? Math.min(...hoursList) : 24;
+  }, [eligibleRemindEdges.length, getActiveCooldown, remindableOwedEdges]);
 
   return (
     <div className="flex flex-col gap-6 pb-12">
@@ -1236,18 +1695,51 @@ export function DashboardClient({
             </p>
           </div>
 
-          <div className="flex items-center justify-between gap-2 border-t border-divider-soft pt-3 text-[12px]">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-divider-soft pt-3 text-[12px]">
             <span className="text-ink-muted-48">
               {kpi.owedToYouCount}{" "}
               {kpi.owedToYouCount === 1 ? "pending claim" : "pending claims"}
             </span>
-            <Link
-              href={buildNavHref("/expenses")}
-              className="inline-flex items-center gap-1 font-medium text-[#0066cc] hover:underline"
-            >
-              <span>View ledger</span>
-              <ArrowRight className="h-3 w-3" aria-hidden="true" />
-            </Link>
+            {remindableOwedEdges.length === 0 ? (
+              <Link
+                href={buildNavHref("/expenses")}
+                className="inline-flex items-center gap-1 font-medium text-[#0066cc] hover:underline"
+              >
+                <span>View ledger</span>
+                <ArrowRight className="h-3 w-3" aria-hidden="true" />
+              </Link>
+            ) : eligibleRemindEdges.length > 0 ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                data-testid="send-batch-reminders-btn"
+                loading={isSendingBatchReminders}
+                disabled={isSendingBatchReminders}
+                leftIcon={
+                  <BellRing
+                    className="h-3.5 w-3.5 text-[#0066cc]"
+                    aria-hidden="true"
+                  />
+                }
+                onClick={() => void handleSendBatchReminders(eligibleRemindEdges)}
+                className="h-7 px-2.5 text-[12px] font-medium text-[#0066cc] hover:bg-[#0066cc]/10"
+              >
+                Send {eligibleRemindEdges.length}{" "}
+                {eligibleRemindEdges.length === 1 ? "reminder" : "reminders"}
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                data-testid="send-batch-reminders-btn"
+                disabled
+                className="h-7 px-2.5 text-[12px] font-medium text-ink-muted-48"
+              >
+                {formatCooldownLabel(minBatchCooldownHours ?? 24)}
+              </Button>
+            )}
           </div>
         </Card>
 
@@ -1993,6 +2485,8 @@ export function DashboardClient({
         debts={settleableDebts}
         currentUserId={currentUserId}
         initialDebtKey={selectedDebtKey}
+        defaultPaymentRail={shellUser?.defaultPaymentRail}
+        currentUserInstantTag={shellUser?.instantSettlementTag}
         onSettled={(settlement) => {
           setAddedSettlements((prev) => [
             {

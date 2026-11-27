@@ -6,6 +6,7 @@ import type {
   SplitMode,
 } from "@/types/database";
 import type { GroupAuditLogEntry } from "./audit-log";
+import type { ReminderCooldownInfo } from "./reminders";
 
 export interface CreateGroupInput {
   name: string;
@@ -65,5 +66,6 @@ export interface SplitGroupsPageData {
   activeGroups: SplitGroupDetail[];
   archivedGroups: SplitGroupDetail[];
   cycleSlug: string;
+  reminderCooldowns?: ReminderCooldownInfo[];
   loadError: string | null;
 }

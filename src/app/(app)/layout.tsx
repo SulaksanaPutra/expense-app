@@ -6,20 +6,9 @@ import type {
   ShellNotificationItem,
   ShellUserSummary,
 } from "@/components/shell";
+import { mapDbNotificationToShellItem } from "@/components/shell/notifications";
 import { getAuthenticatedUser, hasSupabaseEnv } from "@/lib/auth/guards";
 import { createClient } from "@/lib/supabase/server";
-
-function formatNotificationTimestamp(isoString: string): string {
-  const parsed = new Date(isoString);
-  if (Number.isNaN(parsed.getTime())) return isoString;
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZone: "UTC",
-  }).format(parsed);
-}
 
 async function loadShellContext(): Promise<{
   user: ShellUserSummary | null;
@@ -35,11 +24,16 @@ async function loadShellContext(): Promise<{
     typeof authUser.user_metadata?.full_name === "string"
       ? authUser.user_metadata.full_name
       : undefined;
+  const metaAvatarUrl =
+    typeof authUser.user_metadata?.avatar_url === "string"
+      ? authUser.user_metadata.avatar_url
+      : null;
 
   let shellUser: ShellUserSummary = {
     id: authUser.id,
     fullName: metaName || authUser.email || "LedgerSplit User",
     email: authUser.email ?? "",
+    avatarUrl: metaAvatarUrl,
   };
 
   if (!hasSupabaseEnv()) {
@@ -53,19 +47,23 @@ async function loadShellContext(): Promise<{
       await Promise.all([
         supabase
           .from("users")
-          .select("id, full_name, email, receipt_storage_used_bytes")
+          .select(
+            "id, full_name, email, base_currency, instant_settlement_tag, personal_share_cap_cents, receipt_storage_used_bytes, notification_prefs",
+          )
           .eq("id", authUser.id)
           .maybeSingle(),
         supabase
           .from("groups")
           .select(
-            "id, name, slug, group_type, status, base_currency, default_split_mode",
+            "id, name, slug, group_type, status, base_currency, default_split_mode, simplify_debts",
           )
           .neq("status", "ARCHIVED")
           .order("created_at", { ascending: true }),
         supabase
           .from("notifications")
-          .select("id, title, description, href, is_read, created_at")
+          .select(
+            "id, type, title, description, delta_cents, currency, href, is_read, created_at",
+          )
           .eq("user_id", authUser.id)
           .order("created_at", { ascending: false })
           .limit(25),
@@ -73,20 +71,57 @@ async function loadShellContext(): Promise<{
 
     const notifications: ShellNotificationItem[] = (
       notificationsResult?.data ?? []
-    ).map((n) => ({
-      id: n.id,
-      title: n.title,
-      description: n.description,
-      timestamp: formatNotificationTimestamp(n.created_at),
-      unread: !n.is_read,
-      href: n.href ?? undefined,
-    }));
+    ).map(mapDbNotificationToShellItem);
 
     if (profile) {
+      const rawPrefs = (
+        profile.notification_prefs &&
+        typeof profile.notification_prefs === "object"
+          ? profile.notification_prefs
+          : {}
+      ) as Record<string, unknown>;
+      const rawSplitMethod = rawPrefs.default_split_method;
+      const defaultSplitMethod =
+        rawSplitMethod === "EQUAL" ||
+        rawSplitMethod === "PERCENTAGE" ||
+        rawSplitMethod === "EXACT"
+          ? rawSplitMethod
+          : undefined;
+      const rawPaymentMethods = Array.isArray(rawPrefs.payment_methods)
+        ? rawPrefs.payment_methods
+        : [];
+      const defaultPm = rawPaymentMethods.find(
+        (pm): pm is { rail?: unknown; is_default?: unknown } =>
+          Boolean(pm) &&
+          typeof pm === "object" &&
+          Boolean((pm as { is_default?: unknown }).is_default),
+      );
+      const rawRail =
+        defaultPm && typeof defaultPm.rail === "string"
+          ? defaultPm.rail
+          : undefined;
+      const defaultPaymentRail =
+        rawRail === "VENMO" ||
+        rawRail === "APPLE_CARD" ||
+        rawRail === "CASH" ||
+        rawRail === "OTHER"
+          ? rawRail
+          : undefined;
+
       shellUser = {
         id: profile.id,
         fullName: profile.full_name || shellUser.fullName,
         email: profile.email || shellUser.email,
+        avatarUrl: metaAvatarUrl,
+        baseCurrency: profile.base_currency || "USD",
+        instantSettlementTag: profile.instant_settlement_tag ?? null,
+        personalShareCapCents:
+          profile.personal_share_cap_cents !== null &&
+          profile.personal_share_cap_cents !== undefined
+            ? Number(profile.personal_share_cap_cents)
+            : null,
+        defaultSplitMethod,
+        defaultPaymentRail,
         receiptStorageUsedBytes: Number(profile.receipt_storage_used_bytes ?? 0),
       };
     }
@@ -163,6 +198,7 @@ async function loadShellContext(): Promise<{
       status: g.status,
       baseCurrency: g.base_currency,
       defaultSplitMode: g.default_split_mode,
+      simplifyDebts: Boolean(g.simplify_debts),
       currentUserStatus: currentUserStatusByGroup.get(g.id) ?? null,
       activeSplitCount: splitCountByGroup.get(g.id) ?? 0,
       members: membersByGroup.get(g.id) ?? [],

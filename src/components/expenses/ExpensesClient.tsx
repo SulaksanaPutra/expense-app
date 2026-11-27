@@ -59,8 +59,15 @@ import type {
   SortDirection,
   ToastItem,
 } from "@/components/ui";
-import { LiveSyncPill, useActiveGroup } from "@/components/shell";
-import type { ShellGroupSummary } from "@/components/shell/types";
+import {
+  LiveSyncPill,
+  REALTIME_LEDGER_CHANGE_EVENT,
+  useActiveGroup,
+} from "@/components/shell";
+import type {
+  RealtimeLedgerChangeDetail,
+  ShellGroupSummary,
+} from "@/components/shell/types";
 import {
   ALL_GROUPS_VALUE,
   formatCycleLabel,
@@ -71,7 +78,6 @@ import {
 } from "@/lib/expenses/recurring";
 import { EXPENSE_CATEGORIES } from "@/lib/expenses/split-engine";
 import {
-  buildExpensesCsv,
   computeExpensesKpiSummary,
   computePerGroupDebtEdges,
   evaluateExpenseLockAndSettlement,
@@ -369,7 +375,9 @@ export function ExpensesClient({
       if (!deletedSet.has(item.id)) byId.set(item.id, item);
     }
     for (const item of addedRules) {
-      if (!deletedSet.has(item.id)) byId.set(item.id, item);
+      if (!deletedSet.has(item.id) && !byId.has(item.id)) {
+        byId.set(item.id, item);
+      }
     }
     return Array.from(byId.values()).map((r) =>
       r.id in ruleActiveOverrides
@@ -539,6 +547,71 @@ export function ExpensesClient({
     return () =>
       window.removeEventListener("ledgersplit:expense-created", handleCreated);
   }, [initialGroups]);
+
+  React.useEffect(() => {
+    const handleRealtimeChange = (event: Event) => {
+      const detail = (event as CustomEvent<RealtimeLedgerChangeDetail>).detail;
+      if (!detail) return;
+      if (detail.table === "expenses") {
+        const expId =
+          (typeof detail.newRow?.id === "string" && detail.newRow.id) ||
+          (typeof detail.oldRow?.id === "string" && detail.oldRow.id) ||
+          null;
+        if (!expId) return;
+        const isSoftDeleted =
+          detail.eventType === "DELETE" ||
+          (detail.newRow?.deleted_at !== undefined &&
+            detail.newRow?.deleted_at !== null);
+        if (isSoftDeleted) {
+          setDeletedExpenseIds((prev) =>
+            prev.includes(expId) ? prev : [...prev, expId],
+          );
+          setAddedExpenses((prev) => prev.filter((item) => item.id !== expId));
+          setEditedExpenses((prev) => {
+            if (!(expId in prev)) return prev;
+            const next = { ...prev };
+            delete next[expId];
+            return next;
+          });
+        } else if (detail.eventType === "UPDATE") {
+          setEditedExpenses((prev) => {
+            if (!(expId in prev)) return prev;
+            const next = { ...prev };
+            delete next[expId];
+            return next;
+          });
+          setAddedExpenses((prev) => prev.filter((item) => item.id !== expId));
+        }
+      } else if (detail.table === "recurring_rules") {
+        const ruleId =
+          (typeof detail.newRow?.id === "string" && detail.newRow.id) ||
+          (typeof detail.oldRow?.id === "string" && detail.oldRow.id) ||
+          null;
+        if (!ruleId) return;
+        if (detail.eventType === "DELETE") {
+          setDeletedRuleIds((prev) =>
+            prev.includes(ruleId) ? prev : [...prev, ruleId],
+          );
+          setAddedRules((prev) => prev.filter((r) => r.id !== ruleId));
+        } else if (detail.eventType === "UPDATE") {
+          const nextIsActive = detail.newRow?.is_active;
+          if (typeof nextIsActive === "boolean") {
+            setRuleActiveOverrides((prev) => ({
+              ...prev,
+              [ruleId]: nextIsActive,
+            }));
+          }
+        }
+      }
+    };
+
+    window.addEventListener(REALTIME_LEDGER_CHANGE_EVENT, handleRealtimeChange);
+    return () =>
+      window.removeEventListener(
+        REALTIME_LEDGER_CHANGE_EVENT,
+        handleRealtimeChange,
+      );
+  }, []);
 
   const [toasts, setToasts] = React.useState<ToastItem[]>([]);
   const toastCounter = React.useRef(0);
@@ -809,36 +882,72 @@ export function ExpensesClient({
     syncQueryParams({ page });
   };
 
+  const shellInstantTag = shellUser?.instantSettlementTag;
+
+  const effectiveGroups = React.useMemo<ExpenseGroupInfo[]>(() => {
+    const shellById = new Map(shellGroups.map((sg) => [sg.id, sg]));
+    return initialGroups.map((g) => {
+      const sg = shellById.get(g.id);
+      const nextMembers =
+        shellInstantTag !== undefined
+          ? g.members.map((m) =>
+              m.userId === currentUserId
+                ? {
+                    ...m,
+                    instantSettlementTag: shellInstantTag ?? null,
+                  }
+                : m,
+            )
+          : g.members;
+      if (!sg) {
+        return nextMembers === g.members ? g : { ...g, members: nextMembers };
+      }
+      return {
+        ...g,
+        defaultSplitMode: sg.defaultSplitMode ?? g.defaultSplitMode,
+        simplifyDebts: sg.simplifyDebts ?? g.simplifyDebts,
+        members: nextMembers,
+      };
+    });
+  }, [currentUserId, initialGroups, shellGroups, shellInstantTag]);
+
+  const effectivePersonalShareCapCents =
+    shellUser?.personalShareCapCents !== undefined
+      ? shellUser.personalShareCapCents
+      : personalShareCapCents;
+  const effectiveUserBaseCurrency =
+    shellUser?.baseCurrency ?? userBaseCurrency;
+
   const kpi = React.useMemo(
     () =>
       computeExpensesKpiSummary({
         expenses,
-        groups: initialGroups,
+        groups: effectiveGroups,
         settlements,
         activeGroupId,
         cycleSlug: cycle,
         currentUserId,
-        userBaseCurrency,
-        personalShareCapCents,
+        userBaseCurrency: effectiveUserBaseCurrency,
+        personalShareCapCents: effectivePersonalShareCapCents,
       }),
     [
       activeGroupId,
       currentUserId,
       cycle,
+      effectiveGroups,
+      effectivePersonalShareCapCents,
+      effectiveUserBaseCurrency,
       expenses,
-      initialGroups,
-      personalShareCapCents,
       settlements,
-      userBaseCurrency,
     ],
   );
 
   const scopedGroups = React.useMemo(
     () =>
       activeGroupId === ALL_GROUPS_VALUE
-        ? initialGroups
-        : initialGroups.filter((g) => g.id === activeGroupId),
-    [activeGroupId, initialGroups],
+        ? effectiveGroups
+        : effectiveGroups.filter((g) => g.id === activeGroupId),
+    [activeGroupId, effectiveGroups],
   );
 
   const scopedDebts = React.useMemo(
@@ -881,8 +990,8 @@ export function ExpensesClient({
     () =>
       activeGroupId === ALL_GROUPS_VALUE
         ? null
-        : (initialGroups.find((g) => g.id === activeGroupId) ?? null),
-    [activeGroupId, initialGroups],
+        : (effectiveGroups.find((g) => g.id === activeGroupId) ?? null),
+    [activeGroupId, effectiveGroups],
   );
 
   const isFormerMemberInActiveGroup = React.useMemo(() => {
@@ -1033,9 +1142,8 @@ export function ExpensesClient({
   }, [kpi.categoryTotals, selectedCategory]);
 
   const handleExportCsv = () => {
-    const csv = buildExpensesCsv(filteredExpenses, currentUserId);
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
+    const scopeParam = activeGroupId || ALL_GROUPS_VALUE;
+    const url = `/api/expenses/export?group=${encodeURIComponent(scopeParam)}&cycle=${encodeURIComponent(cycle)}&format=csv`;
     const link = document.createElement("a");
     link.href = url;
     const scopeLabel = activeGroup?.slug ?? "all-groups";
@@ -1043,11 +1151,10 @@ export function ExpensesClient({
     document.body.appendChild(link);
     link.click();
     link.remove();
-    URL.revokeObjectURL(url);
     pushToast({
       tone: "success",
-      title: "CSV exported",
-      description: `Downloaded ${filteredExpenses.length} ${filteredExpenses.length === 1 ? "transaction" : "transactions"} for ${formatCycleLabel(cycle)}.`,
+      title: "CSV export started",
+      description: `Downloading ${activeGroup ? activeGroup.name : "All Groups"} transactions for ${formatCycleLabel(cycle)}.`,
     });
   };
 
@@ -1624,7 +1731,7 @@ export function ExpensesClient({
           <Card
             variant="section"
             padding="sm"
-            className="flex flex-col justify-between gap-3 lg:flex-row lg:items-center"
+            className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"
           >
             <SearchInput
               ref={searchInputRef}
@@ -1635,69 +1742,74 @@ export function ExpensesClient({
               onClear={() => handleSearchChange("")}
               placeholder="Search merchant, category, payer, or group..."
               shortcut="/"
-              containerClassName="w-full lg:max-w-sm"
+              containerClassName="w-full lg:max-w-sm lg:flex-1"
             />
 
             <div
-              role="group"
-              aria-label="Filter by category"
-              className="flex flex-wrap items-center gap-1.5"
+              data-testid="expenses-filter-sort-group"
+              className="flex flex-wrap items-center gap-2 sm:gap-3 lg:justify-end"
             >
-              <Button
-                type="button"
-                size="sm"
-                variant={selectedCategory === "all" ? "primary" : "secondary"}
-                onClick={() => handleCategoryChange("all")}
-                className="h-8 px-3 text-[12px]"
+              <div
+                role="group"
+                aria-label="Filter by category"
+                className="flex flex-wrap items-center gap-1.5"
               >
-                All
-              </Button>
-              {categoryChipList.map(({ category, amountCents }) => {
-                const isSelected = selectedCategory === category;
-                return (
-                  <Button
-                    key={category}
-                    type="button"
-                    size="sm"
-                    variant={isSelected ? "primary" : "secondary"}
-                    onClick={() =>
-                      handleCategoryChange(isSelected ? "all" : category)
-                    }
-                    className="h-8 gap-1.5 px-3 text-[12px]"
-                  >
-                    <span
-                      aria-hidden="true"
-                      className="h-1.5 w-1.5 shrink-0 rounded-full"
-                      style={{
-                        backgroundColor: isSelected
-                          ? "#ffffff"
-                          : getCategoryColor(category),
-                      }}
-                    />
-                    <span>{category}</span>
-                    <span
-                      className={
-                        isSelected
-                          ? "text-white/85 tabular-nums"
-                          : "text-ink-muted-48 tabular-nums"
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={selectedCategory === "all" ? "primary" : "secondary"}
+                  onClick={() => handleCategoryChange("all")}
+                  className="h-8 px-3 text-[12px]"
+                >
+                  All
+                </Button>
+                {categoryChipList.map(({ category, amountCents }) => {
+                  const isSelected = selectedCategory === category;
+                  return (
+                    <Button
+                      key={category}
+                      type="button"
+                      size="sm"
+                      variant={isSelected ? "primary" : "secondary"}
+                      onClick={() =>
+                        handleCategoryChange(isSelected ? "all" : category)
                       }
+                      className="h-8 gap-1.5 px-3 text-[12px]"
                     >
-                      {formatMinorUnits(amountCents, kpi.displayCurrency)}
-                    </span>
-                  </Button>
-                );
-              })}
-            </div>
+                      <span
+                        aria-hidden="true"
+                        className="h-1.5 w-1.5 shrink-0 rounded-full"
+                        style={{
+                          backgroundColor: isSelected
+                            ? "#ffffff"
+                            : getCategoryColor(category),
+                        }}
+                      />
+                      <span>{category}</span>
+                      <span
+                        className={
+                          isSelected
+                            ? "text-white/85 tabular-nums"
+                            : "text-ink-muted-48 tabular-nums"
+                        }
+                      >
+                        {formatMinorUnits(amountCents, kpi.displayCurrency)}
+                      </span>
+                    </Button>
+                  );
+                })}
+              </div>
 
-            <div className="shrink-0 self-end lg:self-center">
-              <Select
-                aria-label="Sort transactions"
-                variant="pill-select"
-                options={SORT_OPTIONS}
-                value={sortBy}
-                onChange={handleSortChange}
-                className="h-9 bg-canvas-parchment text-[12px] font-medium"
-              />
+              <div className="shrink-0">
+                <Select
+                  aria-label="Sort transactions"
+                  variant="pill-select"
+                  options={SORT_OPTIONS}
+                  value={sortBy}
+                  onChange={handleSortChange}
+                  className="!h-9 bg-canvas-parchment text-[12px] font-medium"
+                />
+              </div>
             </div>
           </Card>
 
@@ -2454,6 +2566,8 @@ export function ExpensesClient({
         debts={settleableDebts}
         currentUserId={currentUserId}
         initialDebtKey={settleInitialDebtKey}
+        defaultPaymentRail={shellUser?.defaultPaymentRail}
+        currentUserInstantTag={shellUser?.instantSettlementTag}
         onSettled={(created) => {
           setAddedSettlements((prev) => [
             {

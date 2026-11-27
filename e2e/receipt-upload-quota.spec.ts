@@ -324,7 +324,9 @@ test.describe("Issue #78 — Receipt upload & 500 MB per-user quota degradation"
     expect(createdNoReceipt.expense.receipt_url).toBeNull();
     await expect(dialog).toBeHidden();
     await expect(
-      page.getByText(`[E2E] Quota Full Expense ${tag}`),
+      page
+        .getByTestId("recent-shared-transactions-card")
+        .getByText(`[E2E] Quota Full Expense ${tag}`),
     ).toBeVisible();
   });
 });

@@ -1,4 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  getActiveReminderCooldowns,
+  type ReminderCooldownInfo,
+} from "@/lib/groups/reminders";
 import type { Database, SplitBreakdownItem } from "@/types/database";
 import {
   evaluateExpenseLockAndSettlement,
@@ -18,6 +22,7 @@ export interface ExpensesPageData {
   settlements: ExpenseSettlementRecord[];
   billingCycles: ExpenseBillingCycleRecord[];
   recurringRules: RecurringRuleRecord[];
+  reminderCooldowns: ReminderCooldownInfo[];
   loadError: string | null;
 }
 
@@ -34,6 +39,7 @@ export async function getExpensesPageData(
     settlements: [],
     billingCycles: [],
     recurringRules: [],
+    reminderCooldowns: [],
     loadError: null,
   };
 
@@ -86,6 +92,7 @@ export async function getExpensesPageData(
       { data: settlementRows, error: settlementsError },
       { data: billingCycleRows, error: billingCyclesError },
       { data: recurringRows, error: recurringError },
+      reminderCooldowns,
     ] = await Promise.all([
       supabase
         .from("group_members")
@@ -118,6 +125,7 @@ export async function getExpensesPageData(
         )
         .in("group_id", groupIds)
         .order("day_of_month", { ascending: true }),
+      getActiveReminderCooldowns(supabase, currentUserId, groupIds),
     ]);
 
     if (
@@ -315,6 +323,7 @@ export async function getExpensesPageData(
       settlements,
       billingCycles,
       recurringRules,
+      reminderCooldowns,
       loadError: null,
     };
   } catch (err) {

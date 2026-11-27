@@ -33,11 +33,22 @@ export type GroupAuditEventType =
   | "GROUP_ARCHIVED"
   | "GROUP_UNARCHIVED";
 
+export interface SavedPaymentMethod {
+  id: string;
+  label: string;
+  rail: PaymentRail;
+  handle: string;
+  is_default?: boolean;
+}
+
 export interface NotificationPrefs {
   new_expense: boolean;
   settlement_confirmation: boolean;
   monthly_recap: boolean;
   sms_nudges_opt_in: boolean;
+  auto_settlement_reminders?: boolean;
+  default_split_method?: ExpenseSplitMethod;
+  payment_methods?: SavedPaymentMethod[];
 }
 
 export interface SplitBreakdownItem {

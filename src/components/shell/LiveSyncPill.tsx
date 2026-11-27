@@ -22,7 +22,13 @@ export function LiveSyncPill({ className }: LiveSyncPillProps) {
   }, [liveSyncStatus]);
 
   return (
-    <StatusPill tone={syncMeta.tone} size="sm" dot className={className}>
+    <StatusPill
+      tone={syncMeta.tone}
+      size="sm"
+      dot
+      data-sync-status={liveSyncStatus}
+      className={className}
+    >
       {syncMeta.label}
     </StatusPill>
   );

@@ -28,7 +28,12 @@ import { AddEditExpenseModal } from "@/components/expenses";
 import { cn } from "@/lib/cn";
 import { formatMinorUnits } from "@/lib/money";
 import { useActiveGroup } from "./ActiveGroupContext";
-import { buildShellHref, getCyclePickerOptions } from "./url-state";
+import { getNotificationTypeLabel } from "./notifications";
+import {
+  buildShellHref,
+  formatCycleLabel,
+  getCyclePickerOptions,
+} from "./url-state";
 
 interface GlobalSearchExpenseResult {
   id: string;
@@ -56,6 +61,7 @@ export function TopBar({ mobileMenuButtonRef }: TopBarProps) {
     updateReceiptStorageUsedBytes,
     notifications,
     unreadNotificationCount,
+    markNotificationRead,
     markAllNotificationsRead,
     setCycle,
     stepCycle,
@@ -245,8 +251,8 @@ export function TopBar({ mobileMenuButtonRef }: TopBarProps) {
   return (
     <>
       <header className="sticky top-0 z-30 border-b border-hairline bg-canvas/85 backdrop-blur-xl">
-        <div className="flex h-16 w-full items-center justify-between gap-1.5 px-3 sm:gap-2 sm:px-6 lg:px-8">
-          <div className="flex min-w-0 flex-1 items-center gap-1.5 sm:flex-none sm:gap-3">
+        <div className="flex h-16 w-full items-center justify-between gap-1 px-2.5 sm:gap-2 sm:px-6 lg:px-8">
+          <div className="flex min-w-0 flex-1 items-center gap-1 sm:flex-none sm:gap-3">
             <Button
               ref={mobileMenuButtonRef}
               type="button"
@@ -256,7 +262,7 @@ export function TopBar({ mobileMenuButtonRef }: TopBarProps) {
               aria-expanded={mobileDrawerOpen}
               aria-controls="mobile-nav-drawer"
               onClick={() => setMobileDrawerOpen(true)}
-              className="shrink-0 lg:hidden"
+              className="!h-8 !w-8 shrink-0 lg:hidden"
             >
               <Menu className="h-4 w-4" aria-hidden="true" />
             </Button>
@@ -264,41 +270,47 @@ export function TopBar({ mobileMenuButtonRef }: TopBarProps) {
             <div
               role="group"
               aria-label="Billing cycle picker"
-              className="flex min-w-0 flex-1 items-center gap-0.5 rounded-pill border border-hairline bg-canvas-parchment px-1 py-0.5 sm:flex-none"
+              className="flex min-w-0 flex-1 items-center gap-0.5 rounded-pill border border-hairline bg-canvas-parchment px-0.5 py-0.5 sm:flex-none sm:px-1"
             >
-              <span className="hidden shrink-0 sm:inline-flex">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  aria-label="Previous billing cycle"
-                  onClick={() => stepCycle(-1)}
-                  className="h-7 w-7 px-0 text-ink-muted-80 hover:bg-canvas"
-                >
-                  <ChevronLeft className="h-4 w-4" aria-hidden="true" />
-                </Button>
-              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                aria-label="Previous billing cycle"
+                onClick={() => stepCycle(-1)}
+                className="!h-7 !w-5 shrink-0 !px-0 text-ink-muted-80 hover:bg-canvas sm:!w-7"
+              >
+                <ChevronLeft className="h-4 w-4 shrink-0" aria-hidden="true" />
+              </Button>
               <Select
                 aria-label="Select billing cycle"
                 variant="pill-select"
                 options={cycleOptions}
                 value={cycle}
+                selectedLabel={
+                  <>
+                    <span className="sm:hidden">
+                      {formatCycleLabel(cycle, "short")}
+                    </span>
+                    <span className="hidden sm:inline">
+                      {formatCycleLabel(cycle, "long")}
+                    </span>
+                  </>
+                }
                 onChange={setCycle}
                 containerClassName="min-w-0 flex-1 sm:flex-none"
-                className="h-7 w-full min-w-0 max-w-full border-transparent bg-transparent !px-2 text-[11px] font-semibold tracking-tight text-ink hover:bg-canvas sm:w-auto sm:!px-2.5 sm:text-[12px]"
+                className="!h-7 w-full min-w-0 max-w-full border-transparent bg-transparent !gap-1 !px-0.5 text-[11px] font-semibold tracking-tight text-ink hover:bg-canvas sm:w-auto sm:!gap-2 sm:!px-2.5 sm:text-[12px]"
               />
-              <span className="hidden shrink-0 sm:inline-flex">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  aria-label="Next billing cycle"
-                  onClick={() => stepCycle(1)}
-                  className="h-7 w-7 px-0 text-ink-muted-80 hover:bg-canvas"
-                >
-                  <ChevronRight className="h-4 w-4" aria-hidden="true" />
-                </Button>
-              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                aria-label="Next billing cycle"
+                onClick={() => stepCycle(1)}
+                className="!h-7 !w-5 shrink-0 !px-0 text-ink-muted-80 hover:bg-canvas sm:!w-7"
+              >
+                <ChevronRight className="h-4 w-4 shrink-0" aria-hidden="true" />
+              </Button>
             </div>
           </div>
 
@@ -326,7 +338,7 @@ export function TopBar({ mobileMenuButtonRef }: TopBarProps) {
               aria-label="Search expenses and groups"
               aria-haspopup="dialog"
               onClick={() => setSearchOpen(true)}
-              className="md:hidden"
+              className="!h-8 !w-8 md:hidden"
             >
               <Search className="h-4 w-4" aria-hidden="true" />
             </Button>
@@ -342,14 +354,15 @@ export function TopBar({ mobileMenuButtonRef }: TopBarProps) {
                     : "Notifications"
                 }
                 aria-expanded={notifOpen}
-                aria-haspopup="true"
+                aria-controls="topbar-notifications-popover"
                 onClick={() => setNotifOpen((prev) => !prev)}
-                className="relative"
+                className="relative !h-8 !w-8 sm:!h-9 sm:!w-9"
               >
                 <Bell className="h-4 w-4" aria-hidden="true" />
                 {unreadNotificationCount > 0 && (
                   <span
                     aria-hidden="true"
+                    data-testid="notification-unread-dot"
                     className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-red-500 ring-2 ring-canvas"
                   />
                 )}
@@ -357,14 +370,22 @@ export function TopBar({ mobileMenuButtonRef }: TopBarProps) {
 
               {notifOpen && (
                 <div
+                  id="topbar-notifications-popover"
                   role="region"
                   aria-label="Notifications"
-                  className="absolute top-full right-0 z-40 mt-2 w-80 max-w-[calc(100vw-1.5rem)] rounded-[18px] border border-hairline bg-canvas p-3 shadow-[0_12px_32px_rgba(0,0,0,0.1)]"
+                  className="fixed inset-x-3 top-[4.25rem] z-40 rounded-[18px] border border-hairline bg-canvas p-3 shadow-[0_12px_32px_rgba(0,0,0,0.1)] sm:absolute sm:inset-x-auto sm:top-full sm:right-0 sm:mt-2 sm:w-80"
                 >
                   <div className="mb-2 flex items-center justify-between gap-2 border-b border-divider-soft pb-2">
-                    <span className="text-[13px] font-semibold text-ink">
-                      Notifications
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[13px] font-semibold text-ink">
+                        Notifications
+                      </span>
+                      {unreadNotificationCount > 0 && (
+                        <Badge tone="info" size="sm">
+                          {unreadNotificationCount} unread
+                        </Badge>
+                      )}
+                    </div>
                     <Button
                       type="button"
                       variant="ghost"
@@ -382,28 +403,56 @@ export function TopBar({ mobileMenuButtonRef }: TopBarProps) {
                       settlement nudges appear here.
                     </p>
                   ) : (
-                    <ul className="flex max-h-64 flex-col gap-1 overflow-y-auto">
-                      {notifications.map((item) => (
-                        <li
-                          key={item.id}
-                          className={cn(
-                            "rounded-sm px-2.5 py-2 text-left transition-colors",
-                            item.unread ? "bg-canvas-parchment" : "bg-canvas",
-                          )}
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-[12px] font-semibold text-ink">
-                              {item.title}
-                            </span>
-                            <span className="text-[11px] text-ink-muted-48">
-                              {item.timestamp}
-                            </span>
-                          </div>
-                          <p className="mt-0.5 text-[12px] text-ink-muted-80">
-                            {item.description}
-                          </p>
-                        </li>
-                      ))}
+                    <ul className="flex max-h-72 flex-col gap-1 overflow-y-auto">
+                      {notifications.map((item) => {
+                        const typeLabel = getNotificationTypeLabel(item.type);
+                        const handleSelect = () => {
+                          if (item.unread) {
+                            markNotificationRead(item.id);
+                          }
+                          if (item.href) {
+                            setNotifOpen(false);
+                            router.push(item.href);
+                          }
+                        };
+                        return (
+                          <li key={item.id}>
+                            <button
+                              type="button"
+                              onClick={handleSelect}
+                              className={cn(
+                                "w-full rounded-sm px-2.5 py-2 text-left transition-colors hover:bg-canvas-parchment focus-visible:outline-2 focus-visible:outline-primary-focus",
+                                item.unread
+                                  ? "bg-canvas-parchment/80"
+                                  : "bg-canvas",
+                              )}
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <span className="flex min-w-0 items-center gap-1.5 text-[12px] font-semibold text-ink">
+                                  {item.unread && (
+                                    <span
+                                      aria-hidden="true"
+                                      className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#0066cc]"
+                                    />
+                                  )}
+                                  <span className="truncate">{item.title}</span>
+                                </span>
+                                <span className="shrink-0 text-[11px] text-ink-muted-48">
+                                  {item.timestamp}
+                                </span>
+                              </div>
+                              {typeLabel && (
+                                <span className="mt-0.5 inline-block text-[10px] font-medium uppercase tracking-wide text-ink-muted-48">
+                                  {typeLabel}
+                                </span>
+                              )}
+                              <p className="mt-0.5 text-[12px] leading-snug text-ink-muted-80">
+                                {item.description}
+                              </p>
+                            </button>
+                          </li>
+                        );
+                      })}
                     </ul>
                   )}
                 </div>

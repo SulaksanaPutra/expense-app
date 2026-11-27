@@ -2,8 +2,17 @@
 
 import * as React from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
+import { hasSupabasePublicEnv } from "@/lib/supabase/env";
+import {
+  mapDbNotificationToShellItem,
+  mapRealtimeStatusToLiveSync,
+  REALTIME_LEDGER_CHANGE_EVENT,
+  type DbNotificationSelectRow,
+} from "./notifications";
 import type {
   LiveSyncStatus,
+  RealtimeLedgerChangeDetail,
   ShellGroupSummary,
   ShellNotificationItem,
   ShellUserSummary,
@@ -95,9 +104,15 @@ export interface ActiveGroupContextValue {
   cycle: string;
   user: ShellUserSummary | null;
   updateReceiptStorageUsedBytes: (usedBytes: number) => void;
+  updateUserPreferences: (patch: Partial<ShellUserSummary>) => void;
+  updateGroupPreferences: (
+    groupId: string,
+    patch: Partial<ShellGroupSummary>,
+  ) => void;
   liveSyncStatus: LiveSyncStatus;
   notifications: ShellNotificationItem[];
   unreadNotificationCount: number;
+  markNotificationRead: (id: string) => void;
   markAllNotificationsRead: () => void;
   setActiveGroup: (groupId: string) => void;
   upsertGroup: (
@@ -148,26 +163,35 @@ export function ActiveGroupProvider({
   children,
 }: ActiveGroupProviderProps) {
   const router = useRouter();
+  const routerRef = React.useRef(router);
+  React.useEffect(() => {
+    routerRef.current = router;
+  }, [router]);
   const pathname = usePathname() || "/dashboard";
   const searchParams = useSearchParams();
   const searchKey = searchParams.toString();
 
   const [localGroups, setLocalGroups] = React.useState<ShellGroupSummary[]>([]);
+  const [groupOverrides, setGroupOverrides] = React.useState<
+    Record<string, Partial<ShellGroupSummary>>
+  >({});
 
   const nonArchivedGroups = React.useMemo(() => {
     const byId = new Map<string, ShellGroupSummary>();
     for (const g of groups) {
       if (g.status !== "ARCHIVED") {
-        byId.set(g.id, g);
+        const override = groupOverrides[g.id];
+        byId.set(g.id, override ? { ...g, ...override } : g);
       }
     }
     for (const g of localGroups) {
       if (g.status !== "ARCHIVED" && !byId.has(g.id)) {
-        byId.set(g.id, g);
+        const override = groupOverrides[g.id];
+        byId.set(g.id, override ? { ...g, ...override } : g);
       }
     }
     return Array.from(byId.values());
-  }, [groups, localGroups]);
+  }, [groupOverrides, groups, localGroups]);
 
   const availableIds = React.useMemo(
     () => nonArchivedGroups.map((g) => g.id),
@@ -373,8 +397,29 @@ export function ActiveGroupProvider({
     getOnlineServerSnapshot,
   );
 
+  const hasRealtimeEnv = hasSupabasePublicEnv();
+  const shouldSubscribeRealtime =
+    controlledSyncStatus === undefined && Boolean(user?.id) && hasRealtimeEnv;
+
+  const [realtimeSyncState, setRealtimeSyncState] = React.useState<{
+    sessionKey: string;
+    status: LiveSyncStatus;
+  }>({ sessionKey: "", status: "syncing" });
+  const needsCatchupRef = React.useRef(false);
+  const channelSeqRef = React.useRef(0);
+  const currentRealtimeSessionKey =
+    shouldSubscribeRealtime && isOnline && user?.id ? user.id : "";
+
   const liveSyncStatus: LiveSyncStatus =
-    controlledSyncStatus ?? (isOnline ? "subscribed" : "offline");
+    controlledSyncStatus !== undefined
+      ? controlledSyncStatus
+      : !isOnline
+        ? "offline"
+        : shouldSubscribeRealtime
+          ? realtimeSyncState.sessionKey === currentRealtimeSessionKey
+            ? realtimeSyncState.status
+            : "syncing"
+          : "subscribed";
 
   const [mobileDrawerOpen, setMobileDrawerOpen] = React.useState(false);
   const [searchOpen, setSearchOpen] = React.useState(false);
@@ -382,34 +427,312 @@ export function ActiveGroupProvider({
   const [readNotificationIds, setReadNotificationIds] = React.useState<
     Set<string>
   >(() => new Set());
+  const [realtimeAddedNotifications, setRealtimeAddedNotifications] =
+    React.useState<ShellNotificationItem[]>([]);
+  const [realtimeNotificationPatches, setRealtimeNotificationPatches] =
+    React.useState<Record<string, Partial<ShellNotificationItem>>>({});
+  const [deletedNotificationIds, setDeletedNotificationIds] = React.useState<
+    Set<string>
+  >(() => new Set());
   const [userStorageOverride, setUserStorageOverride] = React.useState<{
     userId: string;
     baseBytes: number | undefined;
     overrideBytes: number;
   } | null>(null);
+  const [userPrefOverride, setUserPrefOverride] = React.useState<{
+    userId: string;
+    patch: Partial<ShellUserSummary>;
+  } | null>(null);
 
-  const notifications = React.useMemo<ShellNotificationItem[]>(
-    () =>
-      initialNotifications.map((item) =>
-        readNotificationIds.has(item.id) ? { ...item, unread: false } : item,
-      ),
-    [initialNotifications, readNotificationIds],
-  );
+  React.useEffect(() => {
+    if (!shouldSubscribeRealtime || !user?.id) {
+      return;
+    }
+
+    if (!isOnline) {
+      needsCatchupRef.current = true;
+      return;
+    }
+
+    const sessionKey = user.id;
+    let active = true;
+    let refreshTimer: number | null = null;
+    const supabase = createClient();
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+
+    const scheduleRefresh = () => {
+      if (!active) return;
+      if (refreshTimer !== null) {
+        window.clearTimeout(refreshTimer);
+      }
+      refreshTimer = window.setTimeout(() => {
+        refreshTimer = null;
+        if (active) {
+          routerRef.current.refresh?.();
+        }
+      }, 120);
+    };
+
+    const syncNotificationsFromApi = async () => {
+      if (!active || typeof fetch !== "function") return;
+      try {
+        const res = await fetch("/api/notifications", { cache: "no-store" });
+        if (!res.ok || !active) return;
+        const data = (await res.json()) as {
+          notifications?: DbNotificationSelectRow[];
+        };
+        if (!active || !Array.isArray(data.notifications)) return;
+        const mapped = data.notifications.map(mapDbNotificationToShellItem);
+        setRealtimeAddedNotifications(mapped);
+      } catch {
+        // Non-fatal on transient network error during reconnect catch-up.
+      }
+    };
+
+    const handleNotificationChange = (payload: {
+      eventType?: string;
+      new?: Record<string, unknown>;
+      old?: Record<string, unknown>;
+    }) => {
+      if (!active) return;
+      const eventType = payload.eventType;
+      if (eventType === "INSERT" && payload.new) {
+        const row = payload.new as unknown as DbNotificationSelectRow;
+        if (row.id) {
+          const item = mapDbNotificationToShellItem(row);
+          setRealtimeAddedNotifications((prev) => {
+            const withoutDup = prev.filter((n) => n.id !== item.id);
+            return [item, ...withoutDup];
+          });
+          setDeletedNotificationIds((prev) => {
+            if (!prev.has(item.id)) return prev;
+            const next = new Set(prev);
+            next.delete(item.id);
+            return next;
+          });
+        }
+      } else if (eventType === "UPDATE" && payload.new) {
+        const row = payload.new as unknown as Partial<DbNotificationSelectRow>;
+        if (row.id) {
+          setRealtimeNotificationPatches((prev) => ({
+            ...prev,
+            [row.id as string]: {
+              ...(typeof row.is_read === "boolean"
+                ? { unread: !row.is_read }
+                : {}),
+              ...(typeof row.title === "string" ? { title: row.title } : {}),
+              ...(typeof row.description === "string"
+                ? { description: row.description }
+                : {}),
+              ...(row.href !== undefined
+                ? { href: row.href ?? undefined }
+                : {}),
+            },
+          }));
+        }
+      } else if (eventType === "DELETE" && payload.old) {
+        const oldId = payload.old.id;
+        if (typeof oldId === "string" && oldId) {
+          setDeletedNotificationIds((prev) => {
+            const next = new Set(prev);
+            next.add(oldId);
+            return next;
+          });
+        }
+      }
+    };
+
+    const handleLedgerTableChange = (
+      table: string,
+      payload: {
+        eventType?: string;
+        new?: Record<string, unknown>;
+        old?: Record<string, unknown>;
+      },
+    ) => {
+      if (!active) return;
+      const eventType =
+        payload.eventType === "INSERT" ||
+        payload.eventType === "UPDATE" ||
+        payload.eventType === "DELETE"
+          ? payload.eventType
+          : "UPDATE";
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent<RealtimeLedgerChangeDetail>(
+            REALTIME_LEDGER_CHANGE_EVENT,
+            {
+              detail: {
+                table,
+                eventType,
+                newRow: payload.new ?? null,
+                oldRow: payload.old ?? null,
+              },
+            },
+          ),
+        );
+      }
+      scheduleRefresh();
+    };
+
+    const startSubscription = async () => {
+      try {
+        const authApi = supabase.auth as unknown as {
+          getSession?: () => Promise<{
+            data?: { session?: { access_token?: string } | null };
+          }>;
+        };
+        if (typeof authApi?.getSession === "function") {
+          const { data } = await authApi.getSession();
+          const token = data?.session?.access_token;
+          const realtimeApi = supabase.realtime as unknown as {
+            setAuth?: (token?: string) => void;
+          };
+          if (token && typeof realtimeApi?.setAuth === "function") {
+            realtimeApi.setAuth(token);
+          }
+        }
+      } catch {
+        // Non-fatal in unit-test mocks without auth.getSession.
+      }
+
+      if (!active) return;
+
+      channelSeqRef.current += 1;
+      channel = supabase
+        .channel(`ledgersplit-live-${user.id}-${channelSeqRef.current}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "notifications",
+            filter: `user_id=eq.${user.id}`,
+          },
+          handleNotificationChange,
+        )
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "expenses" },
+          (payload) => handleLedgerTableChange("expenses", payload),
+        )
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "expense_revisions" },
+          (payload) => handleLedgerTableChange("expense_revisions", payload),
+        )
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "settlements" },
+          (payload) => handleLedgerTableChange("settlements", payload),
+        )
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "billing_cycles" },
+          (payload) => handleLedgerTableChange("billing_cycles", payload),
+        )
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "groups" },
+          (payload) => handleLedgerTableChange("groups", payload),
+        )
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "group_members" },
+          (payload) => handleLedgerTableChange("group_members", payload),
+        )
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "recurring_rules" },
+          (payload) => handleLedgerTableChange("recurring_rules", payload),
+        )
+        .subscribe((status) => {
+          if (!active) return;
+          const mappedStatus = mapRealtimeStatusToLiveSync(status, isOnline);
+          setRealtimeSyncState({ sessionKey, status: mappedStatus });
+          if (mappedStatus !== "subscribed") {
+            needsCatchupRef.current = true;
+          } else if (needsCatchupRef.current) {
+            needsCatchupRef.current = false;
+            void syncNotificationsFromApi();
+            scheduleRefresh();
+          }
+        });
+    };
+
+    void startSubscription();
+
+    return () => {
+      active = false;
+      if (refreshTimer !== null) {
+        window.clearTimeout(refreshTimer);
+      }
+      if (channel) {
+        const removable = supabase as unknown as {
+          removeChannel?: (ch: typeof channel) => Promise<unknown>;
+        };
+        if (typeof removable.removeChannel === "function") {
+          void removable.removeChannel(channel);
+        }
+      }
+    };
+  }, [isOnline, shouldSubscribeRealtime, user?.id]);
+
+  const notifications = React.useMemo<ShellNotificationItem[]>(() => {
+    const byId = new Map<string, ShellNotificationItem>();
+    for (const item of realtimeAddedNotifications) {
+      if (!deletedNotificationIds.has(item.id)) {
+        byId.set(item.id, item);
+      }
+    }
+    for (const item of initialNotifications) {
+      if (!deletedNotificationIds.has(item.id) && !byId.has(item.id)) {
+        byId.set(item.id, item);
+      }
+    }
+
+    const merged = Array.from(byId.values()).map((item) => {
+      const patch = realtimeNotificationPatches[item.id];
+      const patched = patch ? { ...item, ...patch } : item;
+      return readNotificationIds.has(patched.id)
+        ? { ...patched, unread: false }
+        : patched;
+    });
+
+    merged.sort((a, b) => {
+      if (a.createdAt && b.createdAt) {
+        return Date.parse(b.createdAt) - Date.parse(a.createdAt);
+      }
+      return 0;
+    });
+
+    return merged.slice(0, 30);
+  }, [
+    deletedNotificationIds,
+    initialNotifications,
+    readNotificationIds,
+    realtimeAddedNotifications,
+    realtimeNotificationPatches,
+  ]);
 
   const effectiveUser = React.useMemo<ShellUserSummary | null>(() => {
     if (!user) return null;
+    let nextUser = user;
+    if (userPrefOverride && userPrefOverride.userId === user.id) {
+      nextUser = { ...nextUser, ...userPrefOverride.patch };
+    }
     if (
       userStorageOverride &&
       userStorageOverride.userId === user.id &&
       userStorageOverride.baseBytes === user.receiptStorageUsedBytes
     ) {
-      return {
-        ...user,
+      nextUser = {
+        ...nextUser,
         receiptStorageUsedBytes: userStorageOverride.overrideBytes,
       };
     }
-    return user;
-  }, [user, userStorageOverride]);
+    return nextUser;
+  }, [user, userPrefOverride, userStorageOverride]);
 
   const updateReceiptStorageUsedBytes = React.useCallback(
     (usedBytes: number) => {
@@ -423,8 +746,56 @@ export function ActiveGroupProvider({
     [user],
   );
 
+  const updateUserPreferences = React.useCallback(
+    (patch: Partial<ShellUserSummary>) => {
+      if (!user) return;
+      setUserPrefOverride((prev) => ({
+        userId: user.id,
+        patch:
+          prev && prev.userId === user.id ? { ...prev.patch, ...patch } : patch,
+      }));
+    },
+    [user],
+  );
+
+  const updateGroupPreferences = React.useCallback(
+    (groupId: string, patch: Partial<ShellGroupSummary>) => {
+      if (!groupId) return;
+      setGroupOverrides((prev) => ({
+        ...prev,
+        [groupId]: { ...(prev[groupId] ?? {}), ...patch },
+      }));
+    },
+    [],
+  );
+
+  const markNotificationRead = React.useCallback((id: string) => {
+    if (!id) return;
+    setReadNotificationIds((prev) => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+    if (typeof fetch === "function") {
+      void fetch("/api/notifications", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [id] }),
+      }).catch(() => {
+        // Non-fatal in unit tests or offline contexts.
+      });
+    }
+  }, []);
+
   const markAllNotificationsRead = React.useCallback(() => {
-    setReadNotificationIds(new Set(initialNotifications.map((item) => item.id)));
+    setReadNotificationIds((prev) => {
+      const next = new Set(prev);
+      for (const item of notifications) {
+        next.add(item.id);
+      }
+      return next;
+    });
     if (typeof fetch === "function") {
       void fetch("/api/notifications", {
         method: "PATCH",
@@ -434,7 +805,7 @@ export function ActiveGroupProvider({
         // Non-fatal in unit tests or offline contexts.
       });
     }
-  }, [initialNotifications]);
+  }, [notifications]);
 
   const unreadNotificationCount = React.useMemo(
     () => notifications.filter((n) => n.unread).length,
@@ -463,9 +834,12 @@ export function ActiveGroupProvider({
       cycle,
       user: effectiveUser,
       updateReceiptStorageUsedBytes,
+      updateUserPreferences,
+      updateGroupPreferences,
       liveSyncStatus,
       notifications,
       unreadNotificationCount,
+      markNotificationRead,
       markAllNotificationsRead,
       setActiveGroup,
       upsertGroup,
@@ -491,6 +865,7 @@ export function ActiveGroupProvider({
       closeAddExpense,
       cycle,
       liveSyncStatus,
+      markNotificationRead,
       markAllNotificationsRead,
       mobileDrawerOpen,
       nonArchivedGroups,
@@ -508,6 +883,8 @@ export function ActiveGroupProvider({
       unreadNotificationCount,
       effectiveUser,
       updateReceiptStorageUsedBytes,
+      updateUserPreferences,
+      updateGroupPreferences,
     ],
   );
 
