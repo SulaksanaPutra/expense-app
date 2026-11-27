@@ -38,12 +38,14 @@ async function loadShellContext(): Promise<{
     const [{ data: profile }, { data: groupRows }] = await Promise.all([
       supabase
         .from("users")
-        .select("id, full_name, email")
+        .select("id, full_name, email, receipt_storage_used_bytes")
         .eq("id", authUser.id)
         .maybeSingle(),
       supabase
         .from("groups")
-        .select("id, name, slug, group_type, status, base_currency")
+        .select(
+          "id, name, slug, group_type, status, base_currency, default_split_mode",
+        )
         .neq("status", "ARCHIVED")
         .order("created_at", { ascending: true }),
     ]);
@@ -53,6 +55,7 @@ async function loadShellContext(): Promise<{
         id: profile.id,
         fullName: profile.full_name || shellUser.fullName,
         email: profile.email || shellUser.email,
+        receiptStorageUsedBytes: Number(profile.receipt_storage_used_bytes ?? 0),
       };
     }
 
@@ -65,9 +68,10 @@ async function loadShellContext(): Promise<{
     const [{ data: memberRows }, { data: expenseRows }] = await Promise.all([
       supabase
         .from("group_members")
-        .select("group_id, user_id, status")
+        .select("group_id, user_id, status, share_percentage, joined_at")
         .in("group_id", groupIds)
-        .eq("status", "ACTIVE"),
+        .eq("status", "ACTIVE")
+        .order("joined_at", { ascending: true }),
       supabase
         .from("expenses")
         .select("group_id")
@@ -97,6 +101,7 @@ async function loadShellContext(): Promise<{
       list.push({
         id: row.user_id,
         name: memberProfile?.full_name || "Member",
+        sharePercentage: Number(row.share_percentage ?? 0),
       });
       membersByGroup.set(row.group_id, list);
     }
@@ -116,6 +121,7 @@ async function loadShellContext(): Promise<{
       groupType: g.group_type,
       status: g.status,
       baseCurrency: g.base_currency,
+      defaultSplitMode: g.default_split_mode,
       activeSplitCount: splitCountByGroup.get(g.id) ?? 0,
       members: membersByGroup.get(g.id) ?? [],
     }));

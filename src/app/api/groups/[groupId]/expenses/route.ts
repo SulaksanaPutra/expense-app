@@ -2,7 +2,11 @@ import { NextResponse, type NextRequest } from "next/server";
 import { hasSupabaseEnv } from "@/lib/auth/guards";
 import { createGroupExpense } from "@/lib/groups/ledger-guards";
 import { createClient } from "@/lib/supabase/server";
-import type { ExpenseSplitMethod, SplitBreakdownItem } from "@/types/database";
+import type {
+  ExchangeRateSource,
+  ExpenseSplitMethod,
+  SplitBreakdownItem,
+} from "@/types/database";
 
 interface RouteContext {
   params: Promise<{ groupId: string }>;
@@ -73,6 +77,25 @@ export async function POST(request: NextRequest, context: RouteContext) {
     splitBreakdown: Array.isArray(record.split_breakdown)
       ? (record.split_breakdown as SplitBreakdownItem[])
       : undefined,
+    originalAmountCents:
+      record.original_amount_cents === null ||
+      record.original_amount_cents === undefined
+        ? null
+        : Number(record.original_amount_cents),
+    originalCurrency:
+      typeof record.original_currency === "string"
+        ? record.original_currency
+        : null,
+    exchangeRate:
+      record.exchange_rate === null || record.exchange_rate === undefined
+        ? null
+        : Number(record.exchange_rate),
+    exchangeRateSource:
+      typeof record.exchange_rate_source === "string"
+        ? (record.exchange_rate_source as ExchangeRateSource)
+        : null,
+    receiptUrl:
+      typeof record.receipt_url === "string" ? record.receipt_url : null,
   });
 
   if (!result.ok) {

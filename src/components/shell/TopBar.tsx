@@ -21,11 +21,14 @@ import {
   Dropdown,
   SearchInput,
   Select,
+  ToastContainer,
 } from "@/components/ui";
-import type { DropdownItem } from "@/components/ui";
+import type { DropdownItem, ToastItem } from "@/components/ui";
+import { AddEditExpenseModal } from "@/components/expenses";
 import { cn } from "@/lib/cn";
+import { formatMinorUnits } from "@/lib/money";
 import { useActiveGroup } from "./ActiveGroupContext";
-import { formatCycleLabel, getCyclePickerOptions } from "./url-state";
+import { getCyclePickerOptions } from "./url-state";
 
 export interface TopBarProps {
   mobileMenuButtonRef?: React.RefObject<HTMLButtonElement | null>;
@@ -35,7 +38,7 @@ export function TopBar({ mobileMenuButtonRef }: TopBarProps) {
   const router = useRouter();
   const {
     groups,
-    activeGroup,
+    activeGroupId,
     cycle,
     user,
     notifications,
@@ -55,8 +58,20 @@ export function TopBar({ mobileMenuButtonRef }: TopBarProps) {
 
   const [notifOpen, setNotifOpen] = React.useState(false);
   const [searchQuery, setSearchQuery] = React.useState("");
+  const [toasts, setToasts] = React.useState<ToastItem[]>([]);
+  const toastCounterRef = React.useRef(0);
   const notifContainerRef = React.useRef<HTMLDivElement>(null);
   const signOutFormRef = React.useRef<HTMLFormElement>(null);
+
+  const pushToast = React.useCallback((toast: Omit<ToastItem, "id">) => {
+    toastCounterRef.current += 1;
+    const id = `shell-toast-${toastCounterRef.current}`;
+    setToasts((prev) => [...prev, { ...toast, id }]);
+  }, []);
+
+  const dismissToast = React.useCallback((id: string) => {
+    setToasts((prev) => prev.filter((item) => item.id !== id));
+  }, []);
 
   const cycleOptions = React.useMemo(
     () => getCyclePickerOptions(cycle),
@@ -438,52 +453,32 @@ export function TopBar({ mobileMenuButtonRef }: TopBarProps) {
         </form>
       </Dialog>
 
-      <Dialog
+      <AddEditExpenseModal
         open={addExpenseOpen}
         onClose={closeAddExpense}
-        title="Add Expense"
-        description={
-          activeGroup
-            ? `Logging to ${activeGroup.name} (${formatCycleLabel(cycle)})`
-            : `Select a group to log an expense for ${formatCycleLabel(cycle)}`
-        }
-        size="md"
-        footer={
-          <>
-            <Button variant="secondary" size="sm" onClick={closeAddExpense}>
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => {
-                closeAddExpense();
-                router.push(buildNavHref("/expenses"));
-              }}
-            >
-              Go to Expenses Ledger
-            </Button>
-          </>
-        }
-      >
-        <div className="flex flex-col gap-3 text-[14px] text-ink-muted-80">
-          <p>
-            Active scope:{" "}
-            <strong className="font-semibold text-ink">
-              {activeGroup ? activeGroup.name : "All Groups"}
-            </strong>{" "}
-            for{" "}
-            <strong className="font-semibold text-ink">
-              {formatCycleLabel(cycle)}
-            </strong>
-            .
-          </p>
-          <p className="text-[13px] text-ink-muted-48">
-            Expense creation opens the shared Add/Edit Expense modal once
-            expenses data wiring is enabled for this workspace.
-          </p>
-        </div>
-      </Dialog>
+        mode="create"
+        groups={groups}
+        activeGroupId={activeGroupId}
+        currentUser={user}
+        cycle={cycle}
+        onCreated={(expense) => {
+          pushToast({
+            tone: "success",
+            title: "Expense logged",
+            description: `${expense.description} (${formatMinorUnits(expense.amount_cents, expense.currency)}) saved.`,
+          });
+          if (typeof window !== "undefined") {
+            window.dispatchEvent(
+              new CustomEvent("ledgersplit:expense-created", { detail: expense }),
+            );
+          }
+          router.refresh();
+        }}
+      />
+
+      {toasts.length > 0 && (
+        <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+      )}
     </>
   );
 }

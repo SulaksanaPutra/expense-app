@@ -1,10 +1,11 @@
-import type { GroupStatus, GroupType } from "@/types/database";
+import type { GroupStatus, GroupType, SplitMode } from "@/types/database";
 
 export interface ShellGroupMember {
   id: string;
   name: string;
   src?: string | null;
   initials?: string;
+  sharePercentage?: number;
 }
 
 export interface ShellGroupSummary {
@@ -14,6 +15,7 @@ export interface ShellGroupSummary {
   status: GroupStatus;
   groupType: GroupType;
   baseCurrency: string;
+  defaultSplitMode?: SplitMode;
   activeSplitCount: number;
   members: ShellGroupMember[];
 }
@@ -23,6 +25,7 @@ export interface ShellUserSummary {
   fullName: string;
   email: string;
   avatarUrl?: string | null;
+  receiptStorageUsedBytes?: number;
 }
 
 export interface ShellNotificationItem {

@@ -91,9 +91,9 @@ export function SegmentedControl<T extends string = string>({
       role="tablist"
       aria-label={ariaLabel}
       className={cn(
-        "inline-flex max-w-full flex-nowrap items-center gap-1 overflow-x-auto",
+        "inline-flex max-w-full flex-nowrap items-center gap-1",
+        fullWidth ? "w-full overflow-hidden" : "overflow-x-auto",
         containerStyle,
-        fullWidth && "w-full",
         className,
       )}
     >
@@ -125,9 +125,11 @@ export function SegmentedControl<T extends string = string>({
             }}
             onKeyDown={(e) => handleKeyDown(e, idx)}
             className={cn(
-              "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-pill px-4 py-2 text-[13px] font-medium whitespace-nowrap transition-colors",
+              "inline-flex items-center justify-center gap-1.5 rounded-pill py-2 font-medium whitespace-nowrap transition-colors",
+              fullWidth
+                ? "min-w-0 flex-1 px-2 text-[11.5px] sm:px-4 sm:text-[13px]"
+                : "shrink-0 px-4 text-[13px]",
               "focus-visible:outline-2 focus-visible:outline-primary-focus focus-visible:outline-offset-2",
-              fullWidth && "flex-1",
               isSelected ? activeTabStyle : inactiveTabStyle,
               option.disabled
                 ? "opacity-45 cursor-not-allowed"
