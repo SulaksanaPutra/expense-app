@@ -6,10 +6,71 @@ import {
   updateGroupRecurringRule,
 } from "@/lib/groups/ledger-guards";
 import { createClient } from "@/lib/supabase/server";
-import type { SplitMode } from "@/types/database";
+import type { RecurringFrequency, SplitMode } from "@/types/database";
 
 interface RouteContext {
   params: Promise<{ groupId: string }>;
+}
+
+export async function GET(_request: NextRequest, context: RouteContext) {
+  if (!hasSupabaseEnv()) {
+    return NextResponse.json(
+      { error: "Supabase environment is not configured." },
+      { status: 503 },
+    );
+  }
+
+  const { groupId } = await context.params;
+  if (!groupId || !groupId.trim()) {
+    return NextResponse.json(
+      { error: "Group ID is required." },
+      { status: 400 },
+    );
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !user) {
+    return NextResponse.json(
+      { error: "Authentication required." },
+      { status: 401 },
+    );
+  }
+
+  const { data: membership } = await supabase
+    .from("group_members")
+    .select("status")
+    .eq("group_id", groupId.trim())
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (!membership) {
+    return NextResponse.json(
+      { error: "You are not a member of this split group." },
+      { status: 403 },
+    );
+  }
+
+  const { data: rules, error: rulesError } = await supabase
+    .from("recurring_rules")
+    .select(
+      "id, group_id, created_by, paid_by, description, category, amount_cents, currency, frequency, day_of_month, split_rule, is_active, next_run_date, created_at, updated_at",
+    )
+    .eq("group_id", groupId.trim())
+    .order("day_of_month", { ascending: true });
+
+  if (rulesError) {
+    return NextResponse.json(
+      { error: rulesError.message || "Unable to load recurring rules." },
+      { status: 500 },
+    );
+  }
+
+  return NextResponse.json({ ok: true, rules: rules ?? [] }, { status: 200 });
 }
 
 export async function POST(request: NextRequest, context: RouteContext) {
@@ -68,6 +129,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
     category:
       typeof record.category === "string" ? record.category : "General",
     amountCents: Number(record.amount_cents),
+    frequency:
+      typeof record.frequency === "string"
+        ? (record.frequency as RecurringFrequency)
+        : undefined,
     dayOfMonth: Number(record.day_of_month ?? 1),
     splitRule:
       typeof record.split_rule === "string"
@@ -76,7 +141,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     nextRunDate:
       typeof record.next_run_date === "string"
         ? record.next_run_date
-        : new Date().toISOString().slice(0, 10),
+        : undefined,
   });
 
   if (!result.ok) {
@@ -156,6 +221,25 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         : undefined,
     description:
       typeof record.description === "string" ? record.description : undefined,
+    category:
+      typeof record.category === "string" ? record.category : undefined,
+    frequency:
+      typeof record.frequency === "string"
+        ? (record.frequency as RecurringFrequency)
+        : undefined,
+    dayOfMonth:
+      record.day_of_month !== undefined
+        ? Number(record.day_of_month)
+        : undefined,
+    splitRule:
+      typeof record.split_rule === "string"
+        ? (record.split_rule as SplitMode)
+        : undefined,
+    paidBy: typeof record.paid_by === "string" ? record.paid_by : undefined,
+    nextRunDate:
+      typeof record.next_run_date === "string"
+        ? record.next_run_date
+        : undefined,
   });
 
   if (!result.ok) {
