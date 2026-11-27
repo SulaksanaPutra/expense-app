@@ -194,8 +194,8 @@ export function TopBar({ mobileMenuButtonRef }: TopBarProps) {
                 options={cycleOptions}
                 value={cycle}
                 onChange={setCycle}
-                containerClassName="shrink-0"
-                className="h-7 w-[114px] border-transparent bg-transparent !px-2 text-[11px] font-semibold tracking-tight text-ink hover:bg-canvas sm:w-auto sm:!px-2.5 sm:text-[12px]"
+                containerClassName="min-w-0 flex-1 sm:flex-none"
+                className="h-7 w-full min-w-0 max-w-full border-transparent bg-transparent !px-2 text-[11px] font-semibold tracking-tight text-ink hover:bg-canvas sm:w-auto sm:!px-2.5 sm:text-[12px]"
               />
               <Button
                 type="button"
@@ -325,10 +325,9 @@ export function TopBar({ mobileMenuButtonRef }: TopBarProps) {
               aria-label="Add Expense"
               onClick={openAddExpense}
               leftIcon={<Plus className="h-4 w-4" aria-hidden="true" />}
-              className="!px-2.5 sm:!px-3.5"
+              className="!px-2 sm:!px-3.5"
             >
               <span className="hidden sm:inline">Add Expense</span>
-              <span className="sm:hidden">Add</span>
             </Button>
 
             <Dropdown
