@@ -126,13 +126,20 @@ export function computePercentageSplit(params: {
   amountCents: number;
   paidBy: string;
   participants: readonly PercentageParticipantInput[];
+  allowNegative?: boolean;
 }): SplitComputationResult {
   const safeAmount = Math.trunc(params.amountCents);
-  if (!Number.isSafeInteger(safeAmount) || safeAmount <= 0) {
+  if (
+    !Number.isSafeInteger(safeAmount) ||
+    safeAmount === 0 ||
+    (!params.allowNegative && safeAmount < 0)
+  ) {
     return {
       ok: false,
       code: "INVALID_AMOUNT",
-      message: "Expense amount must be a positive integer in minor units.",
+      message: params.allowNegative
+        ? "Expense amount must be a non-zero integer in minor units."
+        : "Expense amount must be a positive integer in minor units.",
     };
   }
 
@@ -242,13 +249,20 @@ export function computePercentageSplit(params: {
 export function computeExactSplit(params: {
   amountCents: number;
   participants: readonly ExactParticipantInput[];
+  allowNegative?: boolean;
 }): SplitComputationResult {
   const safeAmount = Math.trunc(params.amountCents);
-  if (!Number.isSafeInteger(safeAmount) || safeAmount <= 0) {
+  if (
+    !Number.isSafeInteger(safeAmount) ||
+    safeAmount === 0 ||
+    (!params.allowNegative && safeAmount < 0)
+  ) {
     return {
       ok: false,
       code: "INVALID_AMOUNT",
-      message: "Expense amount must be a positive integer in minor units.",
+      message: params.allowNegative
+        ? "Expense amount must be a non-zero integer in minor units."
+        : "Expense amount must be a positive integer in minor units.",
     };
   }
 
@@ -282,11 +296,18 @@ export function computeExactSplit(params: {
     seen.add(entry.userId);
 
     const shareCents = entry.shareCents;
-    if (!Number.isSafeInteger(shareCents) || shareCents < 0) {
+    if (
+      !Number.isSafeInteger(shareCents) ||
+      (safeAmount > 0 && shareCents < 0) ||
+      (safeAmount < 0 && shareCents > 0)
+    ) {
       return {
         ok: false,
         code: "INVALID_SHARE",
-        message: "Exact split amounts must be non-negative integer minor units.",
+        message:
+          safeAmount < 0
+            ? "Exact split amounts for negative adjustments must be zero or negative integer minor units."
+            : "Exact split amounts must be non-negative integer minor units.",
       };
     }
 

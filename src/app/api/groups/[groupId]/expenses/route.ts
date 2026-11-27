@@ -156,6 +156,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
         : null,
     receiptUrl:
       typeof record.receipt_url === "string" ? record.receipt_url : null,
+    adjustmentForExpenseId:
+      typeof record.adjustment_for_expense_id === "string" &&
+      record.adjustment_for_expense_id.trim()
+        ? record.adjustment_for_expense_id.trim()
+        : null,
   });
 
   if (!result.ok) {
