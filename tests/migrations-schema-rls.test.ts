@@ -229,4 +229,23 @@ describe("Supabase Postgres Schema & RLS Migrations", () => {
       /CREATE OR REPLACE FUNCTION public\.materialize_due_recurring_rules/i,
     );
   });
+
+  it("enables supabase_realtime publication on notifications and ledger tables", () => {
+    expect(fullSql).toMatch(
+      /ALTER TABLE public\.notifications REPLICA IDENTITY FULL/i,
+    );
+    expect(fullSql).toMatch(/pubname = 'supabase_realtime'/i);
+    for (const table of [
+      "notifications",
+      "expenses",
+      "expense_revisions",
+      "settlements",
+      "billing_cycles",
+      "groups",
+      "group_members",
+      "recurring_rules",
+    ]) {
+      expect(fullSql).toContain(`'${table}'`);
+    }
+  });
 });

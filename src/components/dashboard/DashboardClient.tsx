@@ -55,8 +55,15 @@ import {
   RecordSettlementModal,
   getSettlementDebtKey,
 } from "@/components/expenses";
-import { LiveSyncPill, useActiveGroup } from "@/components/shell";
-import type { ShellGroupSummary } from "@/components/shell/types";
+import {
+  LiveSyncPill,
+  REALTIME_LEDGER_CHANGE_EVENT,
+  useActiveGroup,
+} from "@/components/shell";
+import type {
+  RealtimeLedgerChangeDetail,
+  ShellGroupSummary,
+} from "@/components/shell/types";
 import { ALL_GROUPS_VALUE, formatCycleLabel } from "@/components/shell/url-state";
 import {
   computeExpensesKpiSummary,
@@ -502,6 +509,62 @@ export function DashboardClient({
     return () =>
       window.removeEventListener("ledgersplit:expense-created", handleCreated);
   }, [effectiveGroups]);
+
+  React.useEffect(() => {
+    const handleRealtimeChange = (event: Event) => {
+      const detail = (event as CustomEvent<RealtimeLedgerChangeDetail>).detail;
+      if (!detail) return;
+      if (detail.table === "expenses") {
+        const expId =
+          (typeof detail.newRow?.id === "string" && detail.newRow.id) ||
+          (typeof detail.oldRow?.id === "string" && detail.oldRow.id) ||
+          null;
+        if (!expId) return;
+        const isSoftDeleted =
+          detail.eventType === "DELETE" ||
+          (detail.newRow?.deleted_at !== undefined &&
+            detail.newRow?.deleted_at !== null);
+        if (isSoftDeleted) {
+          setDeletedExpenseIds((prev) =>
+            prev.includes(expId) ? prev : [...prev, expId],
+          );
+          setAddedExpenses((prev) => prev.filter((item) => item.id !== expId));
+          setEditedExpenses((prev) => {
+            if (!(expId in prev)) return prev;
+            const next = { ...prev };
+            delete next[expId];
+            return next;
+          });
+        } else if (detail.eventType === "UPDATE") {
+          setEditedExpenses((prev) => {
+            if (!(expId in prev)) return prev;
+            const next = { ...prev };
+            delete next[expId];
+            return next;
+          });
+          setAddedExpenses((prev) => prev.filter((item) => item.id !== expId));
+        }
+      } else if (detail.table === "groups") {
+        const groupId =
+          typeof detail.newRow?.id === "string" ? detail.newRow.id : null;
+        if (groupId) {
+          setSimplifyOverrides((prev) => {
+            if (!(groupId in prev)) return prev;
+            const next = { ...prev };
+            delete next[groupId];
+            return next;
+          });
+        }
+      }
+    };
+
+    window.addEventListener(REALTIME_LEDGER_CHANGE_EVENT, handleRealtimeChange);
+    return () =>
+      window.removeEventListener(
+        REALTIME_LEDGER_CHANGE_EVENT,
+        handleRealtimeChange,
+      );
+  }, []);
 
   const modalGroups = React.useMemo<ShellGroupSummary[]>(() => {
     const shellById = new Map(shellGroups.map((g) => [g.id, g]));

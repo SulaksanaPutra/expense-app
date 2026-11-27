@@ -6,20 +6,9 @@ import type {
   ShellNotificationItem,
   ShellUserSummary,
 } from "@/components/shell";
+import { mapDbNotificationToShellItem } from "@/components/shell/notifications";
 import { getAuthenticatedUser, hasSupabaseEnv } from "@/lib/auth/guards";
 import { createClient } from "@/lib/supabase/server";
-
-function formatNotificationTimestamp(isoString: string): string {
-  const parsed = new Date(isoString);
-  if (Number.isNaN(parsed.getTime())) return isoString;
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZone: "UTC",
-  }).format(parsed);
-}
 
 async function loadShellContext(): Promise<{
   user: ShellUserSummary | null;
@@ -72,7 +61,9 @@ async function loadShellContext(): Promise<{
           .order("created_at", { ascending: true }),
         supabase
           .from("notifications")
-          .select("id, title, description, href, is_read, created_at")
+          .select(
+            "id, type, title, description, delta_cents, currency, href, is_read, created_at",
+          )
           .eq("user_id", authUser.id)
           .order("created_at", { ascending: false })
           .limit(25),
@@ -80,14 +71,7 @@ async function loadShellContext(): Promise<{
 
     const notifications: ShellNotificationItem[] = (
       notificationsResult?.data ?? []
-    ).map((n) => ({
-      id: n.id,
-      title: n.title,
-      description: n.description,
-      timestamp: formatNotificationTimestamp(n.created_at),
-      unread: !n.is_read,
-      href: n.href ?? undefined,
-    }));
+    ).map(mapDbNotificationToShellItem);
 
     if (profile) {
       const rawPrefs = (
