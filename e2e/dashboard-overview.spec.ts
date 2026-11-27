@@ -385,6 +385,19 @@ test.describe("Issue #84 — Dashboard (/dashboard) cycle spend vs cumulative ba
     await expect(txCard.getByText(`[E2E] Cur Trader Joe's ${tag}`)).toBeVisible();
     await expect(txCard.getByText(`[E2E] Cur Dish Soap ${tag}`)).toBeHidden();
 
+    if (!isMobile) {
+      const tableWrapperMetrics = await txCard
+        .locator("div.overflow-x-auto")
+        .first()
+        .evaluate((el) => ({
+          scrollWidth: el.scrollWidth,
+          clientWidth: el.clientWidth,
+        }));
+      expect(tableWrapperMetrics.scrollWidth).toBeLessThanOrEqual(
+        tableWrapperMetrics.clientWidth,
+      );
+    }
+
     const paginationNav = txCard.getByRole("navigation", { name: "Pagination" });
     await paginationNav.getByRole("button", { name: "Next", exact: true }).click();
     await expect(txCard.getByText(`[E2E] Cur Dish Soap ${tag}`)).toBeVisible();

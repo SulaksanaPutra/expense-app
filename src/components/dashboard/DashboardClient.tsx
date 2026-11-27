@@ -1854,8 +1854,8 @@ export function DashboardClient({
                           </span>
                         )}
                       </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-3">
+                      <TableCell className="min-w-[130px] max-w-[155px]">
+                        <div className="flex items-center gap-2.5">
                           <span
                             className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-hairline bg-canvas-parchment"
                             style={{ color: getCategoryColor(exp.category) }}
@@ -1893,10 +1893,10 @@ export function DashboardClient({
                           {exp.category}
                         </Badge>
                       </TableCell>
-                      <TableCell className="whitespace-nowrap">
-                        <div className="flex items-center gap-2">
+                      <TableCell className="max-w-[125px]">
+                        <div className="flex min-w-0 items-center gap-2">
                           <Avatar name={exp.payerName} size="sm" />
-                          <span className="text-[12px] font-medium text-ink">
+                          <span className="truncate text-[12px] font-medium text-ink">
                             {isUserPayer ? "You" : exp.payerName}
                           </span>
                         </div>
