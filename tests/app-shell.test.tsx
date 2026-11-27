@@ -283,15 +283,39 @@ describe("AppShell", () => {
       { scroll: false },
     );
 
+    // Verify both prev and next billing cycle buttons render visibly without hidden wrappers
+    const cyclePickerGroup = screen.getByRole("group", {
+      name: "Billing cycle picker",
+    });
+    const prevCycleBtn = within(cyclePickerGroup).getByRole("button", {
+      name: "Previous billing cycle",
+    });
+    const nextCycleBtn = within(cyclePickerGroup).getByRole("button", {
+      name: "Next billing cycle",
+    });
+    expect(prevCycleBtn.parentElement).toBe(cyclePickerGroup);
+    expect(nextCycleBtn.parentElement).toBe(cyclePickerGroup);
+    expect(prevCycleBtn).toHaveClass("!px-0");
+    expect(nextCycleBtn).toHaveClass("!px-0");
+
     // Step Cycle Picker backward (2024-10 -> 2024-09)
-    await user.click(
-      screen.getByRole("button", { name: "Previous billing cycle" }),
-    );
+    await user.click(prevCycleBtn);
 
     expect(replaceMock).toHaveBeenLastCalledWith(
       "/dashboard?cycle=2024-09&q=groceries&group=grp-apt-4b",
       { scroll: false },
     );
+
+    // Step Cycle Picker forward (2024-09 -> 2024-10)
+    await user.click(nextCycleBtn);
+
+    expect(replaceMock).toHaveBeenLastCalledWith(
+      "/dashboard?cycle=2024-10&q=groceries&group=grp-apt-4b",
+      { scroll: false },
+    );
+
+    // Step back again so downstream nav link assertions test 2024-09
+    await user.click(prevCycleBtn);
 
     // Verify all navigation links preserve both ?group= and ?cycle=
     const nav = screen.getByRole("navigation", { name: "Primary" });

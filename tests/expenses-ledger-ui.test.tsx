@@ -253,6 +253,19 @@ describe("ExpensesClient & Global Cmd+K Search", () => {
         screen.queryByText("Trader Joe's Basket #1"),
       ).not.toBeInTheDocument();
 
+      // Category filter pills and sort listbox sit side-by-side inside a shared group container
+      const filterSortGroup = screen.getByTestId("expenses-filter-sort-group");
+      expect(filterSortGroup).toHaveClass("flex-wrap", "items-center");
+      expect(filterSortGroup).not.toHaveClass("justify-between");
+      const categoryGroup = within(filterSortGroup).getByRole("group", {
+        name: "Filter by category",
+      });
+      const sortButton = within(filterSortGroup).getByRole("button", {
+        name: /Sort transactions/i,
+      });
+      expect(categoryGroup).toBeInTheDocument();
+      expect(sortButton).toBeInTheDocument();
+
       // Clear search, filter by Utilities category chip
       await user.click(screen.getByRole("button", { name: "Clear search" }));
       await user.click(screen.getByRole("button", { name: /Utilities/i }));

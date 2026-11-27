@@ -1731,7 +1731,7 @@ export function ExpensesClient({
           <Card
             variant="section"
             padding="sm"
-            className="flex flex-col justify-between gap-3 lg:flex-row lg:items-center"
+            className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"
           >
             <SearchInput
               ref={searchInputRef}
@@ -1742,69 +1742,74 @@ export function ExpensesClient({
               onClear={() => handleSearchChange("")}
               placeholder="Search merchant, category, payer, or group..."
               shortcut="/"
-              containerClassName="w-full lg:max-w-sm"
+              containerClassName="w-full lg:max-w-sm lg:flex-1"
             />
 
             <div
-              role="group"
-              aria-label="Filter by category"
-              className="flex flex-wrap items-center gap-1.5"
+              data-testid="expenses-filter-sort-group"
+              className="flex flex-wrap items-center gap-2 sm:gap-3 lg:justify-end"
             >
-              <Button
-                type="button"
-                size="sm"
-                variant={selectedCategory === "all" ? "primary" : "secondary"}
-                onClick={() => handleCategoryChange("all")}
-                className="h-8 px-3 text-[12px]"
+              <div
+                role="group"
+                aria-label="Filter by category"
+                className="flex flex-wrap items-center gap-1.5"
               >
-                All
-              </Button>
-              {categoryChipList.map(({ category, amountCents }) => {
-                const isSelected = selectedCategory === category;
-                return (
-                  <Button
-                    key={category}
-                    type="button"
-                    size="sm"
-                    variant={isSelected ? "primary" : "secondary"}
-                    onClick={() =>
-                      handleCategoryChange(isSelected ? "all" : category)
-                    }
-                    className="h-8 gap-1.5 px-3 text-[12px]"
-                  >
-                    <span
-                      aria-hidden="true"
-                      className="h-1.5 w-1.5 shrink-0 rounded-full"
-                      style={{
-                        backgroundColor: isSelected
-                          ? "#ffffff"
-                          : getCategoryColor(category),
-                      }}
-                    />
-                    <span>{category}</span>
-                    <span
-                      className={
-                        isSelected
-                          ? "text-white/85 tabular-nums"
-                          : "text-ink-muted-48 tabular-nums"
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={selectedCategory === "all" ? "primary" : "secondary"}
+                  onClick={() => handleCategoryChange("all")}
+                  className="h-8 px-3 text-[12px]"
+                >
+                  All
+                </Button>
+                {categoryChipList.map(({ category, amountCents }) => {
+                  const isSelected = selectedCategory === category;
+                  return (
+                    <Button
+                      key={category}
+                      type="button"
+                      size="sm"
+                      variant={isSelected ? "primary" : "secondary"}
+                      onClick={() =>
+                        handleCategoryChange(isSelected ? "all" : category)
                       }
+                      className="h-8 gap-1.5 px-3 text-[12px]"
                     >
-                      {formatMinorUnits(amountCents, kpi.displayCurrency)}
-                    </span>
-                  </Button>
-                );
-              })}
-            </div>
+                      <span
+                        aria-hidden="true"
+                        className="h-1.5 w-1.5 shrink-0 rounded-full"
+                        style={{
+                          backgroundColor: isSelected
+                            ? "#ffffff"
+                            : getCategoryColor(category),
+                        }}
+                      />
+                      <span>{category}</span>
+                      <span
+                        className={
+                          isSelected
+                            ? "text-white/85 tabular-nums"
+                            : "text-ink-muted-48 tabular-nums"
+                        }
+                      >
+                        {formatMinorUnits(amountCents, kpi.displayCurrency)}
+                      </span>
+                    </Button>
+                  );
+                })}
+              </div>
 
-            <div className="shrink-0 self-end lg:self-center">
-              <Select
-                aria-label="Sort transactions"
-                variant="pill-select"
-                options={SORT_OPTIONS}
-                value={sortBy}
-                onChange={handleSortChange}
-                className="h-9 bg-canvas-parchment text-[12px] font-medium"
-              />
+              <div className="shrink-0">
+                <Select
+                  aria-label="Sort transactions"
+                  variant="pill-select"
+                  options={SORT_OPTIONS}
+                  value={sortBy}
+                  onChange={handleSortChange}
+                  className="!h-9 bg-canvas-parchment text-[12px] font-medium"
+                />
+              </div>
             </div>
           </Card>
 

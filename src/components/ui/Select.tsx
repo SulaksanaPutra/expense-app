@@ -27,6 +27,7 @@ export interface SelectProps {
   searchPlaceholder?: string;
   disabled?: boolean;
   id?: string;
+  selectedLabel?: React.ReactNode;
   className?: string;
   containerClassName?: string;
   "aria-label"?: string;
@@ -45,6 +46,7 @@ export function Select({
   searchPlaceholder = "Search options...",
   disabled = false,
   id,
+  selectedLabel,
   className,
   containerClassName,
   "aria-label": ariaLabel,
@@ -253,7 +255,7 @@ export function Select({
               !selectedOption && "text-ink-muted-48",
             )}
           >
-            {selectedOption ? selectedOption.label : placeholder}
+            {selectedLabel ?? (selectedOption ? selectedOption.label : placeholder)}
           </span>
         </span>
         <ChevronDown
