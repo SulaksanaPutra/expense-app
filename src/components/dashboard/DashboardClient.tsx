@@ -304,11 +304,33 @@ export function DashboardClient({
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  // Merge initialGroups with local simplifyOverrides for immediate reactive updates
+  const shellInstantTag = shellUser?.instantSettlementTag;
+
+  // Merge initialGroups with shellGroups & local simplifyOverrides for immediate reactive updates
   const effectiveGroups = React.useMemo<ExpenseGroupInfo[]>(() => {
+    const shellById = new Map(shellGroups.map((sg) => [sg.id, sg]));
     const baseGroups: ExpenseGroupInfo[] =
       initialGroups.length > 0
-        ? initialGroups
+        ? initialGroups.map((g) => {
+            const sg = shellById.get(g.id);
+            const nextMembers =
+              shellInstantTag !== undefined
+                ? g.members.map((m) =>
+                    m.userId === currentUserId
+                      ? {
+                          ...m,
+                          instantSettlementTag: shellInstantTag ?? null,
+                        }
+                      : m,
+                  )
+                : g.members;
+            return {
+              ...g,
+              defaultSplitMode: sg?.defaultSplitMode ?? g.defaultSplitMode,
+              simplifyDebts: sg?.simplifyDebts ?? g.simplifyDebts,
+              members: nextMembers,
+            };
+          })
         : shellGroups.map((sg) => ({
             id: sg.id,
             name: sg.name,
@@ -316,7 +338,7 @@ export function DashboardClient({
             status: sg.status,
             baseCurrency: sg.baseCurrency,
             defaultSplitMode: sg.defaultSplitMode ?? "EQUAL",
-            simplifyDebts: true,
+            simplifyDebts: sg.simplifyDebts ?? true,
             operationalBudgetCents: null,
             billingCycleAnchorDay: 1,
             currentUserRole: null,
@@ -325,7 +347,8 @@ export function DashboardClient({
               userId: m.id,
               name: m.name,
               status: "ACTIVE",
-              instantSettlementTag: null,
+              instantSettlementTag:
+                m.id === currentUserId ? (shellInstantTag ?? null) : null,
             })),
           }));
 
@@ -334,7 +357,13 @@ export function DashboardClient({
         ? { ...g, simplifyDebts: simplifyOverrides[g.id] }
         : g,
     );
-  }, [initialGroups, shellGroups, simplifyOverrides]);
+  }, [
+    currentUserId,
+    initialGroups,
+    shellGroups,
+    shellInstantTag,
+    simplifyOverrides,
+  ]);
 
   const settlements = React.useMemo(() => {
     const byId = new Map<string, ExpenseSettlementRecord>();
@@ -1993,6 +2022,8 @@ export function DashboardClient({
         debts={settleableDebts}
         currentUserId={currentUserId}
         initialDebtKey={selectedDebtKey}
+        defaultPaymentRail={shellUser?.defaultPaymentRail}
+        currentUserInstantTag={shellUser?.instantSettlementTag}
         onSettled={(settlement) => {
           setAddedSettlements((prev) => [
             {
