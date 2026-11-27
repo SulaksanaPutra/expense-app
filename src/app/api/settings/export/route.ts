@@ -3,11 +3,29 @@ import { hasSupabaseEnv } from "@/lib/auth/guards";
 import { buildFullLedgerExport } from "@/lib/settings/service";
 import { createClient } from "@/lib/supabase/server";
 
+/**
+ * Export full ledger history across all user groups in RFC-4180 CSV or JSON.
+ *
+ * Query params: `format` (`csv` | `json`).
+ */
 export async function GET(request: NextRequest) {
   if (!hasSupabaseEnv()) {
     return NextResponse.json(
       { error: "Supabase environment is not configured." },
       { status: 503 },
+    );
+  }
+
+  const rawFormat = (
+    request.nextUrl.searchParams.get("format") ?? "csv"
+  )
+    .trim()
+    .toLowerCase();
+
+  if (rawFormat !== "csv" && rawFormat !== "json") {
+    return NextResponse.json(
+      { error: "Export format must be 'csv' or 'json'." },
+      { status: 400 },
     );
   }
 
@@ -24,23 +42,19 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const format =
-    request.nextUrl.searchParams.get("format")?.toLowerCase() === "json"
-      ? "json"
-      : "csv";
-
   const result = await buildFullLedgerExport(supabase, user.id);
   if (!result.ok) {
     return NextResponse.json({ error: result.message }, { status: 500 });
   }
 
-  if (format === "json") {
+  if (rawFormat === "json") {
     return new NextResponse(result.json, {
       status: 200,
       headers: {
         "Content-Type": "application/json; charset=utf-8",
         "Content-Disposition":
           'attachment; filename="ledgersplit-full-ledger-history.json"',
+        "Cache-Control": "no-store",
       },
     });
   }
@@ -51,6 +65,7 @@ export async function GET(request: NextRequest) {
       "Content-Type": "text/csv; charset=utf-8",
       "Content-Disposition":
         'attachment; filename="ledgersplit-full-ledger-history.csv"',
+      "Cache-Control": "no-store",
     },
   });
 }

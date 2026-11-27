@@ -71,7 +71,6 @@ import {
 } from "@/lib/expenses/recurring";
 import { EXPENSE_CATEGORIES } from "@/lib/expenses/split-engine";
 import {
-  buildExpensesCsv,
   computeExpensesKpiSummary,
   computePerGroupDebtEdges,
   evaluateExpenseLockAndSettlement,
@@ -1069,9 +1068,8 @@ export function ExpensesClient({
   }, [kpi.categoryTotals, selectedCategory]);
 
   const handleExportCsv = () => {
-    const csv = buildExpensesCsv(filteredExpenses, currentUserId);
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
+    const scopeParam = activeGroupId || ALL_GROUPS_VALUE;
+    const url = `/api/expenses/export?group=${encodeURIComponent(scopeParam)}&cycle=${encodeURIComponent(cycle)}&format=csv`;
     const link = document.createElement("a");
     link.href = url;
     const scopeLabel = activeGroup?.slug ?? "all-groups";
@@ -1079,11 +1077,10 @@ export function ExpensesClient({
     document.body.appendChild(link);
     link.click();
     link.remove();
-    URL.revokeObjectURL(url);
     pushToast({
       tone: "success",
-      title: "CSV exported",
-      description: `Downloaded ${filteredExpenses.length} ${filteredExpenses.length === 1 ? "transaction" : "transactions"} for ${formatCycleLabel(cycle)}.`,
+      title: "CSV export started",
+      description: `Downloading ${activeGroup ? activeGroup.name : "All Groups"} transactions for ${formatCycleLabel(cycle)}.`,
     });
   };
 

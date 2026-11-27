@@ -1,11 +1,23 @@
 import { createHmac, randomInt, timingSafeEqual } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { buildExpensesCsv, type ExpenseLedgerRecord } from "@/lib/expenses/ledger";
+import {
+  buildFullLedgerCsv,
+  evaluateExpenseLockAndSettlement,
+  getUserShareCents,
+  type ExpenseBillingCycleRecord,
+  type ExpenseLedgerRecord,
+  type ExpenseSettlementRecord,
+  type FullLedgerCsvSettlementItem,
+} from "@/lib/expenses/ledger";
 import { RECEIPT_STORAGE_QUOTA_BYTES } from "@/lib/expenses/split-engine";
 import { computeEqualSharePercentages } from "@/lib/groups/invite-utils";
 import { updateGroupSimplifyDebts } from "@/lib/groups/service";
 import { getInviteSigningSecret } from "@/lib/groups/invite-token";
-import { isValidCurrencyCode } from "@/lib/money";
+import {
+  formatMinorUnits,
+  formatMinorUnitsDecimal,
+  isValidCurrencyCode,
+} from "@/lib/money";
 import type {
   Database,
   ExpenseSplitMethod,
@@ -1166,9 +1178,49 @@ export async function buildFullLedgerExport(
   csv: string;
   json: string;
 } | { ok: false; message: string }> {
+  const { data: membershipRows, error: memErr } = await supabase
+    .from("group_members")
+    .select("group_id")
+    .eq("user_id", userId);
+
+  if (memErr) {
+    return {
+      ok: false,
+      message: memErr.message || "Unable to verify group memberships for export.",
+    };
+  }
+
+  const memberGroupIds = Array.from(
+    new Set((membershipRows ?? []).map((m) => m.group_id)),
+  );
+
+  if (memberGroupIds.length === 0) {
+    const emptyJson = JSON.stringify(
+      {
+        exportedAt: new Date().toISOString(),
+        userId,
+        groups: [],
+        expenses: [],
+        settlements: [],
+      },
+      null,
+      2,
+    );
+    return {
+      ok: true,
+      csv: buildFullLedgerCsv({
+        expenses: [],
+        settlements: [],
+        currentUserId: userId,
+      }),
+      json: emptyJson,
+    };
+  }
+
   const { data: groups, error: groupErr } = await supabase
     .from("groups")
     .select("id, name, slug, group_type, status, base_currency, billing_cycle_anchor_day")
+    .in("id", memberGroupIds)
     .order("created_at", { ascending: true });
 
   if (groupErr) {
@@ -1195,25 +1247,38 @@ export async function buildFullLedgerExport(
     );
     return {
       ok: true,
-      csv: buildExpensesCsv([], userId),
+      csv: buildFullLedgerCsv({
+        expenses: [],
+        settlements: [],
+        currentUserId: userId,
+      }),
       json: emptyJson,
     };
   }
 
-  const [{ data: expenseRows, error: expErr }, { data: settlementRows, error: setErr }] =
-    await Promise.all([
+  const [
+    { data: expenseRows, error: expErr },
+    { data: settlementRows, error: setErr },
+    billingCyclesRes,
+  ] = await Promise.all([
+    supabase
+      .from("expenses")
+      .select("*")
+      .in("group_id", groupIds)
+      .is("deleted_at", null)
+      .order("expense_date", { ascending: false }),
+    supabase
+      .from("settlements")
+      .select("*")
+      .in("group_id", groupIds)
+      .order("settled_at", { ascending: false }),
+    Promise.resolve(
       supabase
-        .from("expenses")
-        .select("*")
-        .in("group_id", groupIds)
-        .is("deleted_at", null)
-        .order("expense_date", { ascending: false }),
-      supabase
-        .from("settlements")
-        .select("*")
-        .in("group_id", groupIds)
-        .order("settled_at", { ascending: false }),
-    ]);
+        .from("billing_cycles")
+        .select("id, group_id, period_start, period_end, status")
+        .in("group_id", groupIds),
+    ).catch(() => ({ data: null, error: null })),
+  ]);
 
   if (expErr || setErr) {
     return {
@@ -1223,31 +1288,72 @@ export async function buildFullLedgerExport(
     };
   }
 
-  const payerIds = Array.from(
-    new Set((expenseRows ?? []).map((e) => e.paid_by)),
+  const relatedUserIds = Array.from(
+    new Set([
+      ...(expenseRows ?? []).map((e) => e.paid_by),
+      ...(settlementRows ?? []).map((s) => s.payer_id),
+      ...(settlementRows ?? []).map((s) => s.recipient_id),
+    ]),
   );
   const usersById = new Map<string, string>();
-  if (payerIds.length > 0) {
+  if (relatedUserIds.length > 0) {
     const { data: userRows } = await supabase
       .from("users")
       .select("id, full_name")
-      .in("id", payerIds);
+      .in("id", relatedUserIds);
     for (const u of userRows ?? []) {
       usersById.set(u.id, u.full_name || "Member");
     }
   }
 
   const groupMap = new Map(groupList.map((g) => [g.id, g]));
+  const billingCycles: ExpenseBillingCycleRecord[] = (
+    billingCyclesRes?.data ?? []
+  ).map((bc) => ({
+    id: bc.id,
+    groupId: bc.group_id,
+    periodStart: bc.period_start,
+    periodEnd: bc.period_end,
+    status: bc.status,
+  }));
+
+  const settlementRecords: ExpenseSettlementRecord[] = (settlementRows ?? []).map(
+    (s) => ({
+      id: s.id,
+      groupId: s.group_id,
+      payerId: s.payer_id,
+      recipientId: s.recipient_id,
+      amountCents: Math.trunc(Number(s.amount_cents)),
+      currency: s.currency,
+      settledAt: s.settled_at,
+    }),
+  );
+
   const ledgerRecords: ExpenseLedgerRecord[] = (expenseRows ?? []).map((row) => {
     const group = groupMap.get(row.group_id);
+    const baseCurrency = (group?.base_currency || row.currency || "USD").toUpperCase();
     const breakdown: SplitBreakdownItem[] = Array.isArray(row.split_breakdown)
       ? (row.split_breakdown as unknown as SplitBreakdownItem[])
       : [];
+    const lockEval = evaluateExpenseLockAndSettlement({
+      expense: {
+        id: row.id,
+        groupId: row.group_id,
+        paidBy: row.paid_by,
+        expenseDate: row.expense_date,
+        isLocked: Boolean(row.is_locked),
+        splitBreakdown: breakdown,
+      },
+      currentUserId: userId,
+      billingCycles,
+      settlements: settlementRecords,
+    });
+
     return {
       id: row.id,
       groupId: row.group_id,
       groupName: group?.name ?? "Split Group",
-      groupBaseCurrency: group?.base_currency ?? row.currency,
+      groupBaseCurrency: baseCurrency,
       groupBillingAnchorDay: group?.billing_cycle_anchor_day ?? 1,
       createdBy: row.created_by,
       paidBy: row.paid_by,
@@ -1255,15 +1361,18 @@ export async function buildFullLedgerExport(
       description: row.description,
       category: row.category,
       expenseDate: row.expense_date,
-      amountCents: Number(row.amount_cents),
-      currency: row.currency,
+      amountCents: Math.trunc(Number(row.amount_cents)),
+      currency: baseCurrency,
       originalAmountCents:
-        row.original_amount_cents !== null
-          ? Number(row.original_amount_cents)
+        row.original_amount_cents !== null &&
+        row.original_amount_cents !== undefined
+          ? Math.trunc(Number(row.original_amount_cents))
           : null,
       originalCurrency: row.original_currency ?? null,
       exchangeRate:
-        row.exchange_rate !== null ? Number(row.exchange_rate) : null,
+        row.exchange_rate !== null && row.exchange_rate !== undefined
+          ? Number(row.exchange_rate)
+          : null,
       exchangeRateSource: row.exchange_rate_source ?? null,
       splitMethod: row.split_method,
       splitBreakdown: breakdown,
@@ -1271,21 +1380,117 @@ export async function buildFullLedgerExport(
       isRecurringGenerated: Boolean(row.is_recurring_generated),
       recurringRuleId: row.recurring_rule_id ?? null,
       adjustmentForExpenseId: row.adjustment_for_expense_id ?? null,
-      isLocked: Boolean(row.is_locked),
-      isCycleClosed: false,
-      isSettledByWatermark: false,
-      isSettledForUser: false,
+      isLocked: lockEval.isLocked,
+      isCycleClosed: lockEval.isCycleClosed,
+      isSettledByWatermark: lockEval.isSettledByWatermark,
+      isSettledForUser: lockEval.isSettledForUser,
     };
   });
 
-  const csv = buildExpensesCsv(ledgerRecords, userId);
+  const csvSettlements: FullLedgerCsvSettlementItem[] = (settlementRows ?? []).map(
+    (s) => {
+      const group = groupMap.get(s.group_id);
+      const baseCurrency = (group?.base_currency || s.currency || "USD").toUpperCase();
+      return {
+        id: s.id,
+        groupId: s.group_id,
+        groupName: group?.name ?? "Split Group",
+        groupBaseCurrency: baseCurrency,
+        payerId: s.payer_id,
+        payerName: usersById.get(s.payer_id) ?? "Member",
+        recipientId: s.recipient_id,
+        recipientName: usersById.get(s.recipient_id) ?? "Member",
+        amountCents: Math.trunc(Number(s.amount_cents)),
+        paymentRail: s.payment_rail,
+        settledAt: s.settled_at,
+      };
+    },
+  );
+
+  const csv = buildFullLedgerCsv({
+    expenses: ledgerRecords,
+    settlements: csvSettlements,
+    currentUserId: userId,
+  });
+
+  const ledgerById = new Map(ledgerRecords.map((r) => [r.id, r]));
+  const jsonExpenses = (expenseRows ?? []).map((row) => {
+    const ledger = ledgerById.get(row.id);
+    const group = groupMap.get(row.group_id);
+    const baseCurrency = (group?.base_currency || row.currency || "USD").toUpperCase();
+    const amountCents = Math.trunc(Number(row.amount_cents));
+    const shareCents = ledger ? getUserShareCents(ledger, userId) : 0;
+    const status = ledger?.isLocked
+      ? "LOCKED"
+      : ledger?.isSettledForUser
+        ? "Settled"
+        : "Pending";
+    const origMinor =
+      row.original_amount_cents !== null &&
+      row.original_amount_cents !== undefined
+        ? Math.trunc(Number(row.original_amount_cents))
+        : null;
+    const origCurrency = row.original_currency
+      ? row.original_currency.toUpperCase()
+      : null;
+
+    return {
+      ...row,
+      amount_cents: amountCents,
+      currency: baseCurrency,
+      base_currency: baseCurrency,
+      group_name: group?.name ?? "Split Group",
+      payer_name: usersById.get(row.paid_by) ?? "Member",
+      amount_formatted: formatMinorUnits(amountCents, baseCurrency),
+      amount_decimal: formatMinorUnitsDecimal(amountCents, baseCurrency),
+      your_share_cents: shareCents,
+      your_share_formatted: formatMinorUnits(shareCents, baseCurrency),
+      your_share_decimal: formatMinorUnitsDecimal(shareCents, baseCurrency),
+      status,
+      fx_audit:
+        origMinor !== null && origCurrency
+          ? {
+              original_amount_cents: origMinor,
+              original_amount_formatted: formatMinorUnits(origMinor, origCurrency),
+              original_amount_decimal: formatMinorUnitsDecimal(
+                origMinor,
+                origCurrency,
+              ),
+              original_currency: origCurrency,
+              exchange_rate:
+                row.exchange_rate !== null && row.exchange_rate !== undefined
+                  ? Number(row.exchange_rate)
+                  : null,
+              exchange_rate_source: row.exchange_rate_source ?? null,
+            }
+          : null,
+    };
+  });
+
+  const jsonSettlements = (settlementRows ?? []).map((s) => {
+    const group = groupMap.get(s.group_id);
+    const baseCurrency = (group?.base_currency || s.currency || "USD").toUpperCase();
+    const amountCents = Math.trunc(Number(s.amount_cents));
+    return {
+      ...s,
+      amount_cents: amountCents,
+      currency: baseCurrency,
+      base_currency: baseCurrency,
+      group_name: group?.name ?? "Split Group",
+      payer_name: usersById.get(s.payer_id) ?? "Member",
+      recipient_name: usersById.get(s.recipient_id) ?? "Member",
+      amount_formatted: formatMinorUnits(amountCents, baseCurrency),
+      amount_decimal: formatMinorUnitsDecimal(amountCents, baseCurrency),
+    };
+  });
+
   const json = JSON.stringify(
     {
       exportedAt: new Date().toISOString(),
       userId,
       groups: groupList,
-      expenses: expenseRows ?? [],
-      settlements: settlementRows ?? [],
+      expenses: jsonExpenses,
+      settlements: jsonSettlements,
     },
     null,
     2,

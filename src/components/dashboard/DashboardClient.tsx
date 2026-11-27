@@ -59,7 +59,6 @@ import { LiveSyncPill, useActiveGroup } from "@/components/shell";
 import type { ShellGroupSummary } from "@/components/shell/types";
 import { ALL_GROUPS_VALUE, formatCycleLabel } from "@/components/shell/url-state";
 import {
-  buildExpensesCsv,
   computeExpensesKpiSummary,
   computePerGroupDebtEdges,
   evaluateExpenseLockAndSettlement,
@@ -1074,21 +1073,19 @@ export function DashboardClient({
   );
 
   const handleExportCsv = () => {
-    const csv = buildExpensesCsv(visibleExpenses, currentUserId);
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
+    const scopeParam = activeGroupId || ALL_GROUPS_VALUE;
+    const url = `/api/expenses/export?group=${encodeURIComponent(scopeParam)}&cycle=${encodeURIComponent(cycle)}&format=csv`;
     const link = document.createElement("a");
     link.href = url;
     const scopeLabel = activeGroup?.slug ?? "all-groups";
-    link.download = `ledgersplit-dashboard-${scopeLabel}-${cycle}.csv`;
+    link.download = `ledgersplit-${scopeLabel}-${cycle}.csv`;
     document.body.appendChild(link);
     link.click();
     link.remove();
-    URL.revokeObjectURL(url);
     pushToast({
       tone: "success",
-      title: "CSV exported",
-      description: `Downloaded ${visibleExpenses.length} ${visibleExpenses.length === 1 ? "transaction" : "transactions"} for ${formatCycleLabel(cycle)}.`,
+      title: "CSV export started",
+      description: `Downloading ${activeGroup ? activeGroup.name : "All Groups"} transactions for ${formatCycleLabel(cycle)}.`,
     });
   };
 
