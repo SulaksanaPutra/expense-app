@@ -298,12 +298,14 @@ export function toShellGroupSummary(group: SplitGroupDetail): ShellGroupSummary 
     status: group.status,
     groupType: group.groupType,
     baseCurrency: group.baseCurrency,
+    defaultSplitMode: group.defaultSplitMode,
     activeSplitCount: group.cycleTransactionCount,
     members: group.members
       .filter((m) => m.status === "ACTIVE")
       .map((m) => ({
         id: m.userId,
         name: m.name,
+        sharePercentage: m.sharePercentage,
       })),
   };
 }

@@ -1,3 +1,7 @@
+import {
+  computeEqualSplit,
+  computePercentageSplit,
+} from "@/lib/expenses/split-engine";
 import type { MemberStatus, SplitBreakdownItem, SplitMode } from "@/types/database";
 
 export function buildInviteJoinPath(slug: string, token: string): string {
@@ -151,47 +155,31 @@ export function buildDefaultSplitBreakdownFromGroup(params: {
   const count = activeMembers.length;
   if (count === 0) return [];
 
-  const memberIds = activeMembers.map((m) => m.userId);
-  const equalMap =
-    defaultSplitMode === "EQUAL"
-      ? computeEqualSharePercentages(memberIds)
-      : null;
+  if (defaultSplitMode === "EQUAL") {
+    return computeEqualSplit({
+      amountCents: safeAmount,
+      paidBy,
+      participantIds: activeMembers.map((m) => m.userId),
+    });
+  }
 
-  const sharesBps = activeMembers.map((member) => {
-    const pct =
-      defaultSplitMode === "EQUAL"
-        ? (equalMap?.get(member.userId) ?? 0)
-        : member.sharePercentage;
-    return Math.max(0, Math.round(pct * 100));
+  const pctResult = computePercentageSplit({
+    amountCents: safeAmount,
+    paidBy,
+    participants: activeMembers.map((m) => ({
+      userId: m.userId,
+      percentage: m.sharePercentage,
+    })),
   });
-
-  const totalBps = sharesBps.reduce((sum, bps) => sum + bps, 0) || 10_000;
-  const flooredShares = sharesBps.map((bps) =>
-    Math.floor((safeAmount * bps) / totalBps),
-  );
-  const allocatedSum = flooredShares.reduce((sum, val) => sum + val, 0);
-  let remainder = safeAmount - allocatedSum;
-
-  const payerIndex = memberIds.indexOf(paidBy);
-  if (remainder !== 0 && payerIndex >= 0) {
-    const step = remainder > 0 ? 1 : -1;
-    flooredShares[payerIndex] += step;
-    remainder -= step;
+  if (pctResult.ok) {
+    return pctResult.breakdown;
   }
 
-  let cursor = 0;
-  while (remainder !== 0) {
-    const step = remainder > 0 ? 1 : -1;
-    flooredShares[cursor % count] += step;
-    remainder -= step;
-    cursor += 1;
-  }
-
-  return activeMembers.map((member, index) => ({
-    user_id: member.userId,
-    share_cents: flooredShares[index],
-    percentage: sharesBps[index] / 100,
-  }));
+  return computeEqualSplit({
+    amountCents: safeAmount,
+    paidBy,
+    participantIds: activeMembers.map((m) => m.userId),
+  });
 }
 
 export interface GroupMemberSplitCandidate {

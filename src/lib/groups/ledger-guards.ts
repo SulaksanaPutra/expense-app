@@ -1,6 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  validateSplitBreakdown,
+} from "@/lib/expenses/split-engine";
+import { isValidCurrencyCode } from "@/lib/money";
 import type {
   Database,
+  ExchangeRateSource,
   ExpenseSplitMethod,
   GroupStatus,
   MemberRole,
@@ -169,6 +174,11 @@ export async function createGroupExpense(
     expenseDate?: string;
     splitMethod?: ExpenseSplitMethod;
     splitBreakdown?: SplitBreakdownItem[];
+    originalAmountCents?: number | null;
+    originalCurrency?: string | null;
+    exchangeRate?: number | null;
+    exchangeRateSource?: ExchangeRateSource | null;
+    receiptUrl?: string | null;
   },
 ): Promise<
   | { ok: true; expense: Database["public"]["Tables"]["expenses"]["Row"] }
@@ -181,14 +191,100 @@ export async function createGroupExpense(
   });
   if (!guard.ok) return guard;
 
+  const trimmedDescription = params.description.trim();
+  if (!trimmedDescription) {
+    return {
+      ok: false,
+      status: 400,
+      code: "INVALID_DESCRIPTION",
+      message: "Expense description is required.",
+    };
+  }
+  if (trimmedDescription.length > 200) {
+    return {
+      ok: false,
+      status: 400,
+      code: "INVALID_DESCRIPTION",
+      message: "Expense description must be 200 characters or fewer.",
+    };
+  }
+
   const amountCents = Math.trunc(params.amountCents);
-  if (!Number.isSafeInteger(amountCents) || amountCents === 0) {
+  if (
+    !Number.isSafeInteger(params.amountCents) ||
+    !Number.isSafeInteger(amountCents) ||
+    amountCents <= 0
+  ) {
     return {
       ok: false,
       status: 400,
       code: "INVALID_AMOUNT",
-      message: "Expense amount_cents must be a non-zero integer.",
+      message: "Expense amount_cents must be a positive integer in minor units.",
     };
+  }
+
+  if (
+    params.splitMethod !== undefined &&
+    params.splitMethod !== "EQUAL" &&
+    params.splitMethod !== "PERCENTAGE" &&
+    params.splitMethod !== "EXACT"
+  ) {
+    return {
+      ok: false,
+      status: 400,
+      code: "INVALID_SPLIT_METHOD",
+      message: "Split method must be EQUAL, PERCENTAGE, or EXACT.",
+    };
+  }
+
+  // Validate FX audit completeness when foreign currency is provided
+  const hasAnyFxField =
+    params.originalAmountCents != null ||
+    (params.originalCurrency != null && params.originalCurrency.trim() !== "") ||
+    params.exchangeRate != null ||
+    params.exchangeRateSource != null;
+
+  let originalAmountCents: number | null = null;
+  let originalCurrency: string | null = null;
+  let exchangeRate: number | null = null;
+  let exchangeRateSource: ExchangeRateSource | null = null;
+
+  if (hasAnyFxField) {
+    const rawOrigCur =
+      typeof params.originalCurrency === "string"
+        ? params.originalCurrency.trim().toUpperCase()
+        : "";
+    if (rawOrigCur && rawOrigCur === guard.group.base_currency) {
+      // Base currency matches group base currency; clear redundant FX audit fields.
+      originalAmountCents = null;
+      originalCurrency = null;
+      exchangeRate = null;
+      exchangeRateSource = null;
+    } else {
+      if (
+        !isValidCurrencyCode(rawOrigCur) ||
+        typeof params.originalAmountCents !== "number" ||
+        !Number.isSafeInteger(params.originalAmountCents) ||
+        params.originalAmountCents <= 0 ||
+        typeof params.exchangeRate !== "number" ||
+        !Number.isFinite(params.exchangeRate) ||
+        params.exchangeRate <= 0 ||
+        (params.exchangeRateSource !== "API" &&
+          params.exchangeRateSource !== "MANUAL_OVERRIDE")
+      ) {
+        return {
+          ok: false,
+          status: 400,
+          code: "INVALID_FX_AUDIT",
+          message:
+            "Foreign-currency expenses require original_amount_cents, original_currency, positive exchange_rate, and exchange_rate_source.",
+        };
+      }
+      originalAmountCents = params.originalAmountCents;
+      originalCurrency = rawOrigCur;
+      exchangeRate = Number(params.exchangeRate.toFixed(6));
+      exchangeRateSource = params.exchangeRateSource;
+    }
   }
 
   const paidBy = params.paidBy ?? params.userId;
@@ -224,43 +320,9 @@ export async function createGroupExpense(
     };
   }
 
-  let splitBreakdown = params.splitBreakdown;
-  if (!splitBreakdown || splitBreakdown.length === 0) {
-    splitBreakdown = buildDefaultSplitExcludingFormerMembers({
-      amountCents,
-      paidBy,
-      defaultSplitMode: guard.group.default_split_mode,
-      members: allMembers,
-    });
-  } else {
-    const activeIds = new Set(
-      allMembers.filter((m) => m.status === "ACTIVE").map((m) => m.userId),
-    );
-    for (const part of splitBreakdown) {
-      if (!activeIds.has(part.user_id)) {
-        return {
-          ok: false,
-          status: 400,
-          code: "INVALID_SPLIT_PARTICIPANT",
-          message:
-            "Former or non-group members cannot be included in new expense splits.",
-        };
-      }
-    }
-  }
-
-  const sumCents = splitBreakdown.reduce(
-    (sum, item) => sum + Math.trunc(item.share_cents),
-    0,
-  );
-  if (sumCents !== amountCents) {
-    return {
-      ok: false,
-      status: 400,
-      code: "SPLIT_SUM_MISMATCH",
-      message: `Split breakdown (${sumCents}) must equal amount_cents (${amountCents}).`,
-    };
-  }
+  const activeIds = allMembers
+    .filter((m) => m.status === "ACTIVE")
+    .map((m) => m.userId);
 
   const splitMethod: ExpenseSplitMethod =
     params.splitMethod ??
@@ -268,19 +330,82 @@ export async function createGroupExpense(
       ? "PERCENTAGE"
       : "EQUAL");
 
+  let splitBreakdown: SplitBreakdownItem[];
+  if (!params.splitBreakdown || params.splitBreakdown.length === 0) {
+    splitBreakdown = buildDefaultSplitExcludingFormerMembers({
+      amountCents,
+      paidBy,
+      defaultSplitMode: guard.group.default_split_mode,
+      members: allMembers,
+    });
+  } else {
+    const splitValidation = validateSplitBreakdown({
+      amountCents,
+      splitMethod,
+      splitBreakdown: params.splitBreakdown,
+      activeMemberIds: activeIds,
+    });
+    if (!splitValidation.ok) {
+      return {
+        ok: false,
+        status: 400,
+        code: splitValidation.code,
+        message: splitValidation.message,
+      };
+    }
+    splitBreakdown = splitValidation.breakdown;
+  }
+
+  const finalSumCents = splitBreakdown.reduce(
+    (sum, item) => sum + Math.trunc(item.share_cents),
+    0,
+  );
+  if (finalSumCents !== amountCents) {
+    return {
+      ok: false,
+      status: 400,
+      code: "SPLIT_SUM_MISMATCH",
+      message: `Split breakdown (${finalSumCents}) must equal amount_cents (${amountCents}).`,
+    };
+  }
+
+  let expenseDateIso = new Date().toISOString();
+  if (params.expenseDate) {
+    const parsedDate = Date.parse(params.expenseDate);
+    if (Number.isNaN(parsedDate)) {
+      return {
+        ok: false,
+        status: 400,
+        code: "INVALID_DATE",
+        message: "Expense date must be a valid ISO date.",
+      };
+    }
+    expenseDateIso = new Date(parsedDate).toISOString();
+  }
+
+  const receiptUrl =
+    typeof params.receiptUrl === "string" && params.receiptUrl.trim()
+      ? params.receiptUrl.trim()
+      : null;
+
   const { data: inserted, error: insertError } = await supabase
     .from("expenses")
     .insert({
       group_id: params.groupId,
       created_by: params.userId,
       paid_by: paidBy,
-      description: params.description.trim(),
+      description: trimmedDescription,
       category: params.category.trim() || "General",
-      expense_date: params.expenseDate ?? new Date().toISOString(),
+      expense_date: expenseDateIso,
       amount_cents: amountCents,
       currency: guard.group.base_currency,
+      original_amount_cents: originalAmountCents,
+      original_currency: originalCurrency,
+      exchange_rate: exchangeRate,
+      exchange_rate_source: exchangeRateSource,
       split_method: splitMethod,
       split_breakdown: splitBreakdown,
+      receipt_url: receiptUrl,
     })
     .select("*")
     .maybeSingle();
