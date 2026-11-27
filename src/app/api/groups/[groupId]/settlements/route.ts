@@ -8,6 +8,68 @@ interface RouteContext {
   params: Promise<{ groupId: string }>;
 }
 
+export async function GET(_request: NextRequest, context: RouteContext) {
+  if (!hasSupabaseEnv()) {
+    return NextResponse.json(
+      { error: "Supabase environment is not configured." },
+      { status: 503 },
+    );
+  }
+
+  const { groupId } = await context.params;
+  if (!groupId || !groupId.trim()) {
+    return NextResponse.json(
+      { error: "Group ID is required." },
+      { status: 400 },
+    );
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !user) {
+    return NextResponse.json(
+      { error: "Authentication required." },
+      { status: 401 },
+    );
+  }
+
+  const { data: member } = await supabase
+    .from("group_members")
+    .select("user_id")
+    .eq("group_id", groupId.trim())
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (!member) {
+    return NextResponse.json(
+      { error: "You are not a member of this split group." },
+      { status: 403 },
+    );
+  }
+
+  const { data: settlements, error } = await supabase
+    .from("settlements")
+    .select("*")
+    .eq("group_id", groupId.trim())
+    .order("settled_at", { ascending: false });
+
+  if (error) {
+    return NextResponse.json(
+      { error: error.message || "Unable to load group settlements." },
+      { status: 500 },
+    );
+  }
+
+  return NextResponse.json(
+    { ok: true, settlements: settlements ?? [] },
+    { status: 200 },
+  );
+}
+
 export async function POST(request: NextRequest, context: RouteContext) {
   if (!hasSupabaseEnv()) {
     return NextResponse.json(
@@ -55,6 +117,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
   }
 
   const record = body as Record<string, unknown>;
+  const paymentRail =
+    record.payment_rail === undefined || record.payment_rail === null
+      ? "OTHER"
+      : typeof record.payment_rail === "string"
+        ? (record.payment_rail.trim().toUpperCase() as PaymentRail)
+        : ("__INVALID__" as PaymentRail);
+
   const result = await createGroupSettlement(supabase, {
     groupId: groupId.trim(),
     userId: user.id,
@@ -62,10 +131,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     recipientId:
       typeof record.recipient_id === "string" ? record.recipient_id : "",
     amountCents: Number(record.amount_cents),
-    paymentRail:
-      typeof record.payment_rail === "string"
-        ? (record.payment_rail as PaymentRail)
-        : "OTHER",
+    paymentRail,
   });
 
   if (!result.ok) {

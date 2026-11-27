@@ -52,6 +52,10 @@ export function SplitGroupCard({
 }: SplitGroupCardProps) {
   const typeMeta = GROUP_TYPE_BADGE[group.groupType];
   const isArchived = group.status === "ARCHIVED";
+  const isCurrentUserFormer = group.members.some(
+    (m) => m.isCurrentUser && m.status === "FORMER_MEMBER",
+  );
+  const canLogExpense = !isArchived && !isCurrentUserFormer;
   const activeMembers = React.useMemo(
     () => group.members.filter((m) => m.status === "ACTIVE"),
     [group.members],
@@ -76,7 +80,7 @@ export function SplitGroupCard({
       },
     ];
 
-    if (!isArchived) {
+    if (canLogExpense) {
       items.push({
         id: "quick-split",
         label: "Quick Split",
@@ -106,7 +110,7 @@ export function SplitGroupCard({
     }
 
     return items;
-  }, [group, isArchived, onCopyInviteLink, onLeaveGroup, onManageGroup, onQuickSplit]);
+  }, [canLogExpense, group, isArchived, onCopyInviteLink, onLeaveGroup, onManageGroup, onQuickSplit]);
 
   const memberCountLabel = `${activeMembers.length} ${
     activeMembers.length === 1 ? "member" : "members"
@@ -244,7 +248,7 @@ export function SplitGroupCard({
           type="button"
           variant="secondary"
           size="sm"
-          disabled={isArchived}
+          disabled={!canLogExpense}
           aria-label={`Quick Split for ${group.name}`}
           onClick={() => onQuickSplit(group.id)}
         >

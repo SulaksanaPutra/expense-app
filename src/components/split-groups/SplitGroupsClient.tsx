@@ -991,7 +991,12 @@ export function SplitGroupsClient({
                 type="button"
                 variant="secondary"
                 size="sm"
-                disabled={selectedGroup.status === "ARCHIVED"}
+                disabled={
+                  selectedGroup.status === "ARCHIVED" ||
+                  selectedGroup.members.some(
+                    (m) => m.isCurrentUser && m.status === "FORMER_MEMBER",
+                  )
+                }
                 onClick={() => handleQuickSplit(selectedGroup.id)}
               >
                 Log Expense
