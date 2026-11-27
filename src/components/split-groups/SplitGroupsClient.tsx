@@ -13,6 +13,7 @@ import {
   History,
   Home,
   Link2,
+  Lock,
   LogOut,
   Plus,
   ReceiptText,
@@ -98,6 +99,8 @@ export function SplitGroupsClient({
     string | null
   >(null);
   const [leaveTargetGroup, setLeaveTargetGroup] =
+    React.useState<SplitGroupDetail | null>(null);
+  const [closeCycleTargetGroup, setCloseCycleTargetGroup] =
     React.useState<SplitGroupDetail | null>(null);
   const [removeTarget, setRemoveTarget] = React.useState<{
     group: SplitGroupDetail;
@@ -661,6 +664,59 @@ export function SplitGroupsClient({
     }
   }, [archivePromptTarget, handleArchiveRulesSaved, pushToast]);
 
+  const handleCloseCycleConfirm = React.useCallback(async () => {
+    if (!closeCycleTargetGroup) return;
+    setActionLoading(true);
+    try {
+      const response = await fetch(
+        `/api/groups/${encodeURIComponent(closeCycleTargetGroup.id)}/billing-cycles/close`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cycle }),
+        },
+      );
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        lockedExpenseCount?: number;
+      };
+      if (!response.ok) {
+        pushToast({
+          tone: "error",
+          title: "Close cycle failed",
+          description: payload.error || "Unable to close billing cycle.",
+        });
+        setActionLoading(false);
+        return;
+      }
+
+      const lockedCount = payload.lockedExpenseCount ?? 0;
+      setGroupOverrides((prev) => ({
+        ...prev,
+        [closeCycleTargetGroup.id]: {
+          ...prev[closeCycleTargetGroup.id],
+          isCurrentCycleClosed: true,
+        },
+      }));
+      const label = formatCycleLabel(cycle);
+      pushToast({
+        tone: "success",
+        title: "Billing cycle closed & locked",
+        description: `${label} for ${closeCycleTargetGroup.name} is now CLOSED (${lockedCount} ${lockedCount === 1 ? "expense" : "expenses"} locked).`,
+      });
+      setCloseCycleTargetGroup(null);
+      setActionLoading(false);
+      router.refresh();
+    } catch {
+      pushToast({
+        tone: "error",
+        title: "Network error",
+        description: "Unable to close billing cycle. Please try again.",
+      });
+      setActionLoading(false);
+    }
+  }, [closeCycleTargetGroup, cycle, pushToast, router]);
+
   const handleSnoozeLeasePrompt = React.useCallback(
     async (group: SplitGroupDetail) => {
       if (group.currentUserRole !== "ADMIN") {
@@ -991,7 +1047,12 @@ export function SplitGroupsClient({
                 type="button"
                 variant="secondary"
                 size="sm"
-                disabled={selectedGroup.status === "ARCHIVED"}
+                disabled={
+                  selectedGroup.status === "ARCHIVED" ||
+                  selectedGroup.members.some(
+                    (m) => m.isCurrentUser && m.status === "FORMER_MEMBER",
+                  )
+                }
                 onClick={() => handleQuickSplit(selectedGroup.id)}
               >
                 Log Expense
@@ -1008,6 +1069,23 @@ export function SplitGroupsClient({
               >
                 View Ledger
               </Button>
+              {selectedGroup.currentUserRole === "ADMIN" &&
+                selectedGroup.status !== "ARCHIVED" &&
+                (selectedGroup.isCurrentCycleClosed ? (
+                  <Badge tone="warning" size="sm">
+                    Cycle Closed
+                  </Badge>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    leftIcon={<Lock className="h-3.5 w-3.5" />}
+                    onClick={() => setCloseCycleTargetGroup(selectedGroup)}
+                  >
+                    Close &amp; Lock Cycle
+                  </Button>
+                ))}
               {selectedGroup.status !== "ARCHIVED" &&
                 selectedGroup.members.some((m) => m.isCurrentUser) && (
                   <Button
@@ -1535,6 +1613,21 @@ export function SplitGroupsClient({
           loading={actionLoading}
           confirmLabel="Archive Group"
           description={`Lease ended on ${archivePromptTarget.leaseEndDate}. Archiving transitions ${archivePromptTarget.name} to ARCHIVED (read-only), blocking all new expenses, settlements, and recurring rules.`}
+        />
+      )}
+
+      {closeCycleTargetGroup && (
+        <ConfirmDialog
+          open={Boolean(closeCycleTargetGroup)}
+          onClose={() => {
+            if (!actionLoading) setCloseCycleTargetGroup(null);
+          }}
+          onConfirm={handleCloseCycleConfirm}
+          title={`Close & Lock ${cycleLabel}?`}
+          variant="danger"
+          loading={actionLoading}
+          confirmLabel="Close & Lock Cycle"
+          description={`Closing ${cycleLabel} for ${closeCycleTargetGroup.name} permanently locks all expenses in this billing period. Future corrections will require logging an Offsetting Adjustment.`}
         />
       )}
 

@@ -41,6 +41,7 @@ import {
   getCurrencyMinorDigits,
   getCurrencySymbol,
   parseCurrencyInputToMinorUnits,
+  parseSignedCurrencyInputToMinorUnits,
 } from "@/lib/money";
 import type { ExpenseLedgerRecord } from "@/lib/expenses/ledger";
 import type {
@@ -53,8 +54,9 @@ import type {
 export interface AddEditExpenseModalProps {
   open: boolean;
   onClose: () => void;
-  mode?: "create" | "edit";
+  mode?: "create" | "edit" | "adjustment";
   expense?: ExpenseLedgerRecord | null;
+  onSwitchToAdjustment?: () => void;
   groups: ShellGroupSummary[];
   activeGroupId: string;
   currentUser: ShellUserSummary | null;
@@ -300,12 +302,19 @@ function buildInitialEditState(
 
 export function AddEditExpenseModal(props: AddEditExpenseModalProps) {
   const isEditMode = props.mode === "edit" && Boolean(props.expense);
+  const isAdjustmentMode = props.mode === "adjustment" && Boolean(props.expense);
   if (!props.open) {
     return (
       <Dialog
         open={false}
         onClose={props.onClose}
-        title={isEditMode ? "Edit Expense" : "Add Expense"}
+        title={
+          isAdjustmentMode
+            ? "Log Offsetting Adjustment"
+            : isEditMode
+              ? "Edit Expense"
+              : "Add Expense"
+        }
       >
         {null}
       </Dialog>
@@ -315,7 +324,9 @@ export function AddEditExpenseModal(props: AddEditExpenseModalProps) {
   const modalKey =
     isEditMode && props.expense
       ? `edit-${props.expense.id}`
-      : `create-${props.activeGroupId}`;
+      : isAdjustmentMode && props.expense
+        ? `adjustment-${props.expense.id}`
+        : `create-${props.activeGroupId}`;
 
   return <AddEditExpenseModalInner key={modalKey} {...props} />;
 }
@@ -325,6 +336,7 @@ function AddEditExpenseModalInner({
   onClose,
   mode = "create",
   expense = null,
+  onSwitchToAdjustment,
   groups,
   activeGroupId,
   currentUser,
@@ -334,6 +346,7 @@ function AddEditExpenseModalInner({
   onUpdated,
 }: AddEditExpenseModalProps) {
   const isEditMode = mode === "edit" && expense !== null;
+  const isAdjustmentMode = mode === "adjustment" && expense !== null;
   const isLockedExpense = isEditMode && Boolean(expense?.isLocked);
 
   const formId = React.useId();
@@ -348,7 +361,7 @@ function AddEditExpenseModalInner({
     [groups],
   );
 
-  const initialGroupId = isEditMode && expense
+  const initialGroupId = (isEditMode || isAdjustmentMode) && expense
     ? expense.groupId
     : activeGroupId &&
         activeGroupId !== "all" &&
@@ -364,18 +377,41 @@ function AddEditExpenseModalInner({
     [nonArchivedGroups, selectedGroupId],
   );
 
+  const isFormerMemberInSelectedGroup =
+    selectedGroup?.currentUserStatus === "FORMER_MEMBER";
+
   const initialGroup = React.useMemo(
     () => nonArchivedGroups.find((g) => g.id === initialGroupId) ?? null,
     [initialGroupId, nonArchivedGroups],
   );
 
-  const initialEditSeed = React.useMemo(
-    () =>
-      isEditMode && expense
-        ? buildInitialEditState(initialGroup, expense, currentUser)
-        : null,
-    [currentUser, expense, initialGroup, isEditMode],
-  );
+  const initialEditSeed = React.useMemo(() => {
+    if (!expense || (!isEditMode && !isAdjustmentMode)) return null;
+    const base = buildInitialEditState(initialGroup, expense, currentUser);
+    if (!isAdjustmentMode) return base;
+
+    const baseCurrency = initialGroup?.baseCurrency ?? expense.currency;
+    const negatedExactInputs: Record<string, string> = {};
+    for (const [uid, val] of Object.entries(base.exactInputs)) {
+      if (!val) {
+        negatedExactInputs[uid] = "";
+      } else {
+        negatedExactInputs[uid] = val.startsWith("-") ? val : `-${val}`;
+      }
+    }
+
+    return {
+      ...base,
+      currency: baseCurrency,
+      exchangeRateInput: "1",
+      exchangeRateSource: "API" as ExchangeRateSource,
+      amountInput: `-${formatMinorUnitsPlain(expense.amountCents, baseCurrency)}`,
+      description: `Adjustment: ${expense.description}`.slice(0, 200),
+      expenseDate: getTodayIsoDate(),
+      exactInputs: negatedExactInputs,
+      existingReceiptUrl: null,
+    };
+  }, [currentUser, expense, initialGroup, isAdjustmentMode, isEditMode]);
 
   const initialSeed = React.useMemo(
     () => buildInitialGroupState(initialGroup, currentUser),
@@ -589,8 +625,11 @@ function AddEditExpenseModalInner({
   }, [currency, open, selectedGroup]);
 
   const parsedInputAmountCents = React.useMemo(
-    () => parseCurrencyInputToMinorUnits(amountInput, currency),
-    [amountInput, currency],
+    () =>
+      isAdjustmentMode
+        ? parseSignedCurrencyInputToMinorUnits(amountInput, currency)
+        : parseCurrencyInputToMinorUnits(amountInput, currency),
+    [amountInput, currency, isAdjustmentMode],
   );
 
   const parsedExchangeRate = React.useMemo(() => {
@@ -604,7 +643,11 @@ function AddEditExpenseModalInner({
   }, [exchangeRateInput, isForeignCurrency]);
 
   const effectiveBaseAmountCents = React.useMemo(() => {
-    if (parsedInputAmountCents === null || parsedInputAmountCents <= 0) {
+    if (
+      parsedInputAmountCents === null ||
+      parsedInputAmountCents === 0 ||
+      (!isAdjustmentMode && parsedInputAmountCents < 0)
+    ) {
       return null;
     }
     if (!isForeignCurrency) {
@@ -613,15 +656,18 @@ function AddEditExpenseModalInner({
     if (parsedExchangeRate === null) {
       return null;
     }
-    return convertForeignAmountToBaseMinorUnits({
-      originalAmountCents: parsedInputAmountCents,
+    const sign = parsedInputAmountCents < 0 ? -1 : 1;
+    const converted = convertForeignAmountToBaseMinorUnits({
+      originalAmountCents: Math.abs(parsedInputAmountCents),
       originalCurrency: currency,
       exchangeRate: parsedExchangeRate,
       baseCurrency,
     });
+    return converted === null ? null : sign * converted;
   }, [
     baseCurrency,
     currency,
+    isAdjustmentMode,
     isForeignCurrency,
     parsedExchangeRate,
     parsedInputAmountCents,
@@ -672,28 +718,30 @@ function AddEditExpenseModalInner({
     }
 
     const totalCents = effectiveBaseAmountCents ?? 0;
+    const hasValidNonZeroTotal = isAdjustmentMode ? totalCents !== 0 : totalCents > 0;
 
     if (splitMethod === "EQUAL") {
-      const breakdown =
-        totalCents > 0
-          ? computeEqualSplit({
-              amountCents: totalCents,
-              paidBy,
-              participantIds: selectedMemberIds,
-            })
-          : selectedMemberIds.map((id) => ({
-              user_id: id,
-              share_cents: 0,
-              percentage: 0,
-            }));
+      const breakdown = hasValidNonZeroTotal
+        ? computeEqualSplit({
+            amountCents: totalCents,
+            paidBy,
+            participantIds: selectedMemberIds,
+          })
+        : selectedMemberIds.map((id) => ({
+            user_id: id,
+            share_cents: 0,
+            percentage: 0,
+          }));
 
-      if (totalCents <= 0) {
+      if (!hasValidNonZeroTotal) {
         return {
           ok: false,
           breakdown,
           assignedCents: 0,
           totalBps: 0,
-          errorMessage: "Enter an expense amount greater than zero.",
+          errorMessage: isAdjustmentMode
+            ? "Enter a non-zero adjustment amount."
+            : "Enter an expense amount greater than zero.",
         };
       }
 
@@ -702,6 +750,7 @@ function AddEditExpenseModalInner({
         splitMethod: "EQUAL",
         splitBreakdown: breakdown,
         activeMemberIds: activeIds,
+        allowNegative: isAdjustmentMode,
       });
 
       return {
@@ -731,7 +780,7 @@ function AddEditExpenseModalInner({
         }
       }
 
-      if (totalCents <= 0) {
+      if (!hasValidNonZeroTotal) {
         return {
           ok: false,
           breakdown: participants.map((p) => ({
@@ -741,7 +790,9 @@ function AddEditExpenseModalInner({
           })),
           assignedCents: 0,
           totalBps,
-          errorMessage: "Enter an expense amount greater than zero.",
+          errorMessage: isAdjustmentMode
+            ? "Enter a non-zero adjustment amount."
+            : "Enter an expense amount greater than zero.",
         };
       }
 
@@ -763,6 +814,7 @@ function AddEditExpenseModalInner({
         amountCents: totalCents,
         paidBy,
         participants,
+        allowNegative: isAdjustmentMode,
       });
 
       if (!result.ok) {
@@ -803,8 +855,15 @@ function AddEditExpenseModalInner({
     for (const id of selectedMemberIds) {
       const raw = (exactInputs[id] ?? "").trim();
       const parsed =
-        raw === "" ? 0 : parseCurrencyInputToMinorUnits(raw, baseCurrency);
-      if (parsed === null || parsed < 0) {
+        raw === ""
+          ? 0
+          : isAdjustmentMode
+            ? parseSignedCurrencyInputToMinorUnits(raw, baseCurrency)
+            : parseCurrencyInputToMinorUnits(raw, baseCurrency);
+      const invalidSign =
+        parsed === null ||
+        (totalCents < 0 ? parsed > 0 : parsed < 0);
+      if (invalidSign) {
         hasInvalidExact = true;
         exactParticipants.push({ userId: id, shareCents: 0 });
       } else {
@@ -813,7 +872,7 @@ function AddEditExpenseModalInner({
       }
     }
 
-    if (totalCents <= 0) {
+    if (!hasValidNonZeroTotal) {
       return {
         ok: false,
         breakdown: exactParticipants.map((p) => ({
@@ -822,7 +881,9 @@ function AddEditExpenseModalInner({
         })),
         assignedCents: sumCents,
         totalBps: 0,
-        errorMessage: "Enter an expense amount greater than zero.",
+        errorMessage: isAdjustmentMode
+          ? "Enter a non-zero adjustment amount."
+          : "Enter an expense amount greater than zero.",
       };
     }
 
@@ -835,13 +896,17 @@ function AddEditExpenseModalInner({
         })),
         assignedCents: sumCents,
         totalBps: 0,
-        errorMessage: "Enter valid non-negative currency amounts.",
+        errorMessage:
+          totalCents < 0
+            ? "Enter valid zero or negative currency amounts."
+            : "Enter valid non-negative currency amounts.",
       };
     }
 
     const exactResult = computeExactSplit({
       amountCents: totalCents,
       participants: exactParticipants,
+      allowNegative: isAdjustmentMode,
     });
 
     if (!exactResult.ok) {
@@ -869,6 +934,7 @@ function AddEditExpenseModalInner({
     effectiveBaseAmountCents,
     exactInputs,
     groupMembers,
+    isAdjustmentMode,
     paidBy,
     percentageInputs,
     selectedGroup,
@@ -1002,10 +1068,14 @@ function AddEditExpenseModalInner({
   const isPayerValid =
     Boolean(paidBy) && groupMembers.some((m) => m.id === paidBy);
   const isAmountValid =
-    effectiveBaseAmountCents !== null && effectiveBaseAmountCents > 0;
+    effectiveBaseAmountCents !== null &&
+    (isAdjustmentMode
+      ? effectiveBaseAmountCents !== 0
+      : effectiveBaseAmountCents > 0);
 
   const isFormValid =
     !isLockedExpense &&
+    !isFormerMemberInSelectedGroup &&
     selectedGroup !== null &&
     selectedGroup.status !== "ARCHIVED" &&
     isDescriptionValid &&
@@ -1015,7 +1085,7 @@ function AddEditExpenseModalInner({
     splitEvaluation.ok &&
     (!isForeignCurrency ||
       (parsedInputAmountCents !== null &&
-        parsedInputAmountCents > 0 &&
+        parsedInputAmountCents !== 0 &&
         parsedExchangeRate !== null));
 
   const handleClose = () => {
@@ -1132,6 +1202,9 @@ function AddEditExpenseModalInner({
           exchange_rate: isForeignCurrency ? parsedExchangeRate : null,
           exchange_rate_source: isForeignCurrency ? exchangeRateSource : null,
           receipt_url: receiptUrl,
+          ...(isAdjustmentMode && expense
+            ? { adjustment_for_expense_id: expense.id }
+            : {}),
         }),
       });
 
@@ -1217,8 +1290,10 @@ function AddEditExpenseModalInner({
         return `Use up to ${digits} decimal places for ${currency}.`;
       }
     }
-    return "Enter an amount greater than 0.";
-  }, [amountInput, currency, parsedInputAmountCents, touched.amount]);
+    return isAdjustmentMode
+      ? "Enter a non-zero adjustment amount (e.g. -25.00)."
+      : "Enter an amount greater than 0.";
+  }, [amountInput, currency, isAdjustmentMode, parsedInputAmountCents, touched.amount]);
 
   const exchangeRateError = React.useMemo(() => {
     if (!isForeignCurrency || !touched.exchangeRate || parsedExchangeRate !== null) {
@@ -1242,9 +1317,13 @@ function AddEditExpenseModalInner({
   const dateError =
     touched.date && !isDateValid ? "Enter a valid YYYY-MM-DD date." : undefined;
 
-  const saveBaseLabel = isEditMode ? "Save Changes" : "Save Expense";
+  const saveBaseLabel = isAdjustmentMode
+    ? "Save Adjustment"
+    : isEditMode
+      ? "Save Changes"
+      : "Save Expense";
   const saveLabel =
-    effectiveBaseAmountCents && effectiveBaseAmountCents > 0
+    effectiveBaseAmountCents && effectiveBaseAmountCents !== 0
       ? `${saveBaseLabel} (${formatMinorUnits(effectiveBaseAmountCents, baseCurrency)})`
       : saveBaseLabel;
 
@@ -1257,15 +1336,23 @@ function AddEditExpenseModalInner({
     <Dialog
       open={open}
       onClose={handleClose}
-      title={isEditMode ? "Edit Expense" : "Add Expense"}
+      title={
+        isAdjustmentMode
+          ? "Log Offsetting Adjustment"
+          : isEditMode
+            ? "Edit Expense"
+            : "Add Expense"
+      }
       description={
-        isEditMode
-          ? selectedGroup
-            ? `Editing expense in ${selectedGroup.name} · records an ExpenseRevision snapshot`
-            : "Editing shared expense"
-          : selectedGroup
-            ? `Logging to ${selectedGroup.name} (${cycleLabel})`
-            : `Select a split group to log an expense for ${cycleLabel}`
+        isAdjustmentMode && expense
+          ? `Creating an offsetting adjustment for "${expense.description}" (${formatMinorUnits(expense.amountCents, expense.currency)})`
+          : isEditMode
+            ? selectedGroup
+              ? `Editing expense in ${selectedGroup.name} · records an ExpenseRevision snapshot`
+              : "Editing shared expense"
+            : selectedGroup
+              ? `Logging to ${selectedGroup.name} (${cycleLabel})`
+              : `Select a split group to log an expense for ${cycleLabel}`
       }
       size="lg"
       closeOnBackdropClick={!isSubmitting}
@@ -1373,6 +1460,34 @@ function AddEditExpenseModalInner({
             tone="warning"
             title="Expense is locked"
             description="This expense is covered by a closed billing cycle or pairwise settlement watermark and cannot be edited."
+            action={
+              onSwitchToAdjustment ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={onSwitchToAdjustment}
+                >
+                  Log Adjustment
+                </Button>
+              ) : undefined
+            }
+          />
+        )}
+
+        {isAdjustmentMode && expense && (
+          <AlertBanner
+            tone="info"
+            title="Offsetting Adjustment Mode"
+            description={`This entry is linked to locked expense "${expense.description}" (${formatMinorUnits(expense.amountCents, expense.currency)}). Enter a negative amount to reverse or reduce it, or a positive amount to add a correction.`}
+          />
+        )}
+
+        {isFormerMemberInSelectedGroup && (
+          <AlertBanner
+            tone="warning"
+            title="Former members cannot log expenses"
+            description="You have FORMER_MEMBER status in this group and are excluded from new splits. You can still record settlements on the Expenses page."
           />
         )}
 
@@ -1392,6 +1507,7 @@ function AddEditExpenseModalInner({
           />
         ) : (
           !isEditMode &&
+          !isAdjustmentMode &&
           (activeGroupId === "all" || nonArchivedGroups.length > 1) && (
             <Select
               label="Split Group"

@@ -17,6 +17,7 @@ import {
   Play,
   Plus,
   ReceiptText,
+  RefreshCw,
   Repeat,
   ShoppingBag,
   Sparkles,
@@ -99,7 +100,10 @@ import type {
   SplitMode,
 } from "@/types/database";
 import { AddEditExpenseModal } from "./AddEditExpenseModal";
-import { RecordSettlementModal } from "./RecordSettlementModal";
+import {
+  RecordSettlementModal,
+  getSettlementDebtKey,
+} from "./RecordSettlementModal";
 
 const PAGE_SIZE = 7;
 
@@ -284,6 +288,27 @@ export function ExpensesClient({
     Record<string, boolean>
   >({});
   const [deletedRuleIds, setDeletedRuleIds] = React.useState<string[]>([]);
+  const [addedBillingCycles, setAddedBillingCycles] = React.useState<
+    ExpenseBillingCycleRecord[]
+  >([]);
+
+  const settlements = React.useMemo(() => {
+    const byId = new Map<string, ExpenseSettlementRecord>();
+    for (const item of addedSettlements) byId.set(item.id, item);
+    for (const item of initialSettlements) {
+      if (!byId.has(item.id)) byId.set(item.id, item);
+    }
+    return Array.from(byId.values());
+  }, [addedSettlements, initialSettlements]);
+
+  const billingCycles = React.useMemo(() => {
+    const byId = new Map<string, ExpenseBillingCycleRecord>();
+    for (const bc of addedBillingCycles) byId.set(bc.id, bc);
+    for (const bc of initialBillingCycles) {
+      if (!byId.has(bc.id)) byId.set(bc.id, bc);
+    }
+    return Array.from(byId.values());
+  }, [addedBillingCycles, initialBillingCycles]);
 
   const expenses = React.useMemo(() => {
     const deletedSet = new Set(deletedExpenseIds);
@@ -296,19 +321,46 @@ export function ExpensesClient({
         byId.set(item.id, item);
       }
     }
-    return Array.from(byId.values()).map((item) =>
-      item.id in editedExpenses ? editedExpenses[item.id] : item,
-    );
-  }, [addedExpenses, deletedExpenseIds, editedExpenses, initialExpenses]);
-
-  const settlements = React.useMemo(() => {
-    const byId = new Map<string, ExpenseSettlementRecord>();
-    for (const item of addedSettlements) byId.set(item.id, item);
-    for (const item of initialSettlements) {
-      if (!byId.has(item.id)) byId.set(item.id, item);
-    }
-    return Array.from(byId.values());
-  }, [addedSettlements, initialSettlements]);
+    return Array.from(byId.values()).map((rawItem) => {
+      const item = rawItem.id in editedExpenses ? editedExpenses[rawItem.id] : rawItem;
+      const lockEval = evaluateExpenseLockAndSettlement({
+        expense: {
+          id: item.id,
+          groupId: item.groupId,
+          paidBy: item.paidBy,
+          expenseDate: item.expenseDate,
+          isLocked: item.isLocked,
+          splitBreakdown: item.splitBreakdown,
+        },
+        currentUserId,
+        billingCycles,
+        settlements,
+      });
+      if (
+        lockEval.isLocked === item.isLocked &&
+        lockEval.isCycleClosed === item.isCycleClosed &&
+        lockEval.isSettledByWatermark === item.isSettledByWatermark &&
+        lockEval.isSettledForUser === item.isSettledForUser
+      ) {
+        return item;
+      }
+      return {
+        ...item,
+        isLocked: lockEval.isLocked,
+        isCycleClosed: lockEval.isCycleClosed,
+        isSettledByWatermark: lockEval.isSettledByWatermark,
+        isSettledForUser: lockEval.isSettledForUser,
+      };
+    });
+  }, [
+    addedExpenses,
+    billingCycles,
+    currentUserId,
+    deletedExpenseIds,
+    editedExpenses,
+    initialExpenses,
+    settlements,
+  ]);
 
   const recurringRules = React.useMemo(() => {
     const deletedSet = new Set(deletedRuleIds);
@@ -499,10 +551,21 @@ export function ExpensesClient({
   }, []);
 
   const [settleModalOpen, setSettleModalOpen] = React.useState(false);
+  const [settleInitialDebtKey, setSettleInitialDebtKey] = React.useState<
+    string | null
+  >(null);
   const [inspectExpense, setInspectExpense] =
     React.useState<ExpenseLedgerRecord | null>(null);
   const [editingExpense, setEditingExpense] =
     React.useState<ExpenseLedgerRecord | null>(null);
+  const [adjustingExpense, setAdjustingExpense] =
+    React.useState<ExpenseLedgerRecord | null>(null);
+  const [closeCycleConfirmOpen, setCloseCycleConfirmOpen] =
+    React.useState(false);
+  const [closingCycle, setClosingCycle] = React.useState(false);
+  const [closeCycleError, setCloseCycleError] = React.useState<string | null>(
+    null,
+  );
   const [deletingExpense, setDeletingExpense] =
     React.useState<ExpenseLedgerRecord | null>(null);
   const [isDeletingExpense, setIsDeletingExpense] = React.useState(false);
@@ -556,7 +619,7 @@ export function ExpensesClient({
           splitBreakdown: breakdown,
         },
         currentUserId,
-        billingCycles: initialBillingCycles,
+        billingCycles,
         settlements,
       });
 
@@ -609,7 +672,56 @@ export function ExpensesClient({
       });
       router.refresh();
     },
-    [currentUserId, initialBillingCycles, initialGroups, pushToast, router, settlements],
+    [billingCycles, currentUserId, initialGroups, pushToast, router, settlements],
+  );
+
+  const handleAdjustmentCreated = React.useCallback(
+    (created: Database["public"]["Tables"]["expenses"]["Row"]) => {
+      const group = initialGroups.find((g) => g.id === created.group_id);
+      const payer = group?.members.find((m) => m.userId === created.paid_by);
+      const breakdown = Array.isArray(created.split_breakdown)
+        ? created.split_breakdown
+        : [];
+      const newRecord: ExpenseLedgerRecord = {
+        id: created.id,
+        groupId: created.group_id,
+        groupName: group?.name ?? "Split Group",
+        groupBaseCurrency: group?.baseCurrency ?? created.currency,
+        groupBillingAnchorDay: group?.billingCycleAnchorDay ?? 1,
+        createdBy: created.created_by,
+        paidBy: created.paid_by,
+        payerName: payer?.name ?? "Member",
+        description: created.description,
+        category: created.category,
+        expenseDate: created.expense_date,
+        amountCents: Number(created.amount_cents),
+        currency: created.currency,
+        originalAmountCents: created.original_amount_cents ?? null,
+        originalCurrency: created.original_currency ?? null,
+        exchangeRate: created.exchange_rate ?? null,
+        exchangeRateSource: created.exchange_rate_source ?? null,
+        splitMethod: created.split_method,
+        splitBreakdown: breakdown,
+        receiptUrl: created.receipt_url ?? null,
+        isRecurringGenerated: Boolean(created.is_recurring_generated),
+        recurringRuleId: created.recurring_rule_id ?? null,
+        adjustmentForExpenseId: created.adjustment_for_expense_id ?? null,
+        isLocked: Boolean(created.is_locked),
+        isCycleClosed: false,
+        isSettledByWatermark: false,
+        isSettledForUser: false,
+      };
+      setAddedExpenses((prev) =>
+        prev.some((item) => item.id === newRecord.id) ? prev : [newRecord, ...prev],
+      );
+      pushToast({
+        tone: "success",
+        title: "Offsetting adjustment logged",
+        description: `${created.description} (${formatMinorUnits(created.amount_cents, created.currency)}) added to ${group?.name ?? "group"}.`,
+      });
+      router.refresh();
+    },
+    [initialGroups, pushToast, router],
   );
 
   const handleConfirmSoftDelete = React.useCallback(async () => {
@@ -737,6 +849,50 @@ export function ExpensesClient({
     [expenses, scopedGroups, settlements],
   );
 
+  const settleableDebts = React.useMemo(() => {
+    const allowedEdges = scopedGroups.flatMap((group) => {
+      if (group.status === "ARCHIVED") return [];
+      const member = group.members.find((m) => m.userId === currentUserId);
+      const userStatus = group.currentUserStatus ?? member?.status ?? null;
+      const isActiveAdmin =
+        userStatus === "ACTIVE" && group.currentUserRole === "ADMIN";
+      const edges = computePerGroupDebtEdges({ group, expenses, settlements });
+      return isActiveAdmin
+        ? edges
+        : edges.filter(
+            (edge) =>
+              edge.payerId === currentUserId ||
+              edge.recipientId === currentUserId,
+          );
+    });
+
+    return allowedEdges.sort((a, b) => {
+      const rank = (edge: (typeof allowedEdges)[number]) =>
+        edge.payerId === currentUserId
+          ? 0
+          : edge.recipientId === currentUserId
+            ? 1
+            : 2;
+      return rank(a) - rank(b) || b.amountCents - a.amountCents;
+    });
+  }, [currentUserId, expenses, scopedGroups, settlements]);
+
+  const activeLedgerGroup = React.useMemo(
+    () =>
+      activeGroupId === ALL_GROUPS_VALUE
+        ? null
+        : (initialGroups.find((g) => g.id === activeGroupId) ?? null),
+    [activeGroupId, initialGroups],
+  );
+
+  const isFormerMemberInActiveGroup = React.useMemo(() => {
+    if (!activeLedgerGroup) return false;
+    const status =
+      activeLedgerGroup.currentUserStatus ??
+      activeLedgerGroup.members.find((m) => m.userId === currentUserId)?.status;
+    return status === "FORMER_MEMBER";
+  }, [activeLedgerGroup, currentUserId]);
+
   const isCycleClosed = React.useMemo(
     () =>
       scopedGroups.length > 0 &&
@@ -745,11 +901,64 @@ export function ExpensesClient({
           g.id,
           cycle,
           g.billingCycleAnchorDay,
-          initialBillingCycles,
+          billingCycles,
         ),
       ),
-    [cycle, initialBillingCycles, scopedGroups],
+    [billingCycles, cycle, scopedGroups],
   );
+
+  const handleConfirmCloseCycle = React.useCallback(async () => {
+    if (!activeLedgerGroup || closingCycle) return;
+    setCloseCycleError(null);
+    setClosingCycle(true);
+    try {
+      const response = await fetch(
+        `/api/groups/${encodeURIComponent(activeLedgerGroup.id)}/billing-cycles/close`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cycle }),
+        },
+      );
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        billingCycle?: Database["public"]["Tables"]["billing_cycles"]["Row"];
+        lockedExpenseCount?: number;
+      };
+      if (!response.ok || !payload.billingCycle) {
+        setCloseCycleError(
+          payload.error || "Unable to close and lock this billing cycle.",
+        );
+        setClosingCycle(false);
+        return;
+      }
+
+      const closed = payload.billingCycle;
+      setAddedBillingCycles((prev) => [
+        ...prev,
+        {
+          id: closed.id,
+          groupId: closed.group_id,
+          periodStart: closed.period_start,
+          periodEnd: closed.period_end,
+          status: closed.status,
+        },
+      ]);
+      const lockedCount = payload.lockedExpenseCount ?? 0;
+      const label = formatCycleLabel(cycle);
+      pushToast({
+        tone: "success",
+        title: "Billing cycle closed & locked",
+        description: `${label} for ${activeLedgerGroup.name} is now CLOSED (${lockedCount} ${lockedCount === 1 ? "expense" : "expenses"} locked).`,
+      });
+      setCloseCycleConfirmOpen(false);
+      setClosingCycle(false);
+      router.refresh();
+    } catch {
+      setCloseCycleError("Network error while closing billing cycle.");
+      setClosingCycle(false);
+    }
+  }, [activeLedgerGroup, closingCycle, cycle, pushToast, router]);
 
   const filteredExpenses = React.useMemo(
     () =>
@@ -1146,6 +1355,14 @@ export function ExpensesClient({
         />
       )}
 
+      {isFormerMemberInActiveGroup && activeLedgerGroup && (
+        <AlertBanner
+          tone="warning"
+          title="Former Member Access"
+          description={`You are a former member of ${activeLedgerGroup.name}. You are excluded from logging or splitting new expenses, but you can still record settlements for remaining balances.`}
+        />
+      )}
+
       {/* Page Header */}
       <section className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
         <div className="flex flex-col gap-1">
@@ -1174,6 +1391,24 @@ export function ExpensesClient({
             onChange={handleTabChange}
             className="[&>button]:px-3 [&>button]:py-1.5 [&>button]:text-[12px]"
           />
+          {activeLedgerGroup &&
+            activeLedgerGroup.currentUserRole === "ADMIN" &&
+            activeLedgerGroup.status !== "ARCHIVED" &&
+            !isCycleClosed && (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                leftIcon={<Lock className="h-3.5 w-3.5" aria-hidden="true" />}
+                onClick={() => {
+                  setCloseCycleError(null);
+                  setCloseCycleConfirmOpen(true);
+                }}
+                className="shrink-0"
+              >
+                Close &amp; Lock Cycle
+              </Button>
+            )}
           <Button
             type="button"
             variant="secondary"
@@ -1369,9 +1604,12 @@ export function ExpensesClient({
               type="button"
               variant="ghost"
               size="sm"
-              disabled={scopedDebts.length === 0}
+              disabled={settleableDebts.length === 0}
               rightIcon={<ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />}
-              onClick={() => setSettleModalOpen(true)}
+              onClick={() => {
+                setSettleInitialDebtKey(null);
+                setSettleModalOpen(true);
+              }}
               className="h-7 px-2 text-[12px] text-[#0066cc]"
             >
               Settle now
@@ -1620,9 +1858,27 @@ export function ExpensesClient({
                           icon: <Pencil className="h-3.5 w-3.5" aria-hidden="true" />,
                           onSelect: () => setEditingExpense(exp),
                         });
+                      } else if (exp.isLocked && !isGroupArchived && isActiveMember) {
+                        rowMenuItems.push({
+                          id: "adjust",
+                          label: "Log Adjustment",
+                          icon: <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />,
+                          onSelect: () => setAdjustingExpense(exp),
+                        });
                       }
 
-                      if (scopedDebts.some((d) => d.groupId === exp.groupId)) {
+                      const groupSettleableDebts = settleableDebts.filter(
+                        (d) => d.groupId === exp.groupId,
+                      );
+                      if (groupSettleableDebts.length > 0) {
+                        const preferredDebt =
+                          groupSettleableDebts.find(
+                            (d) =>
+                              (d.payerId === currentUserId &&
+                                d.recipientId === exp.paidBy) ||
+                              (d.recipientId === currentUserId &&
+                                d.payerId === exp.paidBy),
+                          ) ?? groupSettleableDebts[0];
                         rowMenuItems.push({
                           id: "settle",
                           label: "Settle Group Balance",
@@ -1632,7 +1888,12 @@ export function ExpensesClient({
                               aria-hidden="true"
                             />
                           ),
-                          onSelect: () => setSettleModalOpen(true),
+                          onSelect: () => {
+                            setSettleInitialDebtKey(
+                              getSettlementDebtKey(preferredDebt),
+                            );
+                            setSettleModalOpen(true);
+                          },
                         });
                       }
 
@@ -2054,14 +2315,36 @@ export function ExpensesClient({
         }
         size="md"
         footer={
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={() => setInspectExpense(null)}
-          >
-            Close
-          </Button>
+          <div className="flex items-center gap-2">
+            {inspectExpense?.isLocked &&
+              inspectGroup &&
+              inspectGroup.status !== "ARCHIVED" &&
+              inspectGroup.members.some(
+                (m) => m.userId === currentUserId && m.status === "ACTIVE",
+              ) && (
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  leftIcon={<RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />}
+                  onClick={() => {
+                    const target = inspectExpense;
+                    setInspectExpense(null);
+                    setAdjustingExpense(target);
+                  }}
+                >
+                  Log Adjustment
+                </Button>
+              )}
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => setInspectExpense(null)}
+            >
+              Close
+            </Button>
+          </div>
         }
       >
         {inspectExpense && (
@@ -2164,9 +2447,13 @@ export function ExpensesClient({
       {/* Record Settlement Modal */}
       <RecordSettlementModal
         open={settleModalOpen}
-        onClose={() => setSettleModalOpen(false)}
-        debts={scopedDebts}
+        onClose={() => {
+          setSettleModalOpen(false);
+          setSettleInitialDebtKey(null);
+        }}
+        debts={settleableDebts}
         currentUserId={currentUserId}
+        initialDebtKey={settleInitialDebtKey}
         onSettled={(created) => {
           setAddedSettlements((prev) => [
             {
@@ -2345,6 +2632,11 @@ export function ExpensesClient({
         onClose={() => setEditingExpense(null)}
         mode="edit"
         expense={editingExpense}
+        onSwitchToAdjustment={() => {
+          const target = editingExpense;
+          setEditingExpense(null);
+          if (target) setAdjustingExpense(target);
+        }}
         groups={modalGroups}
         activeGroupId={editingExpense?.groupId ?? activeGroupId}
         currentUser={
@@ -2358,6 +2650,55 @@ export function ExpensesClient({
         onReceiptStorageUsedBytesChange={updateReceiptStorageUsedBytes}
         onUpdated={handleExpenseUpdated}
       />
+
+      {/* Offsetting Adjustment Modal */}
+      <AddEditExpenseModal
+        open={adjustingExpense !== null}
+        onClose={() => setAdjustingExpense(null)}
+        mode="adjustment"
+        expense={adjustingExpense}
+        groups={modalGroups}
+        activeGroupId={adjustingExpense?.groupId ?? activeGroupId}
+        currentUser={
+          shellUser ?? {
+            id: currentUserId,
+            fullName: "Member",
+            email: "",
+          }
+        }
+        cycle={cycle}
+        onReceiptStorageUsedBytesChange={updateReceiptStorageUsedBytes}
+        onCreated={handleAdjustmentCreated}
+      />
+
+      {/* Close & Lock Billing Cycle Confirmation */}
+      <ConfirmDialog
+        open={closeCycleConfirmOpen}
+        onClose={() => {
+          if (!closingCycle) {
+            setCloseCycleError(null);
+            setCloseCycleConfirmOpen(false);
+          }
+        }}
+        onConfirm={handleConfirmCloseCycle}
+        title={`Close & Lock ${cycleLabel}?`}
+        description={
+          activeLedgerGroup
+            ? `Closing ${cycleLabel} for ${activeLedgerGroup.name} permanently locks all expenses in this billing period. Future corrections will require logging an Offsetting Adjustment.`
+            : undefined
+        }
+        confirmLabel="Close & Lock Cycle"
+        variant="danger"
+        loading={closingCycle}
+      >
+        {closeCycleError && (
+          <AlertBanner
+            tone="error"
+            title="Could not close billing cycle"
+            description={closeCycleError}
+          />
+        )}
+      </ConfirmDialog>
 
       {/* Soft-Delete Confirmation Dialog */}
       <ConfirmDialog

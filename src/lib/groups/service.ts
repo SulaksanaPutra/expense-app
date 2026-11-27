@@ -1,6 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ShellGroupSummary } from "@/components/shell/types";
 import { parseCycleParam } from "@/components/shell/url-state";
+import {
+  isBillingCycleClosedForWindow,
+  type ExpenseBillingCycleRecord,
+} from "@/lib/expenses/ledger";
 import { isValidCurrencyCode } from "@/lib/money";
 import type {
   Database,
@@ -535,6 +539,7 @@ export async function getSplitGroupsPageData(
       { data: expenseRows, error: expensesError },
       { data: settlementRows, error: settlementsError },
       { data: recurringRows, error: recurringError },
+      { data: billingCycleRows },
     ] = await Promise.all([
       supabase
         .from("group_members")
@@ -557,6 +562,14 @@ export async function getSplitGroupsPageData(
         .select("group_id, is_active")
         .in("group_id", groupIds)
         .eq("is_active", true),
+      Promise.resolve()
+        .then(() =>
+          supabase
+            .from("billing_cycles")
+            .select("id, group_id, period_start, period_end, status")
+            .in("group_id", groupIds),
+        )
+        .catch(() => ({ data: [] })),
     ]);
 
     if (membersError || expensesError || settlementsError || recurringError) {
@@ -815,6 +828,25 @@ export async function getSplitGroupsPageData(
 
       const currentMember = members.find((m) => m.isCurrentUser) ?? null;
 
+      const billingCyclesForGroup: ExpenseBillingCycleRecord[] = (
+        billingCycleRows ?? []
+      )
+        .filter((bc) => bc.group_id === g.id)
+        .map((bc) => ({
+          id: bc.id,
+          groupId: bc.group_id,
+          periodStart: bc.period_start,
+          periodEnd: bc.period_end,
+          status: bc.status,
+        }));
+
+      const isCurrentCycleClosed = isBillingCycleClosedForWindow(
+        g.id,
+        cycleSlug,
+        g.billing_cycle_anchor_day,
+        billingCyclesForGroup,
+      );
+
       const detail: SplitGroupDetail = {
         id: g.id,
         name: g.name,
@@ -842,6 +874,7 @@ export async function getSplitGroupsPageData(
         userNetLedgerCents: metrics.userNetLedgerCents,
         recurringRuleCount: recurringCountByGroup.get(g.id) ?? 0,
         isFullySettled: metrics.isFullySettled,
+        isCurrentCycleClosed,
         members,
         currentUserRole: currentMember?.role ?? null,
         auditLogs: auditLogsByGroup.get(g.id),
@@ -869,4 +902,119 @@ export async function getSplitGroupsPageData(
         err instanceof Error ? err.message : "Unable to load split groups.",
     };
   }
+}
+
+export type UpdateSimplifyDebtsResult =
+  | {
+      ok: true;
+      groupId: string;
+      simplifyDebts: boolean;
+    }
+  | {
+      ok: false;
+      status: number;
+      code:
+        | "NOT_FOUND"
+        | "NOT_MEMBER"
+        | "FORBIDDEN"
+        | "GROUP_ARCHIVED"
+        | "SERVER_ERROR";
+      message: string;
+    };
+
+export async function updateGroupSimplifyDebts(
+  supabase: SupabaseClient<Database>,
+  userId: string,
+  groupId: string,
+  simplifyDebts: boolean,
+): Promise<UpdateSimplifyDebtsResult> {
+  const { data: group, error: groupError } = await supabase
+    .from("groups")
+    .select("id, status, simplify_debts")
+    .eq("id", groupId)
+    .maybeSingle();
+
+  if (groupError) {
+    return {
+      ok: false,
+      status: 500,
+      code: "SERVER_ERROR",
+      message: groupError.message || "Unable to load split group.",
+    };
+  }
+
+  if (!group) {
+    return {
+      ok: false,
+      status: 404,
+      code: "NOT_FOUND",
+      message: "Split group not found.",
+    };
+  }
+
+  const { data: membership, error: memberError } = await supabase
+    .from("group_members")
+    .select("role, status")
+    .eq("group_id", groupId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (memberError) {
+    return {
+      ok: false,
+      status: 500,
+      code: "SERVER_ERROR",
+      message: memberError.message || "Unable to verify group membership.",
+    };
+  }
+
+  if (!membership) {
+    return {
+      ok: false,
+      status: 403,
+      code: "NOT_MEMBER",
+      message: "You are not a member of this split group.",
+    };
+  }
+
+  if (group.status === "ARCHIVED") {
+    return {
+      ok: false,
+      status: 409,
+      code: "GROUP_ARCHIVED",
+      message: "Archived groups are strictly read-only.",
+    };
+  }
+
+  if (membership.status !== "ACTIVE" || membership.role !== "ADMIN") {
+    return {
+      ok: false,
+      status: 403,
+      code: "FORBIDDEN",
+      message: "Only active group admins can update debt simplification settings.",
+    };
+  }
+
+  const { data: updated, error: updateError } = await supabase
+    .from("groups")
+    .update({ simplify_debts: simplifyDebts })
+    .eq("id", groupId)
+    .select("id, simplify_debts")
+    .maybeSingle();
+
+  if (updateError || !updated) {
+    return {
+      ok: false,
+      status: 500,
+      code: "SERVER_ERROR",
+      message:
+        updateError?.message || "Failed to update group debt simplification setting.",
+    };
+  }
+
+  return {
+    ok: true,
+    groupId: updated.id,
+    simplifyDebts: Boolean(updated.simplify_debts),
+  };
 }
