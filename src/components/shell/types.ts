@@ -1,7 +1,9 @@
 import type {
+  ExpenseSplitMethod,
   GroupStatus,
   GroupType,
   MemberStatus,
+  PaymentRail,
   SplitMode,
 } from "@/types/database";
 
@@ -21,6 +23,7 @@ export interface ShellGroupSummary {
   groupType: GroupType;
   baseCurrency: string;
   defaultSplitMode?: SplitMode;
+  simplifyDebts?: boolean;
   currentUserStatus?: MemberStatus | null;
   activeSplitCount: number;
   members: ShellGroupMember[];
@@ -31,6 +34,11 @@ export interface ShellUserSummary {
   fullName: string;
   email: string;
   avatarUrl?: string | null;
+  baseCurrency?: string;
+  instantSettlementTag?: string | null;
+  personalShareCapCents?: number | null;
+  defaultSplitMethod?: ExpenseSplitMethod;
+  defaultPaymentRail?: PaymentRail;
   receiptStorageUsedBytes?: number;
 }
 

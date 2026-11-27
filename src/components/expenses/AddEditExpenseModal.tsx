@@ -152,9 +152,9 @@ function buildInitialGroupState(
 } {
   if (!group) {
     return {
-      currency: "USD",
+      currency: currentUser?.baseCurrency || "USD",
       paidBy: currentUser?.id ?? "",
-      splitMethod: "EQUAL",
+      splitMethod: currentUser?.defaultSplitMethod ?? "EQUAL",
       includedMemberIds: [],
       percentageInputs: {},
       exactInputs: {},
@@ -174,16 +174,27 @@ function buildInitialGroupState(
     group.status !== "NEEDS_RATIO_UPDATE" &&
     members.some((m) => typeof m.sharePercentage === "number");
 
+  const resolvedSplitMethod: ExpenseSplitMethod =
+    currentUser?.defaultSplitMethod ??
+    (hasCustomRatios ? "PERCENTAGE" : "EQUAL");
+
+  const customRatioSum = members.reduce(
+    (sum, m) => sum + Math.round((m.sharePercentage ?? 0) * 100),
+    0,
+  );
+  const useMemberRatios =
+    hasCustomRatios && Math.abs(customRatioSum - 10_000) <= 1;
+
   return {
     currency: group.baseCurrency,
     paidBy: defaultPayer,
-    splitMethod: hasCustomRatios ? "PERCENTAGE" : "EQUAL",
+    splitMethod: resolvedSplitMethod,
     includedMemberIds: memberIds,
     percentageInputs: Object.fromEntries(
       members.map((m) => [
         m.id,
         String(
-          hasCustomRatios
+          useMemberRatios
             ? (m.sharePercentage ?? equalMap.get(m.id) ?? 0)
             : (equalMap.get(m.id) ?? 0),
         ),

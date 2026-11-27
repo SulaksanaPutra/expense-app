@@ -809,36 +809,72 @@ export function ExpensesClient({
     syncQueryParams({ page });
   };
 
+  const shellInstantTag = shellUser?.instantSettlementTag;
+
+  const effectiveGroups = React.useMemo<ExpenseGroupInfo[]>(() => {
+    const shellById = new Map(shellGroups.map((sg) => [sg.id, sg]));
+    return initialGroups.map((g) => {
+      const sg = shellById.get(g.id);
+      const nextMembers =
+        shellInstantTag !== undefined
+          ? g.members.map((m) =>
+              m.userId === currentUserId
+                ? {
+                    ...m,
+                    instantSettlementTag: shellInstantTag ?? null,
+                  }
+                : m,
+            )
+          : g.members;
+      if (!sg) {
+        return nextMembers === g.members ? g : { ...g, members: nextMembers };
+      }
+      return {
+        ...g,
+        defaultSplitMode: sg.defaultSplitMode ?? g.defaultSplitMode,
+        simplifyDebts: sg.simplifyDebts ?? g.simplifyDebts,
+        members: nextMembers,
+      };
+    });
+  }, [currentUserId, initialGroups, shellGroups, shellInstantTag]);
+
+  const effectivePersonalShareCapCents =
+    shellUser?.personalShareCapCents !== undefined
+      ? shellUser.personalShareCapCents
+      : personalShareCapCents;
+  const effectiveUserBaseCurrency =
+    shellUser?.baseCurrency ?? userBaseCurrency;
+
   const kpi = React.useMemo(
     () =>
       computeExpensesKpiSummary({
         expenses,
-        groups: initialGroups,
+        groups: effectiveGroups,
         settlements,
         activeGroupId,
         cycleSlug: cycle,
         currentUserId,
-        userBaseCurrency,
-        personalShareCapCents,
+        userBaseCurrency: effectiveUserBaseCurrency,
+        personalShareCapCents: effectivePersonalShareCapCents,
       }),
     [
       activeGroupId,
       currentUserId,
       cycle,
+      effectiveGroups,
+      effectivePersonalShareCapCents,
+      effectiveUserBaseCurrency,
       expenses,
-      initialGroups,
-      personalShareCapCents,
       settlements,
-      userBaseCurrency,
     ],
   );
 
   const scopedGroups = React.useMemo(
     () =>
       activeGroupId === ALL_GROUPS_VALUE
-        ? initialGroups
-        : initialGroups.filter((g) => g.id === activeGroupId),
-    [activeGroupId, initialGroups],
+        ? effectiveGroups
+        : effectiveGroups.filter((g) => g.id === activeGroupId),
+    [activeGroupId, effectiveGroups],
   );
 
   const scopedDebts = React.useMemo(
@@ -881,8 +917,8 @@ export function ExpensesClient({
     () =>
       activeGroupId === ALL_GROUPS_VALUE
         ? null
-        : (initialGroups.find((g) => g.id === activeGroupId) ?? null),
-    [activeGroupId, initialGroups],
+        : (effectiveGroups.find((g) => g.id === activeGroupId) ?? null),
+    [activeGroupId, effectiveGroups],
   );
 
   const isFormerMemberInActiveGroup = React.useMemo(() => {
@@ -2454,6 +2490,8 @@ export function ExpensesClient({
         debts={settleableDebts}
         currentUserId={currentUserId}
         initialDebtKey={settleInitialDebtKey}
+        defaultPaymentRail={shellUser?.defaultPaymentRail}
+        currentUserInstantTag={shellUser?.instantSettlementTag}
         onSettled={(created) => {
           setAddedSettlements((prev) => [
             {

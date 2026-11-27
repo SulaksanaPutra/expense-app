@@ -95,6 +95,11 @@ export interface ActiveGroupContextValue {
   cycle: string;
   user: ShellUserSummary | null;
   updateReceiptStorageUsedBytes: (usedBytes: number) => void;
+  updateUserPreferences: (patch: Partial<ShellUserSummary>) => void;
+  updateGroupPreferences: (
+    groupId: string,
+    patch: Partial<ShellGroupSummary>,
+  ) => void;
   liveSyncStatus: LiveSyncStatus;
   notifications: ShellNotificationItem[];
   unreadNotificationCount: number;
@@ -153,21 +158,26 @@ export function ActiveGroupProvider({
   const searchKey = searchParams.toString();
 
   const [localGroups, setLocalGroups] = React.useState<ShellGroupSummary[]>([]);
+  const [groupOverrides, setGroupOverrides] = React.useState<
+    Record<string, Partial<ShellGroupSummary>>
+  >({});
 
   const nonArchivedGroups = React.useMemo(() => {
     const byId = new Map<string, ShellGroupSummary>();
     for (const g of groups) {
       if (g.status !== "ARCHIVED") {
-        byId.set(g.id, g);
+        const override = groupOverrides[g.id];
+        byId.set(g.id, override ? { ...g, ...override } : g);
       }
     }
     for (const g of localGroups) {
       if (g.status !== "ARCHIVED" && !byId.has(g.id)) {
-        byId.set(g.id, g);
+        const override = groupOverrides[g.id];
+        byId.set(g.id, override ? { ...g, ...override } : g);
       }
     }
     return Array.from(byId.values());
-  }, [groups, localGroups]);
+  }, [groupOverrides, groups, localGroups]);
 
   const availableIds = React.useMemo(
     () => nonArchivedGroups.map((g) => g.id),
@@ -387,6 +397,10 @@ export function ActiveGroupProvider({
     baseBytes: number | undefined;
     overrideBytes: number;
   } | null>(null);
+  const [userPrefOverride, setUserPrefOverride] = React.useState<{
+    userId: string;
+    patch: Partial<ShellUserSummary>;
+  } | null>(null);
 
   const notifications = React.useMemo<ShellNotificationItem[]>(
     () =>
@@ -398,18 +412,22 @@ export function ActiveGroupProvider({
 
   const effectiveUser = React.useMemo<ShellUserSummary | null>(() => {
     if (!user) return null;
+    let nextUser = user;
+    if (userPrefOverride && userPrefOverride.userId === user.id) {
+      nextUser = { ...nextUser, ...userPrefOverride.patch };
+    }
     if (
       userStorageOverride &&
       userStorageOverride.userId === user.id &&
       userStorageOverride.baseBytes === user.receiptStorageUsedBytes
     ) {
-      return {
-        ...user,
+      nextUser = {
+        ...nextUser,
         receiptStorageUsedBytes: userStorageOverride.overrideBytes,
       };
     }
-    return user;
-  }, [user, userStorageOverride]);
+    return nextUser;
+  }, [user, userPrefOverride, userStorageOverride]);
 
   const updateReceiptStorageUsedBytes = React.useCallback(
     (usedBytes: number) => {
@@ -421,6 +439,29 @@ export function ActiveGroupProvider({
       });
     },
     [user],
+  );
+
+  const updateUserPreferences = React.useCallback(
+    (patch: Partial<ShellUserSummary>) => {
+      if (!user) return;
+      setUserPrefOverride((prev) => ({
+        userId: user.id,
+        patch:
+          prev && prev.userId === user.id ? { ...prev.patch, ...patch } : patch,
+      }));
+    },
+    [user],
+  );
+
+  const updateGroupPreferences = React.useCallback(
+    (groupId: string, patch: Partial<ShellGroupSummary>) => {
+      if (!groupId) return;
+      setGroupOverrides((prev) => ({
+        ...prev,
+        [groupId]: { ...(prev[groupId] ?? {}), ...patch },
+      }));
+    },
+    [],
   );
 
   const markAllNotificationsRead = React.useCallback(() => {
@@ -463,6 +504,8 @@ export function ActiveGroupProvider({
       cycle,
       user: effectiveUser,
       updateReceiptStorageUsedBytes,
+      updateUserPreferences,
+      updateGroupPreferences,
       liveSyncStatus,
       notifications,
       unreadNotificationCount,
@@ -508,6 +551,8 @@ export function ActiveGroupProvider({
       unreadNotificationCount,
       effectiveUser,
       updateReceiptStorageUsedBytes,
+      updateUserPreferences,
+      updateGroupPreferences,
     ],
   );
 
