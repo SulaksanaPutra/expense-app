@@ -36,7 +36,11 @@ import {
 } from "@/components/ui";
 import type { ToastItem } from "@/components/ui";
 import { useActiveGroup } from "@/components/shell/ActiveGroupContext";
-import type { ShellGroupSummary } from "@/components/shell/types";
+import { REALTIME_LEDGER_CHANGE_EVENT } from "@/components/shell/notifications";
+import type {
+  RealtimeLedgerChangeDetail,
+  ShellGroupSummary,
+} from "@/components/shell/types";
 import { formatCycleLabel } from "@/components/shell/url-state";
 import { cn } from "@/lib/cn";
 import type { GroupAuditLogEntry } from "@/lib/groups/audit-log";
@@ -133,6 +137,38 @@ export function SplitGroupsClient({
   const [toasts, setToasts] = React.useState<ToastItem[]>([]);
   const toastCounterRef = React.useRef(0);
   const copyTimerRef = React.useRef<number | null>(null);
+
+  React.useEffect(() => {
+    const handleRealtimeChange = (event: Event) => {
+      const detail = (event as CustomEvent<RealtimeLedgerChangeDetail>).detail;
+      if (!detail) return;
+      if (detail.table === "groups" || detail.table === "group_members") {
+        const groupId =
+          (typeof detail.newRow?.group_id === "string" &&
+            detail.newRow.group_id) ||
+          (typeof detail.newRow?.id === "string" && detail.newRow.id) ||
+          (typeof detail.oldRow?.group_id === "string" &&
+            detail.oldRow.group_id) ||
+          (typeof detail.oldRow?.id === "string" && detail.oldRow.id) ||
+          null;
+        if (groupId) {
+          setGroupOverrides((prev) => {
+            if (!(groupId in prev)) return prev;
+            const next = { ...prev };
+            delete next[groupId];
+            return next;
+          });
+        }
+      }
+    };
+
+    window.addEventListener(REALTIME_LEDGER_CHANGE_EVENT, handleRealtimeChange);
+    return () =>
+      window.removeEventListener(
+        REALTIME_LEDGER_CHANGE_EVENT,
+        handleRealtimeChange,
+      );
+  }, []);
 
   const allGroups = React.useMemo(() => {
     const departedSet = new Set(departedGroupIds);

@@ -59,8 +59,15 @@ import type {
   SortDirection,
   ToastItem,
 } from "@/components/ui";
-import { LiveSyncPill, useActiveGroup } from "@/components/shell";
-import type { ShellGroupSummary } from "@/components/shell/types";
+import {
+  LiveSyncPill,
+  REALTIME_LEDGER_CHANGE_EVENT,
+  useActiveGroup,
+} from "@/components/shell";
+import type {
+  RealtimeLedgerChangeDetail,
+  ShellGroupSummary,
+} from "@/components/shell/types";
 import {
   ALL_GROUPS_VALUE,
   formatCycleLabel,
@@ -538,6 +545,70 @@ export function ExpensesClient({
     return () =>
       window.removeEventListener("ledgersplit:expense-created", handleCreated);
   }, [initialGroups]);
+
+  React.useEffect(() => {
+    const handleRealtimeChange = (event: Event) => {
+      const detail = (event as CustomEvent<RealtimeLedgerChangeDetail>).detail;
+      if (!detail) return;
+      if (detail.table === "expenses") {
+        const expId =
+          (typeof detail.newRow?.id === "string" && detail.newRow.id) ||
+          (typeof detail.oldRow?.id === "string" && detail.oldRow.id) ||
+          null;
+        if (!expId) return;
+        const isSoftDeleted =
+          detail.eventType === "DELETE" ||
+          (detail.newRow?.deleted_at !== undefined &&
+            detail.newRow?.deleted_at !== null);
+        if (isSoftDeleted) {
+          setDeletedExpenseIds((prev) =>
+            prev.includes(expId) ? prev : [...prev, expId],
+          );
+          setAddedExpenses((prev) => prev.filter((item) => item.id !== expId));
+          setEditedExpenses((prev) => {
+            if (!(expId in prev)) return prev;
+            const next = { ...prev };
+            delete next[expId];
+            return next;
+          });
+        } else if (detail.eventType === "UPDATE") {
+          setEditedExpenses((prev) => {
+            if (!(expId in prev)) return prev;
+            const next = { ...prev };
+            delete next[expId];
+            return next;
+          });
+          setAddedExpenses((prev) => prev.filter((item) => item.id !== expId));
+        }
+      } else if (detail.table === "recurring_rules") {
+        const ruleId =
+          (typeof detail.newRow?.id === "string" && detail.newRow.id) ||
+          (typeof detail.oldRow?.id === "string" && detail.oldRow.id) ||
+          null;
+        if (!ruleId) return;
+        if (detail.eventType === "DELETE") {
+          setDeletedRuleIds((prev) =>
+            prev.includes(ruleId) ? prev : [...prev, ruleId],
+          );
+          setAddedRules((prev) => prev.filter((r) => r.id !== ruleId));
+        } else if (detail.eventType === "UPDATE") {
+          setRuleActiveOverrides((prev) => {
+            if (!(ruleId in prev)) return prev;
+            const next = { ...prev };
+            delete next[ruleId];
+            return next;
+          });
+        }
+      }
+    };
+
+    window.addEventListener(REALTIME_LEDGER_CHANGE_EVENT, handleRealtimeChange);
+    return () =>
+      window.removeEventListener(
+        REALTIME_LEDGER_CHANGE_EVENT,
+        handleRealtimeChange,
+      );
+  }, []);
 
   const [toasts, setToasts] = React.useState<ToastItem[]>([]);
   const toastCounter = React.useRef(0);

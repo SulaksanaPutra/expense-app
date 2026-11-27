@@ -3,6 +3,7 @@ import type {
   GroupStatus,
   GroupType,
   MemberStatus,
+  NotificationType,
   PaymentRail,
   SplitMode,
 } from "@/types/database";
@@ -47,8 +48,19 @@ export interface ShellNotificationItem {
   title: string;
   description: string;
   timestamp: string;
+  createdAt?: string;
   unread: boolean;
   href?: string;
+  type?: NotificationType;
+  deltaCents?: number | null;
+  currency?: string | null;
 }
 
 export type LiveSyncStatus = "subscribed" | "syncing" | "offline";
+
+export interface RealtimeLedgerChangeDetail {
+  table: string;
+  eventType: "INSERT" | "UPDATE" | "DELETE";
+  newRow: Record<string, unknown> | null;
+  oldRow: Record<string, unknown> | null;
+}

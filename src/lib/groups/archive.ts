@@ -307,6 +307,58 @@ export async function runArchiveRulesEvaluation(
       );
       if (promptEval.shouldPromptLeaseArchive) {
         leasePromptGroupIds.push(g.id);
+
+        try {
+          const notifTable = supabase.from("notifications");
+          if (notifTable && typeof notifTable.insert === "function") {
+            const { data: adminMembers } = await supabase
+              .from("group_members")
+              .select("user_id")
+              .eq("group_id", g.id)
+              .eq("role", "ADMIN")
+              .eq("status", "ACTIVE");
+
+            const adminIds = (adminMembers ?? []).map((m) => m.user_id);
+            if (adminIds.length > 0) {
+              const { data: existingPrompts } = await notifTable
+                .select("user_id")
+                .eq("group_id", g.id)
+                .eq("type", "LEASE_ARCHIVE_PROMPT")
+                .eq("is_read", false)
+                .in("user_id", adminIds);
+
+              const alreadyPrompted = new Set(
+                (existingPrompts ?? []).map((row) => row.user_id),
+              );
+              const targetAdmins = adminIds.filter(
+                (uid) => !alreadyPrompted.has(uid),
+              );
+
+              if (targetAdmins.length > 0) {
+                const payloads: Database["public"]["Tables"]["notifications"]["Insert"][] =
+                  targetAdmins.map((uid) => ({
+                    id: crypto.randomUUID(),
+                    user_id: uid,
+                    group_id: g.id,
+                    actor_id: null,
+                    expense_id: null,
+                    revision_id: null,
+                    type: "LEASE_ARCHIVE_PROMPT",
+                    title: "Lease archive prompt",
+                    description: `Lease ended on ${g.lease_end_date} for ${g.name}. Review balances and archive or snooze.`,
+                    delta_cents: null,
+                    currency: null,
+                    href: `/split-groups?group=${encodeURIComponent(g.id)}`,
+                    is_read: false,
+                    created_at: nowIso,
+                  }));
+                await notifTable.insert(payloads);
+              }
+            }
+          }
+        } catch {
+          // Non-fatal in minimal unit-test mocks.
+        }
       }
     }
   }

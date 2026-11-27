@@ -22,11 +22,20 @@ export type { LiveSyncPillProps } from "./LiveSyncPill";
 
 export type {
   LiveSyncStatus,
+  RealtimeLedgerChangeDetail,
   ShellGroupMember,
   ShellGroupSummary,
   ShellNotificationItem,
   ShellUserSummary,
 } from "./types";
+
+export {
+  REALTIME_LEDGER_CHANGE_EVENT,
+  formatNotificationTimestamp,
+  getNotificationTypeLabel,
+  mapDbNotificationToShellItem,
+  mapRealtimeStatusToLiveSync,
+} from "./notifications";
 
 export {
   ALL_GROUPS_VALUE,

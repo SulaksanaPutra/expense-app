@@ -28,6 +28,7 @@ import { AddEditExpenseModal } from "@/components/expenses";
 import { cn } from "@/lib/cn";
 import { formatMinorUnits } from "@/lib/money";
 import { useActiveGroup } from "./ActiveGroupContext";
+import { getNotificationTypeLabel } from "./notifications";
 import { buildShellHref, getCyclePickerOptions } from "./url-state";
 
 interface GlobalSearchExpenseResult {
@@ -56,6 +57,7 @@ export function TopBar({ mobileMenuButtonRef }: TopBarProps) {
     updateReceiptStorageUsedBytes,
     notifications,
     unreadNotificationCount,
+    markNotificationRead,
     markAllNotificationsRead,
     setCycle,
     stepCycle,
@@ -342,7 +344,7 @@ export function TopBar({ mobileMenuButtonRef }: TopBarProps) {
                     : "Notifications"
                 }
                 aria-expanded={notifOpen}
-                aria-haspopup="true"
+                aria-controls="topbar-notifications-popover"
                 onClick={() => setNotifOpen((prev) => !prev)}
                 className="relative"
               >
@@ -350,6 +352,7 @@ export function TopBar({ mobileMenuButtonRef }: TopBarProps) {
                 {unreadNotificationCount > 0 && (
                   <span
                     aria-hidden="true"
+                    data-testid="notification-unread-dot"
                     className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-red-500 ring-2 ring-canvas"
                   />
                 )}
@@ -357,14 +360,22 @@ export function TopBar({ mobileMenuButtonRef }: TopBarProps) {
 
               {notifOpen && (
                 <div
+                  id="topbar-notifications-popover"
                   role="region"
                   aria-label="Notifications"
-                  className="absolute top-full right-0 z-40 mt-2 w-80 max-w-[calc(100vw-1.5rem)] rounded-[18px] border border-hairline bg-canvas p-3 shadow-[0_12px_32px_rgba(0,0,0,0.1)]"
+                  className="fixed inset-x-3 top-[4.25rem] z-40 rounded-[18px] border border-hairline bg-canvas p-3 shadow-[0_12px_32px_rgba(0,0,0,0.1)] sm:absolute sm:inset-x-auto sm:top-full sm:right-0 sm:mt-2 sm:w-80"
                 >
                   <div className="mb-2 flex items-center justify-between gap-2 border-b border-divider-soft pb-2">
-                    <span className="text-[13px] font-semibold text-ink">
-                      Notifications
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[13px] font-semibold text-ink">
+                        Notifications
+                      </span>
+                      {unreadNotificationCount > 0 && (
+                        <Badge tone="info" size="sm">
+                          {unreadNotificationCount} unread
+                        </Badge>
+                      )}
+                    </div>
                     <Button
                       type="button"
                       variant="ghost"
@@ -382,28 +393,56 @@ export function TopBar({ mobileMenuButtonRef }: TopBarProps) {
                       settlement nudges appear here.
                     </p>
                   ) : (
-                    <ul className="flex max-h-64 flex-col gap-1 overflow-y-auto">
-                      {notifications.map((item) => (
-                        <li
-                          key={item.id}
-                          className={cn(
-                            "rounded-sm px-2.5 py-2 text-left transition-colors",
-                            item.unread ? "bg-canvas-parchment" : "bg-canvas",
-                          )}
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-[12px] font-semibold text-ink">
-                              {item.title}
-                            </span>
-                            <span className="text-[11px] text-ink-muted-48">
-                              {item.timestamp}
-                            </span>
-                          </div>
-                          <p className="mt-0.5 text-[12px] text-ink-muted-80">
-                            {item.description}
-                          </p>
-                        </li>
-                      ))}
+                    <ul className="flex max-h-72 flex-col gap-1 overflow-y-auto">
+                      {notifications.map((item) => {
+                        const typeLabel = getNotificationTypeLabel(item.type);
+                        const handleSelect = () => {
+                          if (item.unread) {
+                            markNotificationRead(item.id);
+                          }
+                          if (item.href) {
+                            setNotifOpen(false);
+                            router.push(item.href);
+                          }
+                        };
+                        return (
+                          <li key={item.id}>
+                            <button
+                              type="button"
+                              onClick={handleSelect}
+                              className={cn(
+                                "w-full rounded-sm px-2.5 py-2 text-left transition-colors hover:bg-canvas-parchment focus-visible:outline-2 focus-visible:outline-primary-focus",
+                                item.unread
+                                  ? "bg-canvas-parchment/80"
+                                  : "bg-canvas",
+                              )}
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <span className="flex min-w-0 items-center gap-1.5 text-[12px] font-semibold text-ink">
+                                  {item.unread && (
+                                    <span
+                                      aria-hidden="true"
+                                      className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#0066cc]"
+                                    />
+                                  )}
+                                  <span className="truncate">{item.title}</span>
+                                </span>
+                                <span className="shrink-0 text-[11px] text-ink-muted-48">
+                                  {item.timestamp}
+                                </span>
+                              </div>
+                              {typeLabel && (
+                                <span className="mt-0.5 inline-block text-[10px] font-medium uppercase tracking-wide text-ink-muted-48">
+                                  {typeLabel}
+                                </span>
+                              )}
+                              <p className="mt-0.5 text-[12px] leading-snug text-ink-muted-80">
+                                {item.description}
+                              </p>
+                            </button>
+                          </li>
+                        );
+                      })}
                     </ul>
                   )}
                 </div>
