@@ -7,13 +7,23 @@ import {
   ArrowDownLeft,
   ArrowRight,
   ArrowUpRight,
+  Car,
+  CheckCircle2,
   Download,
+  Eye,
+  Home,
   Paperclip,
+  Pencil,
   PieChart,
   Plus,
   ReceiptText,
   RefreshCw,
+  ShoppingBag,
+  Sparkles,
+  Trash2,
+  Utensils,
   Wallet,
+  Zap,
 } from "lucide-react";
 import {
   AlertBanner,
@@ -21,7 +31,11 @@ import {
   Badge,
   Button,
   Card,
+  ConfirmDialog,
+  Dialog,
+  Dropdown,
   Pagination,
+  ProgressBar,
   SearchInput,
   Select,
   Switch,
@@ -34,14 +48,21 @@ import {
   TableRow,
   ToastContainer,
 } from "@/components/ui";
-import type { SelectOption, ToastItem } from "@/components/ui";
-import { RecordSettlementModal, getSettlementDebtKey } from "@/components/expenses";
+import type { DropdownItem, SelectOption, ToastItem } from "@/components/ui";
+import {
+  AddEditExpenseModal,
+  RecordSettlementModal,
+  getSettlementDebtKey,
+} from "@/components/expenses";
 import { LiveSyncPill, useActiveGroup } from "@/components/shell";
+import type { ShellGroupSummary } from "@/components/shell/types";
 import { ALL_GROUPS_VALUE, formatCycleLabel } from "@/components/shell/url-state";
 import {
   buildExpensesCsv,
   computeExpensesKpiSummary,
   computePerGroupDebtEdges,
+  evaluateExpenseLockAndSettlement,
+  getUserShareCents,
   isBillingCycleClosedForWindow,
   type ExpenseBillingCycleRecord,
   type ExpenseGroupInfo,
@@ -51,7 +72,11 @@ import {
 } from "@/lib/expenses/ledger";
 import { getBillingCycleWindow } from "@/lib/groups/service";
 import { formatMinorUnits } from "@/lib/money";
-import type { ExpenseSplitMethod, SplitBreakdownItem } from "@/types/database";
+import type {
+  Database,
+  ExpenseSplitMethod,
+  SplitBreakdownItem,
+} from "@/types/database";
 
 export interface DashboardExpenseItem {
   id: string;
@@ -95,12 +120,6 @@ export interface DashboardClientProps {
 
 const RECENT_TX_PAGE_SIZE = 5;
 
-const SPLIT_METHOD_LABEL: Record<ExpenseSplitMethod, string> = {
-  EQUAL: "Split Evenly",
-  PERCENTAGE: "By Percentage",
-  EXACT: "Exact Amounts",
-};
-
 const CATEGORY_COLORS: Record<string, string> = {
   "Groceries & Food": "#34c759",
   Groceries: "#34c759",
@@ -120,15 +139,64 @@ function getCategoryColor(category: string): string {
   return CATEGORY_COLORS[category] ?? "#0066cc";
 }
 
-function formatExpenseDateShort(isoDate: string): string {
+function renderCategoryIcon(category: string) {
+  const lower = category.toLowerCase();
+  if (lower.includes("grocer") || lower.includes("food")) {
+    return <ShoppingBag className="h-4 w-4" aria-hidden="true" />;
+  }
+  if (lower.includes("utilit")) {
+    return <Zap className="h-4 w-4" aria-hidden="true" />;
+  }
+  if (lower.includes("dining") || lower.includes("drink")) {
+    return <Utensils className="h-4 w-4" aria-hidden="true" />;
+  }
+  if (
+    lower.includes("transit") ||
+    lower.includes("transport") ||
+    lower.includes("travel")
+  ) {
+    return <Car className="h-4 w-4" aria-hidden="true" />;
+  }
+  if (lower.includes("rent") || lower.includes("hous") || lower.includes("home")) {
+    return <Home className="h-4 w-4" aria-hidden="true" />;
+  }
+  if (lower.includes("entertain")) {
+    return <Sparkles className="h-4 w-4" aria-hidden="true" />;
+  }
+  return <ReceiptText className="h-4 w-4" aria-hidden="true" />;
+}
+
+function formatSplitMethodLabel(
+  method: ExpenseSplitMethod,
+  participantCount: number,
+): string {
+  if (method === "EQUAL") {
+    return `Split Equally (${participantCount})`;
+  }
+  if (method === "PERCENTAGE") {
+    return `By Percentage (${participantCount})`;
+  }
+  return `Exact Amounts (${participantCount})`;
+}
+
+function formatDateParts(isoDate: string): { date: string; time: string } {
   const parsed = new Date(isoDate);
-  if (Number.isNaN(parsed.getTime())) return isoDate;
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(parsed);
+  if (Number.isNaN(parsed.getTime())) {
+    return { date: isoDate, time: "" };
+  }
+  return {
+    date: new Intl.DateTimeFormat("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      timeZone: "UTC",
+    }).format(parsed),
+    time: new Intl.DateTimeFormat("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone: "UTC",
+    }).format(parsed),
+  };
 }
 
 function toLedgerRecord(
@@ -180,6 +248,8 @@ export function DashboardClient({
     activeGroupId,
     activeGroup,
     cycle,
+    user: shellUser,
+    updateReceiptStorageUsedBytes,
     setActiveGroup,
     buildNavHref,
     openAddExpense,
@@ -188,6 +258,14 @@ export function DashboardClient({
   const [searchQuery, setSearchQuery] = React.useState("");
   const [selectedCategory, setSelectedCategory] = React.useState("all");
   const [currentPage, setCurrentPage] = React.useState(1);
+
+  const [addedExpenses, setAddedExpenses] = React.useState<ExpenseLedgerRecord[]>(
+    [],
+  );
+  const [editedExpenses, setEditedExpenses] = React.useState<
+    Record<string, ExpenseLedgerRecord>
+  >({});
+  const [deletedExpenseIds, setDeletedExpenseIds] = React.useState<string[]>([]);
 
   const [simplifyOverrides, setSimplifyOverrides] = React.useState<
     Record<string, boolean>
@@ -203,6 +281,18 @@ export function DashboardClient({
   const [selectedDebtKey, setSelectedDebtKey] = React.useState<string | null>(
     null,
   );
+  const [inspectExpense, setInspectExpense] =
+    React.useState<ExpenseLedgerRecord | null>(null);
+  const [editingExpense, setEditingExpense] =
+    React.useState<ExpenseLedgerRecord | null>(null);
+  const [adjustingExpense, setAdjustingExpense] =
+    React.useState<ExpenseLedgerRecord | null>(null);
+  const [deletingExpense, setDeletingExpense] =
+    React.useState<ExpenseLedgerRecord | null>(null);
+  const [isDeletingExpense, setIsDeletingExpense] = React.useState(false);
+  const [deleteExpenseError, setDeleteExpenseError] = React.useState<
+    string | null
+  >(null);
   const [toasts, setToasts] = React.useState<ToastItem[]>([]);
 
   const pushToast = React.useCallback((toast: Omit<ToastItem, "id">) => {
@@ -255,10 +345,140 @@ export function DashboardClient({
     return Array.from(byId.values());
   }, [addedSettlements, initialSettlements]);
 
-  const ledgerExpenses = React.useMemo(
-    () => initialExpenses.map(toLedgerRecord),
-    [initialExpenses],
-  );
+  const ledgerExpenses = React.useMemo(() => {
+    const deletedSet = new Set(deletedExpenseIds);
+    const byId = new Map<string, ExpenseLedgerRecord>();
+    for (const item of addedExpenses) {
+      if (!deletedSet.has(item.id)) byId.set(item.id, item);
+    }
+    for (const item of initialExpenses) {
+      const normalized = toLedgerRecord(item);
+      if (!deletedSet.has(normalized.id) && !byId.has(normalized.id)) {
+        byId.set(normalized.id, normalized);
+      }
+    }
+    return Array.from(byId.values())
+      .map((rawItem) => {
+        const item =
+          rawItem.id in editedExpenses ? editedExpenses[rawItem.id] : rawItem;
+        const lockEval = evaluateExpenseLockAndSettlement({
+          expense: {
+            id: item.id,
+            groupId: item.groupId,
+            paidBy: item.paidBy,
+            expenseDate: item.expenseDate,
+            isLocked: item.isLocked,
+            splitBreakdown: item.splitBreakdown,
+          },
+          currentUserId,
+          billingCycles: initialBillingCycles,
+          settlements,
+        });
+        if (
+          lockEval.isLocked === item.isLocked &&
+          lockEval.isCycleClosed === item.isCycleClosed &&
+          lockEval.isSettledByWatermark === item.isSettledByWatermark &&
+          lockEval.isSettledForUser === item.isSettledForUser
+        ) {
+          return item;
+        }
+        return {
+          ...item,
+          isLocked: lockEval.isLocked,
+          isCycleClosed: lockEval.isCycleClosed,
+          isSettledByWatermark: lockEval.isSettledByWatermark,
+          isSettledForUser: lockEval.isSettledForUser,
+        };
+      })
+      .sort(
+        (a, b) =>
+          Date.parse(b.expenseDate) - Date.parse(a.expenseDate) ||
+          b.id.localeCompare(a.id),
+      );
+  }, [
+    addedExpenses,
+    currentUserId,
+    deletedExpenseIds,
+    editedExpenses,
+    initialBillingCycles,
+    initialExpenses,
+    settlements,
+  ]);
+
+  React.useEffect(() => {
+    const handleCreated = (event: Event) => {
+      const custom = event as CustomEvent<
+        Database["public"]["Tables"]["expenses"]["Row"]
+      >;
+      const created = custom.detail;
+      if (!created || !created.id) return;
+      const group = effectiveGroups.find((g) => g.id === created.group_id);
+      const payer = group?.members.find((m) => m.userId === created.paid_by);
+      const newRecord: ExpenseLedgerRecord = {
+        id: created.id,
+        groupId: created.group_id,
+        groupName: group?.name ?? "Split Group",
+        groupBaseCurrency: group?.baseCurrency ?? created.currency,
+        groupBillingAnchorDay: group?.billingCycleAnchorDay ?? 1,
+        createdBy: created.created_by,
+        paidBy: created.paid_by,
+        payerName: payer?.name ?? "Member",
+        description: created.description,
+        category: created.category,
+        expenseDate: created.expense_date,
+        amountCents: Number(created.amount_cents),
+        currency: created.currency,
+        originalAmountCents: created.original_amount_cents ?? null,
+        originalCurrency: created.original_currency ?? null,
+        exchangeRate: created.exchange_rate ?? null,
+        exchangeRateSource: created.exchange_rate_source ?? null,
+        splitMethod: created.split_method,
+        splitBreakdown: Array.isArray(created.split_breakdown)
+          ? created.split_breakdown
+          : [],
+        receiptUrl: created.receipt_url ?? null,
+        isRecurringGenerated: Boolean(created.is_recurring_generated),
+        recurringRuleId: created.recurring_rule_id ?? null,
+        adjustmentForExpenseId: created.adjustment_for_expense_id ?? null,
+        isLocked: Boolean(created.is_locked),
+        isCycleClosed: false,
+        isSettledByWatermark: false,
+        isSettledForUser: false,
+      };
+      setAddedExpenses((prev) =>
+        prev.some((item) => item.id === newRecord.id)
+          ? prev
+          : [newRecord, ...prev],
+      );
+    };
+    window.addEventListener("ledgersplit:expense-created", handleCreated);
+    return () =>
+      window.removeEventListener("ledgersplit:expense-created", handleCreated);
+  }, [effectiveGroups]);
+
+  const modalGroups = React.useMemo<ShellGroupSummary[]>(() => {
+    const shellById = new Map(shellGroups.map((g) => [g.id, g]));
+    return effectiveGroups.map((g) => {
+      const existing = shellById.get(g.id);
+      if (existing) return existing;
+      return {
+        id: g.id,
+        name: g.name,
+        slug: g.slug,
+        status: g.status,
+        groupType: "RESIDENTIAL",
+        baseCurrency: g.baseCurrency,
+        defaultSplitMode: g.defaultSplitMode,
+        activeSplitCount: 0,
+        members: g.members
+          .filter((m) => m.status === "ACTIVE")
+          .map((m) => ({
+            id: m.userId,
+            name: m.name,
+          })),
+      };
+    });
+  }, [effectiveGroups, shellGroups]);
 
   const scopedGroups = React.useMemo(
     () =>
@@ -540,21 +760,236 @@ export function DashboardClient({
     });
   };
 
+  const handleExpenseUpdated = React.useCallback(
+    (payload: {
+      expense: Database["public"]["Tables"]["expenses"]["Row"];
+      revision?: Database["public"]["Tables"]["expense_revisions"]["Row"];
+      notifications?: Database["public"]["Tables"]["notifications"]["Row"][];
+    }) => {
+      const updated = payload.expense;
+      const group = effectiveGroups.find((g) => g.id === updated.group_id);
+      const payer = group?.members.find((m) => m.userId === updated.paid_by);
+      const breakdown = Array.isArray(updated.split_breakdown)
+        ? updated.split_breakdown
+        : [];
+      const lockEval = evaluateExpenseLockAndSettlement({
+        expense: {
+          id: updated.id,
+          groupId: updated.group_id,
+          paidBy: updated.paid_by,
+          expenseDate: updated.expense_date,
+          isLocked: Boolean(updated.is_locked),
+          splitBreakdown: breakdown,
+        },
+        currentUserId,
+        billingCycles: initialBillingCycles,
+        settlements,
+      });
+
+      const nextRecord: ExpenseLedgerRecord = {
+        id: updated.id,
+        groupId: updated.group_id,
+        groupName: group?.name ?? "Split Group",
+        groupBaseCurrency: group?.baseCurrency ?? updated.currency,
+        groupBillingAnchorDay: group?.billingCycleAnchorDay ?? 1,
+        createdBy: updated.created_by,
+        paidBy: updated.paid_by,
+        payerName: payer?.name ?? "Member",
+        description: updated.description,
+        category: updated.category,
+        expenseDate: updated.expense_date,
+        amountCents: Number(updated.amount_cents),
+        currency: updated.currency,
+        originalAmountCents:
+          updated.original_amount_cents !== null &&
+          updated.original_amount_cents !== undefined
+            ? Number(updated.original_amount_cents)
+            : null,
+        originalCurrency: updated.original_currency ?? null,
+        exchangeRate:
+          updated.exchange_rate !== null && updated.exchange_rate !== undefined
+            ? Number(updated.exchange_rate)
+            : null,
+        exchangeRateSource: updated.exchange_rate_source ?? null,
+        splitMethod: updated.split_method,
+        splitBreakdown: breakdown,
+        receiptUrl: updated.receipt_url ?? null,
+        isRecurringGenerated: Boolean(updated.is_recurring_generated),
+        recurringRuleId: updated.recurring_rule_id ?? null,
+        adjustmentForExpenseId: updated.adjustment_for_expense_id ?? null,
+        isLocked: lockEval.isLocked,
+        isCycleClosed: lockEval.isCycleClosed,
+        isSettledByWatermark: lockEval.isSettledByWatermark,
+        isSettledForUser: lockEval.isSettledForUser,
+      };
+
+      setEditedExpenses((prev) => ({ ...prev, [updated.id]: nextRecord }));
+      pushToast({
+        tone: "success",
+        title: "Expense updated",
+        description: `${updated.description} (${formatMinorUnits(updated.amount_cents, updated.currency)}) saved.`,
+      });
+      router.refresh();
+    },
+    [
+      currentUserId,
+      effectiveGroups,
+      initialBillingCycles,
+      pushToast,
+      router,
+      settlements,
+    ],
+  );
+
+  const handleAdjustmentCreated = React.useCallback(
+    (created: Database["public"]["Tables"]["expenses"]["Row"]) => {
+      const group = effectiveGroups.find((g) => g.id === created.group_id);
+      const payer = group?.members.find((m) => m.userId === created.paid_by);
+      const breakdown = Array.isArray(created.split_breakdown)
+        ? created.split_breakdown
+        : [];
+      const newRecord: ExpenseLedgerRecord = {
+        id: created.id,
+        groupId: created.group_id,
+        groupName: group?.name ?? "Split Group",
+        groupBaseCurrency: group?.baseCurrency ?? created.currency,
+        groupBillingAnchorDay: group?.billingCycleAnchorDay ?? 1,
+        createdBy: created.created_by,
+        paidBy: created.paid_by,
+        payerName: payer?.name ?? "Member",
+        description: created.description,
+        category: created.category,
+        expenseDate: created.expense_date,
+        amountCents: Number(created.amount_cents),
+        currency: created.currency,
+        originalAmountCents: created.original_amount_cents ?? null,
+        originalCurrency: created.original_currency ?? null,
+        exchangeRate: created.exchange_rate ?? null,
+        exchangeRateSource: created.exchange_rate_source ?? null,
+        splitMethod: created.split_method,
+        splitBreakdown: breakdown,
+        receiptUrl: created.receipt_url ?? null,
+        isRecurringGenerated: Boolean(created.is_recurring_generated),
+        recurringRuleId: created.recurring_rule_id ?? null,
+        adjustmentForExpenseId: created.adjustment_for_expense_id ?? null,
+        isLocked: Boolean(created.is_locked),
+        isCycleClosed: false,
+        isSettledByWatermark: false,
+        isSettledForUser: false,
+      };
+      setAddedExpenses((prev) =>
+        prev.some((item) => item.id === newRecord.id)
+          ? prev
+          : [newRecord, ...prev],
+      );
+      pushToast({
+        tone: "success",
+        title: "Offsetting adjustment logged",
+        description: `${created.description} (${formatMinorUnits(created.amount_cents, created.currency)}) added to ${group?.name ?? "group"}.`,
+      });
+      router.refresh();
+    },
+    [effectiveGroups, pushToast, router],
+  );
+
+  const handleConfirmSoftDelete = React.useCallback(async () => {
+    if (!deletingExpense || isDeletingExpense) return;
+    setDeleteExpenseError(null);
+    setIsDeletingExpense(true);
+
+    try {
+      const res = await fetch(
+        `/api/groups/${encodeURIComponent(deletingExpense.groupId)}/expenses/${encodeURIComponent(deletingExpense.id)}`,
+        { method: "DELETE" },
+      );
+      const data = (await res.json().catch(() => null)) as {
+        ok?: boolean;
+        error?: string;
+      } | null;
+
+      if (!res.ok) {
+        setDeleteExpenseError(
+          data?.error || "Unable to delete expense. Please try again.",
+        );
+        setIsDeletingExpense(false);
+        return;
+      }
+
+      const deletedTarget = deletingExpense;
+      setDeletedExpenseIds((prev) =>
+        prev.includes(deletedTarget.id) ? prev : [...prev, deletedTarget.id],
+      );
+      setDeletingExpense(null);
+      setIsDeletingExpense(false);
+      pushToast({
+        tone: "success",
+        title: "Expense deleted",
+        description: `${deletedTarget.description} removed from active balances and ledger.`,
+      });
+      router.refresh();
+    } catch {
+      setDeleteExpenseError("Network error while deleting expense.");
+      setIsDeletingExpense(false);
+    }
+  }, [deletingExpense, isDeletingExpense, pushToast, router]);
+
   const cycleLabel = formatCycleLabel(cycle);
   const netSettlementCents = kpi.owedToYouCents - kpi.youOweCents;
 
-  const activeBudgetCents = activeLedgerGroup?.operationalBudgetCents ?? null;
+  const activeBudgetCents = React.useMemo(() => {
+    if (activeLedgerGroup) {
+      return activeLedgerGroup.operationalBudgetCents ?? null;
+    }
+    if (kpi.hasMixedCurrencies) return null;
+    const hasAnyBudget = scopedGroups.some(
+      (g) => g.operationalBudgetCents !== null && g.operationalBudgetCents > 0,
+    );
+    if (!hasAnyBudget) return null;
+    return scopedGroups.reduce(
+      (sum, g) => sum + (g.operationalBudgetCents ?? 0),
+      0,
+    );
+  }, [activeLedgerGroup, kpi.hasMixedCurrencies, scopedGroups]);
+
   const budgetConsumedPct =
     activeBudgetCents && activeBudgetCents > 0
-      ? Math.min(
-          100,
-          Math.round((kpi.totalGroupExpensesCents / activeBudgetCents) * 100),
-        )
+      ? Math.round((kpi.totalGroupExpensesCents / activeBudgetCents) * 100)
       : null;
   const budgetRemainingCents =
     activeBudgetCents !== null
       ? Math.max(0, activeBudgetCents - kpi.totalGroupExpensesCents)
       : null;
+
+  const cycleSplitRatioText = React.useMemo(() => {
+    const cycleExpenses = ledgerExpenses.filter((exp) => {
+      if (activeGroupId !== ALL_GROUPS_VALUE && exp.groupId !== activeGroupId) {
+        return false;
+      }
+      const { startMs, endMs } = getBillingCycleWindow(
+        cycle,
+        exp.groupBillingAnchorDay || 1,
+      );
+      const expMs = Date.parse(exp.expenseDate);
+      return Number.isFinite(expMs) && expMs >= startMs && expMs < endMs;
+    });
+
+    if (cycleExpenses.length === 0) {
+      return activeLedgerGroup
+        ? `Split model: ${
+            activeLedgerGroup.defaultSplitMode === "CUSTOM_RATIOS"
+              ? "Custom Ratios"
+              : "Equal Split"
+          }`
+        : `${scopedGroups.length} active split ${scopedGroups.length === 1 ? "group" : "groups"}`;
+    }
+
+    const equalCount = cycleExpenses.filter(
+      (exp) => exp.splitMethod === "EQUAL",
+    ).length;
+    const equalPct = Math.round((equalCount / cycleExpenses.length) * 100);
+    const customPct = 100 - equalPct;
+    return `Split model: Equal ${equalPct}% · Custom ${customPct}%`;
+  }, [activeGroupId, activeLedgerGroup, cycle, ledgerExpenses, scopedGroups.length]);
 
   const renderEdgeRow = (
     edge: SimplifiedDebtEdge,
@@ -663,8 +1098,12 @@ export function DashboardClient({
             </h1>
             <LiveSyncPill />
             {isCycleClosed && (
-              <Badge tone="warning" size="sm">
-                Closed Period
+              <Badge
+                tone="warning"
+                size="sm"
+                data-testid="settled-closed-period-badge"
+              >
+                Settled / Closed Period
               </Badge>
             )}
           </div>
@@ -705,15 +1144,6 @@ export function DashboardClient({
             className="px-2.5"
           >
             <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
-          </Button>
-          <Button
-            type="button"
-            variant="primary"
-            size="sm"
-            leftIcon={<Plus className="h-4 w-4" aria-hidden="true" />}
-            onClick={openAddExpense}
-          >
-            Quick Add
           </Button>
         </div>
       </section>
@@ -938,31 +1368,30 @@ export function DashboardClient({
             </div>
 
             {/* Segmented Category Meter */}
-            <div className="flex h-3 w-full gap-0.5 overflow-hidden rounded-full border border-hairline bg-canvas-parchment p-0.5">
-              {kpi.totalGroupExpensesCents <= 0 || kpi.categoryTotals.length === 0 ? (
-                <div className="h-full w-full rounded-full bg-hairline/40" />
-              ) : (
-                kpi.categoryTotals.slice(0, 6).map((cat) => {
-                  const pct = Math.max(
-                    3,
-                    Math.round(
-                      (cat.amountCents / kpi.totalGroupExpensesCents) * 100,
-                    ),
-                  );
-                  return (
-                    <div
-                      key={cat.category}
-                      style={{
-                        width: `${pct}%`,
-                        backgroundColor: getCategoryColor(cat.category),
-                      }}
-                      title={`${cat.category}: ${formatMinorUnits(cat.amountCents, kpi.displayCurrency)}`}
-                      className="h-full rounded-full transition-all"
-                    />
-                  );
-                })
-              )}
-            </div>
+            <ProgressBar
+              label="Monthly category spending breakdown"
+              value={kpi.totalGroupExpensesCents}
+              max={
+                activeBudgetCents &&
+                activeBudgetCents > kpi.totalGroupExpensesCents &&
+                !kpi.hasMixedCurrencies
+                  ? activeBudgetCents
+                  : Math.max(kpi.totalGroupExpensesCents, 1)
+              }
+              size="lg"
+              segments={
+                kpi.totalGroupExpensesCents > 0
+                  ? kpi.categoryTotals.slice(0, 6).map((cat) => ({
+                      id: cat.category,
+                      label: cat.category,
+                      value: cat.amountCents,
+                      color: getCategoryColor(cat.category),
+                    }))
+                  : undefined
+              }
+              tone="primary"
+              className="rounded-full border border-hairline bg-canvas-parchment p-0.5"
+            />
 
             {/* Category Tiles */}
             {kpi.categoryTotals.length === 0 ? (
@@ -1024,8 +1453,16 @@ export function DashboardClient({
                             kpi.displayCurrency,
                           )}
                         </span>
-                        <span className="text-[11px] font-medium tabular-nums text-[#248a3d]">
-                          {Math.max(0, 100 - (budgetConsumedPct ?? 0))}% left
+                        <span
+                          className={`text-[11px] font-medium tabular-nums ${
+                            (budgetConsumedPct ?? 0) > 100
+                              ? "text-[#ff3b30]"
+                              : "text-[#248a3d]"
+                          }`}
+                        >
+                          {(budgetConsumedPct ?? 0) > 100
+                            ? "Over budget"
+                            : `${Math.max(0, 100 - (budgetConsumedPct ?? 0))}% left`}
                         </span>
                       </div>
                     </div>
@@ -1040,15 +1477,7 @@ export function DashboardClient({
                 className="h-4 w-4 shrink-0 text-[#0066cc]"
                 aria-hidden="true"
               />
-              <span>
-                {activeLedgerGroup
-                  ? `Split model: ${
-                      activeLedgerGroup.defaultSplitMode === "CUSTOM_RATIOS"
-                        ? "Custom Ratios"
-                        : "Equal Split"
-                    }`
-                  : `${scopedGroups.length} active split ${scopedGroups.length === 1 ? "group" : "groups"}`}
-              </span>
+              <span>{cycleSplitRatioText}</span>
             </div>
             <Link
               href={buildNavHref("/split-groups")}
@@ -1213,7 +1642,12 @@ export function DashboardClient({
       </section>
 
       {/* Recent Shared Transactions */}
-      <Card variant="section" padding="md" className="flex flex-col gap-4">
+      <Card
+        variant="section"
+        padding="md"
+        data-testid="recent-shared-transactions-card"
+        className="flex flex-col gap-4"
+      >
         <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
           <div className="flex items-center gap-3">
             <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-hairline bg-canvas-parchment text-[#0066cc]">
@@ -1224,7 +1658,7 @@ export function DashboardClient({
                 Recent Shared Transactions
               </h2>
               <p className="text-[12px] text-ink-muted-48">
-                Itemized expenses logged for {cycleLabel}
+                Itemized shared records for {cycleLabel}
               </p>
             </div>
           </div>
@@ -1255,81 +1689,207 @@ export function DashboardClient({
               }}
               className="h-9 bg-canvas text-[12px] font-medium"
             />
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              leftIcon={<Plus className="h-4 w-4" aria-hidden="true" />}
+              onClick={openAddExpense}
+            >
+              Quick Add
+            </Button>
           </div>
         </div>
 
         <div className="overflow-hidden rounded-[14px] border border-hairline">
-          <Table>
+          <Table aria-label="Recent Shared Transactions">
             <TableHeader>
               <TableRow>
-                <TableHead>Date</TableHead>
-                <TableHead>Description &amp; Group</TableHead>
+                <TableHead>Date &amp; Time</TableHead>
+                <TableHead>Merchant &amp; Group</TableHead>
                 <TableHead>Category</TableHead>
                 <TableHead>Paid By</TableHead>
-                <TableHead>Split</TableHead>
+                <TableHead>Split Distribution</TableHead>
                 <TableHead className="text-right">Amount</TableHead>
+                <TableHead className="text-center">Action</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {paginatedExpenses.length === 0 ? (
                 <TableEmpty
-                  colSpan={6}
+                  colSpan={7}
                   title="No shared transactions in this period"
                   description={
                     effectiveGroups.length === 0
                       ? "Create a split group first, then use Quick Add to log shared expenses."
-                      : `No expenses logged for ${cycleLabel}. Use Quick Add to record your first split.`
+                      : searchQuery || selectedCategory !== "all"
+                        ? "No matching expenses found. Try clearing your filter."
+                        : `No expenses logged for ${cycleLabel}. Use Quick Add to record your first split.`
                   }
                   action={
-                    effectiveGroups.length > 0 ? (
+                    searchQuery || selectedCategory !== "all" ? (
                       <Button
                         type="button"
                         variant="secondary"
                         size="sm"
-                        leftIcon={<Plus className="h-3.5 w-3.5" aria-hidden="true" />}
-                        onClick={openAddExpense}
+                        onClick={() => {
+                          setSearchQuery("");
+                          setSelectedCategory("all");
+                          setCurrentPage(1);
+                        }}
                       >
-                        Quick Add
+                        Reset Filters
                       </Button>
                     ) : undefined
                   }
                 />
               ) : (
                 paginatedExpenses.map((exp) => {
-                  const myShare = exp.splitBreakdown.find(
-                    (b) => b.user_id === currentUserId,
+                  const dateParts = formatDateParts(exp.expenseDate);
+                  const myShareCents = getUserShareCents(exp, currentUserId);
+                  const isUserPayer = exp.paidBy === currentUserId;
+                  const netOwedToUser = isUserPayer
+                    ? exp.amountCents - myShareCents
+                    : myShareCents;
+
+                  const expGroup = effectiveGroups.find(
+                    (g) => g.id === exp.groupId,
                   );
+                  const currentMember = expGroup?.members.find(
+                    (m) => m.userId === currentUserId,
+                  );
+                  const isActiveMember = currentMember?.status === "ACTIVE";
+                  const isGroupAdmin =
+                    isActiveMember && expGroup?.currentUserRole === "ADMIN";
+                  const isCreator =
+                    isActiveMember && exp.createdBy === currentUserId;
+                  const isGroupArchived = expGroup?.status === "ARCHIVED";
+                  const canModify =
+                    !exp.isLocked &&
+                    !isGroupArchived &&
+                    (isGroupAdmin || isCreator);
+
+                  const rowMenuItems: DropdownItem[] = [
+                    {
+                      id: "inspect",
+                      label: "View Split Details",
+                      icon: <Eye className="h-3.5 w-3.5" aria-hidden="true" />,
+                      onSelect: () => setInspectExpense(exp),
+                    },
+                  ];
+
+                  if (canModify) {
+                    rowMenuItems.push({
+                      id: "edit",
+                      label: "Edit Expense",
+                      icon: <Pencil className="h-3.5 w-3.5" aria-hidden="true" />,
+                      onSelect: () => setEditingExpense(exp),
+                    });
+                  } else if (exp.isLocked && !isGroupArchived && isActiveMember) {
+                    rowMenuItems.push({
+                      id: "adjust",
+                      label: "Log Adjustment",
+                      icon: (
+                        <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                      ),
+                      onSelect: () => setAdjustingExpense(exp),
+                    });
+                  }
+
+                  const groupSettleableDebts = settleableDebts.filter(
+                    (d) => d.groupId === exp.groupId,
+                  );
+                  if (groupSettleableDebts.length > 0) {
+                    const preferredDebt =
+                      groupSettleableDebts.find(
+                        (d) =>
+                          (d.payerId === currentUserId &&
+                            d.recipientId === exp.paidBy) ||
+                          (d.recipientId === currentUserId &&
+                            d.payerId === exp.paidBy),
+                      ) ?? groupSettleableDebts[0];
+                    rowMenuItems.push({
+                      id: "settle",
+                      label: "Settle Group Balance",
+                      icon: (
+                        <CheckCircle2
+                          className="h-3.5 w-3.5"
+                          aria-hidden="true"
+                        />
+                      ),
+                      onSelect: () => openSettlementForEdge(preferredDebt),
+                    });
+                  }
+
+                  if (canModify) {
+                    rowMenuItems.push(
+                      { id: "delete-divider", separator: true },
+                      {
+                        id: "delete",
+                        label: "Delete Expense",
+                        danger: true,
+                        icon: (
+                          <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                        ),
+                        onSelect: () => {
+                          setDeleteExpenseError(null);
+                          setDeletingExpense(exp);
+                        },
+                      },
+                    );
+                  }
 
                   return (
-                    <TableRow key={exp.id}>
-                      <TableCell className="whitespace-nowrap text-[12px] text-ink-muted-80">
-                        {formatExpenseDateShort(exp.expenseDate)}
+                    <TableRow
+                      key={exp.id}
+                      data-testid={`dashboard-tx-row-${exp.id}`}
+                    >
+                      <TableCell className="whitespace-nowrap">
+                        <span className="block text-[12px] font-medium text-ink">
+                          {dateParts.date}
+                        </span>
+                        {dateParts.time && (
+                          <span className="block text-[11px] text-ink-muted-48">
+                            {dateParts.time}
+                          </span>
+                        )}
                       </TableCell>
                       <TableCell>
-                        <div className="flex flex-col">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-[13px] font-semibold text-ink">
-                              {exp.description}
-                            </span>
-                            {exp.receiptUrl && (
-                              <a
-                                href={`/api/receipts?path=${encodeURIComponent(exp.receiptUrl)}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                aria-label={`View receipt for ${exp.description}`}
-                                className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink-muted-48 transition-colors hover:bg-canvas-parchment hover:text-[#0066cc] focus-visible:outline-2 focus-visible:outline-primary-focus focus-visible:outline-offset-2"
-                              >
-                                <Paperclip className="h-3.5 w-3.5" aria-hidden="true" />
-                              </a>
-                            )}
-                          </div>
-                          <span className="text-[11px] text-ink-muted-48">
-                            {exp.groupName}
+                        <div className="flex items-center gap-3">
+                          <span
+                            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-hairline bg-canvas-parchment"
+                            style={{ color: getCategoryColor(exp.category) }}
+                          >
+                            {renderCategoryIcon(exp.category)}
                           </span>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <span className="truncate text-[13px] font-semibold text-ink">
+                                {exp.description}
+                              </span>
+                              {exp.adjustmentForExpenseId && (
+                                <Badge tone="warning" size="sm">
+                                  Adjustment
+                                </Badge>
+                              )}
+                              {exp.isRecurringGenerated && (
+                                <Badge tone="info" size="sm">
+                                  Auto
+                                </Badge>
+                              )}
+                            </div>
+                            <span className="block truncate text-[11px] text-ink-muted-48">
+                              {exp.groupName}
+                            </span>
+                          </div>
                         </div>
                       </TableCell>
                       <TableCell className="whitespace-nowrap">
-                        <Badge tone="neutral" size="sm">
+                        <Badge
+                          tone="category"
+                          size="sm"
+                          dotColor={getCategoryColor(exp.category)}
+                        >
                           {exp.category}
                         </Badge>
                       </TableCell>
@@ -1337,31 +1897,40 @@ export function DashboardClient({
                         <div className="flex items-center gap-2">
                           <Avatar name={exp.payerName} size="sm" />
                           <span className="text-[12px] font-medium text-ink">
-                            {exp.paidBy === currentUserId
-                              ? "You"
-                              : exp.payerName}
+                            {isUserPayer ? "You" : exp.payerName}
                           </span>
                         </div>
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-[12px] text-ink-muted-80">
-                        <div className="flex flex-col">
-                          <span>{SPLIT_METHOD_LABEL[exp.splitMethod]}</span>
-                          {myShare && (
-                            <span className="text-[11px] tabular-nums text-[#0066cc]">
-                              Your share:{" "}
-                              {formatMinorUnits(
-                                myShare.share_cents,
-                                exp.currency,
-                              )}
-                            </span>
+                        <Badge tone="neutral" size="sm">
+                          {formatSplitMethodLabel(
+                            exp.splitMethod,
+                            exp.splitBreakdown.length,
                           )}
-                        </div>
+                        </Badge>
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-right">
                         <div className="flex flex-col items-end">
                           <span className="text-[13px] font-semibold tabular-nums text-ink">
                             {formatMinorUnits(exp.amountCents, exp.currency)}
                           </span>
+                          {myShareCents > 0 || (isUserPayer && netOwedToUser > 0) ? (
+                            <span
+                              className={`text-[11px] font-medium tabular-nums ${
+                                !exp.isSettledForUser && !isUserPayer && myShareCents > 0
+                                  ? "text-[#ff3b30]"
+                                  : !exp.isSettledForUser && isUserPayer && netOwedToUser > 0
+                                    ? "text-[#248a3d]"
+                                    : "text-[#0066cc]"
+                              }`}
+                            >
+                              {!exp.isSettledForUser && !isUserPayer
+                                ? `You owe: ${formatMinorUnits(myShareCents, exp.currency)}`
+                                : !exp.isSettledForUser && isUserPayer && netOwedToUser > 0
+                                  ? `Owed to you: ${formatMinorUnits(netOwedToUser, exp.currency)}`
+                                  : `Your share: ${formatMinorUnits(myShareCents, exp.currency)}`}
+                            </span>
+                          ) : null}
                           {exp.originalAmountCents !== null &&
                             exp.originalCurrency && (
                               <span className="text-[11px] tabular-nums text-ink-muted-48">
@@ -1374,6 +1943,30 @@ export function DashboardClient({
                             )}
                         </div>
                       </TableCell>
+                      <TableCell className="whitespace-nowrap text-center">
+                        <div className="inline-flex items-center justify-center gap-1">
+                          {exp.receiptUrl && (
+                            <a
+                              href={`/api/receipts?path=${encodeURIComponent(exp.receiptUrl)}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              aria-label={`View receipt for ${exp.description}`}
+                              className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-ink-muted-48 transition-colors hover:bg-canvas-parchment hover:text-[#0066cc] focus-visible:outline-2 focus-visible:outline-primary-focus focus-visible:outline-offset-2"
+                            >
+                              <Paperclip
+                                className="h-3.5 w-3.5"
+                                aria-hidden="true"
+                              />
+                            </a>
+                          )}
+                          <Dropdown
+                            variant="action-menu"
+                            align="right"
+                            triggerAriaLabel={`Actions for ${exp.description}`}
+                            items={rowMenuItems}
+                          />
+                        </div>
+                      </TableCell>
                     </TableRow>
                   );
                 })
@@ -1382,12 +1975,13 @@ export function DashboardClient({
           </Table>
         </div>
 
-        {visibleExpenses.length > RECENT_TX_PAGE_SIZE && (
+        {visibleExpenses.length > 0 && (
           <Pagination
             currentPage={safePage}
             totalPages={totalPages}
             totalItems={visibleExpenses.length}
             pageSize={RECENT_TX_PAGE_SIZE}
+            itemLabel="transactions"
             onPageChange={setCurrentPage}
           />
         )}
@@ -1420,6 +2014,206 @@ export function DashboardClient({
           router.refresh();
         }}
       />
+
+      {/* Split Inspection Dialog */}
+      {(() => {
+        const inspectGroup = inspectExpense
+          ? effectiveGroups.find((g) => g.id === inspectExpense.groupId)
+          : null;
+        return (
+          <Dialog
+            open={inspectExpense !== null}
+            onClose={() => setInspectExpense(null)}
+            title={inspectExpense?.description ?? "Expense Details"}
+            description={
+              inspectExpense
+                ? `${inspectExpense.groupName} · ${formatDateParts(inspectExpense.expenseDate).date}`
+                : undefined
+            }
+            size="md"
+            footer={
+              <div className="flex items-center gap-2">
+                {inspectExpense?.isLocked &&
+                  inspectGroup &&
+                  inspectGroup.status !== "ARCHIVED" &&
+                  inspectGroup.members.some(
+                    (m) => m.userId === currentUserId && m.status === "ACTIVE",
+                  ) && (
+                    <Button
+                      type="button"
+                      variant="primary"
+                      size="sm"
+                      leftIcon={
+                        <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                      }
+                      onClick={() => {
+                        const target = inspectExpense;
+                        setInspectExpense(null);
+                        setAdjustingExpense(target);
+                      }}
+                    >
+                      Log Adjustment
+                    </Button>
+                  )}
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setInspectExpense(null)}
+                >
+                  Close
+                </Button>
+              </div>
+            }
+          >
+            {inspectExpense && (
+              <div className="flex flex-col gap-4">
+                {inspectExpense.isLocked && (
+                  <AlertBanner
+                    tone="warning"
+                    title="Immutable Locked Expense"
+                    description={
+                      inspectExpense.isCycleClosed
+                        ? "This expense belongs to a closed billing cycle and cannot be edited or deleted. Log an Offsetting Adjustment if a correction is needed."
+                        : "A pairwise settlement watermark covers this expense, locking its split breakdown against edits."
+                    }
+                  />
+                )}
+
+                <div className="grid grid-cols-2 gap-3 rounded-[14px] border border-hairline bg-canvas-parchment p-4 text-[13px]">
+                  <div>
+                    <span className="block text-[11px] font-semibold uppercase tracking-wider text-ink-muted-48">
+                      Total Amount
+                    </span>
+                    <span className="font-semibold tabular-nums text-ink">
+                      {formatMinorUnits(
+                        inspectExpense.amountCents,
+                        inspectExpense.currency,
+                      )}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="block text-[11px] font-semibold uppercase tracking-wider text-ink-muted-48">
+                      Paid By
+                    </span>
+                    <span className="font-semibold text-ink">
+                      {inspectExpense.paidBy === currentUserId
+                        ? `You (${inspectExpense.payerName})`
+                        : inspectExpense.payerName}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted-48">
+                    Point-in-Time Split Snapshot ({inspectExpense.splitMethod})
+                  </span>
+                  <ul className="divide-y divide-divider-soft rounded-[14px] border border-hairline bg-canvas">
+                    {inspectExpense.splitBreakdown.map((item) => {
+                      const member = inspectGroup?.members.find(
+                        (m) => m.userId === item.user_id,
+                      );
+                      const memberName = member?.name ?? "Group Member";
+                      return (
+                        <li
+                          key={item.user_id}
+                          className="flex items-center justify-between px-4 py-2.5 text-[13px]"
+                        >
+                          <span className="font-medium text-ink">
+                            {item.user_id === currentUserId
+                              ? `${memberName} (You)`
+                              : memberName}
+                          </span>
+                          <span className="font-semibold tabular-nums text-ink">
+                            {formatMinorUnits(
+                              item.share_cents,
+                              inspectExpense.currency,
+                            )}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              </div>
+            )}
+          </Dialog>
+        );
+      })()}
+
+      {/* Edit Expense Modal */}
+      <AddEditExpenseModal
+        open={editingExpense !== null}
+        onClose={() => setEditingExpense(null)}
+        mode="edit"
+        expense={editingExpense}
+        onSwitchToAdjustment={() => {
+          const target = editingExpense;
+          setEditingExpense(null);
+          if (target) setAdjustingExpense(target);
+        }}
+        groups={modalGroups}
+        activeGroupId={editingExpense?.groupId ?? activeGroupId}
+        currentUser={
+          shellUser ?? {
+            id: currentUserId,
+            fullName: "Member",
+            email: "",
+          }
+        }
+        cycle={cycle}
+        onReceiptStorageUsedBytesChange={updateReceiptStorageUsedBytes}
+        onUpdated={handleExpenseUpdated}
+      />
+
+      {/* Offsetting Adjustment Modal */}
+      <AddEditExpenseModal
+        open={adjustingExpense !== null}
+        onClose={() => setAdjustingExpense(null)}
+        mode="adjustment"
+        expense={adjustingExpense}
+        groups={modalGroups}
+        activeGroupId={adjustingExpense?.groupId ?? activeGroupId}
+        currentUser={
+          shellUser ?? {
+            id: currentUserId,
+            fullName: "Member",
+            email: "",
+          }
+        }
+        cycle={cycle}
+        onReceiptStorageUsedBytesChange={updateReceiptStorageUsedBytes}
+        onCreated={handleAdjustmentCreated}
+      />
+
+      {/* Soft-Delete Confirmation Dialog */}
+      <ConfirmDialog
+        open={deletingExpense !== null}
+        onClose={() => {
+          if (!isDeletingExpense) {
+            setDeleteExpenseError(null);
+            setDeletingExpense(null);
+          }
+        }}
+        onConfirm={handleConfirmSoftDelete}
+        title="Delete Unlocked Expense?"
+        description={
+          deletingExpense
+            ? `Soft-delete "${deletingExpense.description}" (${formatMinorUnits(deletingExpense.amountCents, deletingExpense.currency)}) from ${deletingExpense.groupName}? Active group balances will recalculate immediately.`
+            : undefined
+        }
+        confirmLabel="Delete Expense"
+        variant="danger"
+        loading={isDeletingExpense}
+      >
+        {deleteExpenseError && (
+          <AlertBanner
+            tone="error"
+            title="Could not delete expense"
+            description={deleteExpenseError}
+          />
+        )}
+      </ConfirmDialog>
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>

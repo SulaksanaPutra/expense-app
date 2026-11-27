@@ -574,18 +574,11 @@ describe("Issue #85 — Hybrid Locking (Cycle Close + Pairwise Watermark) & Offs
       group: {
         id: groupId,
         name: "Apt 4B",
-        slug: "apt-4b",
-        status: "ACTIVE",
         baseCurrency: "USD",
-        defaultSplitMode: "EQUAL",
         simplifyDebts: false,
-        operationalBudgetCents: null,
-        billingCycleAnchorDay: 1,
-        currentUserRole: "ADMIN",
         members: store.users.map((u) => ({
           userId: u.id,
           name: u.full_name,
-          status: "ACTIVE",
           instantSettlementTag: null,
         })),
       },
