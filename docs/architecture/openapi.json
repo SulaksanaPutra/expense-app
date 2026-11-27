@@ -622,6 +622,66 @@
         }
       }
     },
+    "/api/groups/{groupId}/reminders": {
+      "parameters": [
+        {
+          "name": "groupId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "get_groups_groupId_reminders",
+        "tags": [
+          "groups"
+        ],
+        "summary": "List active 24h settlement reminder cooldowns for the authenticated creditor in a group.",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_groups_groupId_reminders",
+        "tags": [
+          "groups"
+        ],
+        "summary": "Dispatch settlement reminder(s) for a group with 24h cooldown and SMS opt-in gating.",
+        "responses": {
+          "201": {
+            "description": "Created"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "429": {
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
     "/api/groups/{groupId}/settlements": {
       "parameters": [
         {
@@ -818,6 +878,50 @@
         }
       }
     },
+    "/api/reminders": {
+      "get": {
+        "operationId": "get_reminders",
+        "tags": [
+          "reminders"
+        ],
+        "summary": "List all active 24h settlement reminder cooldowns for the authenticated creditor across groups.",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_reminders",
+        "tags": [
+          "reminders"
+        ],
+        "summary": "Send one or a cross-group batch of settlement reminders with strict 24h cooldown and SMS opt-in gating.",
+        "responses": {
+          "201": {
+            "description": "Created"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "429": {
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
     "/api/search": {
       "get": {
         "operationId": "get_search",
@@ -828,6 +932,99 @@
         "responses": {
           "200": {
             "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/settings": {
+      "get": {
+        "operationId": "get_settings",
+        "tags": [
+          "settings"
+        ],
+        "summary": "GET /api/settings",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "patch_settings",
+        "tags": [
+          "settings"
+        ],
+        "summary": "PATCH /api/settings",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/settings/export": {
+      "get": {
+        "operationId": "get_settings_export",
+        "tags": [
+          "settings"
+        ],
+        "summary": "GET /api/settings/export",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/settings/phone-verify": {
+      "post": {
+        "operationId": "post_settings_phone_verify",
+        "tags": [
+          "settings"
+        ],
+        "summary": "POST /api/settings/phone-verify",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Bad Request"
           },
           "401": {
             "description": "Unauthorized"

@@ -29,6 +29,7 @@ import {
   recordGroupAuditEvent,
   type GroupAuditLogEntry,
 } from "./audit-log";
+import { getActiveReminderCooldowns } from "./reminders";
 
 const VALID_GROUP_TYPES: readonly GroupType[] = [
   "RESIDENTIAL",
@@ -540,6 +541,7 @@ export async function getSplitGroupsPageData(
       { data: settlementRows, error: settlementsError },
       { data: recurringRows, error: recurringError },
       { data: billingCycleRows },
+      reminderCooldowns,
     ] = await Promise.all([
       supabase
         .from("group_members")
@@ -570,6 +572,7 @@ export async function getSplitGroupsPageData(
             .in("group_id", groupIds),
         )
         .catch(() => ({ data: [] })),
+      getActiveReminderCooldowns(supabase, currentUserId, groupIds),
     ]);
 
     if (membersError || expensesError || settlementsError || recurringError) {
@@ -891,6 +894,7 @@ export async function getSplitGroupsPageData(
       activeGroups,
       archivedGroups,
       cycleSlug,
+      reminderCooldowns,
       loadError: null,
     };
   } catch (err) {

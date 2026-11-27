@@ -41,6 +41,12 @@ import { formatCycleLabel } from "@/components/shell/url-state";
 import { cn } from "@/lib/cn";
 import type { GroupAuditLogEntry } from "@/lib/groups/audit-log";
 import { buildInviteJoinUrl } from "@/lib/groups/invite-utils";
+import {
+  formatCooldownLabel,
+  getReminderCooldownKey,
+  REMINDER_COOLDOWN_MS,
+  type ReminderCooldownInfo,
+} from "@/lib/groups/reminders";
 import type {
   SplitGroupDetail,
   SplitGroupMemberDetail,
@@ -117,6 +123,13 @@ export function SplitGroupsClient({
   const [regeneratingGroupId, setRegeneratingGroupId] = React.useState<
     string | null
   >(null);
+  const [cooldownOverrides, setCooldownOverrides] = React.useState<
+    Record<string, ReminderCooldownInfo>
+  >({});
+  const [sendingReminderKeys, setSendingReminderKeys] = React.useState<
+    Record<string, boolean>
+  >({});
+  const [nowTickMs, setNowTickMs] = React.useState(() => Date.now());
   const [toasts, setToasts] = React.useState<ToastItem[]>([]);
   const toastCounterRef = React.useRef(0);
   const copyTimerRef = React.useRef<number | null>(null);
@@ -770,6 +783,155 @@ export function SplitGroupsClient({
     [pushToast, router],
   );
 
+  React.useEffect(() => {
+    const timer = window.setInterval(() => {
+      setNowTickMs(Date.now());
+    }, 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const cooldownMap = React.useMemo(() => {
+    const map: Record<string, ReminderCooldownInfo> = {};
+    for (const item of initialData.reminderCooldowns ?? []) {
+      map[getReminderCooldownKey(item.groupId, item.debtorId)] = item;
+    }
+    for (const [key, item] of Object.entries(cooldownOverrides)) {
+      map[key] = item;
+    }
+    return map;
+  }, [cooldownOverrides, initialData.reminderCooldowns]);
+
+  const getActiveCooldown = React.useCallback(
+    (groupId: string, debtorId: string): ReminderCooldownInfo | null => {
+      const key = getReminderCooldownKey(groupId, debtorId);
+      const info = cooldownMap[key];
+      if (!info) return null;
+      const nextAllowedMs = Date.parse(info.nextAllowedAt);
+      if (!Number.isFinite(nextAllowedMs) || nextAllowedMs <= nowTickMs) {
+        return null;
+      }
+      const remainingMs = nextAllowedMs - nowTickMs;
+      const remainingHours = Math.max(1, Math.ceil(remainingMs / 3_600_000));
+      return {
+        ...info,
+        remainingMs,
+        remainingHours,
+      };
+    },
+    [cooldownMap, nowTickMs],
+  );
+
+  const handleSendMemberReminder = React.useCallback(
+    async (group: SplitGroupDetail, member: SplitGroupMemberDetail) => {
+      const key = getReminderCooldownKey(group.id, member.userId);
+      if (sendingReminderKeys[key]) return;
+
+      setSendingReminderKeys((prev) => ({ ...prev, [key]: true }));
+      try {
+        const response = await fetch(
+          `/api/groups/${encodeURIComponent(group.id)}/reminders`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              debtor_id: member.userId,
+              amount_cents: Math.abs(member.netBalanceCents),
+            }),
+          },
+        );
+        const payload = (await response.json()) as {
+          ok?: boolean;
+          error?: string;
+          channel?: "PUSH" | "EMAIL" | "SMS";
+          cooldown?: ReminderCooldownInfo;
+          remaining_hours?: number;
+          next_allowed_at?: string;
+          last_sent_at?: string;
+        };
+
+        if (response.status === 429) {
+          const remainingHours = Math.max(
+            1,
+            Math.trunc(
+              payload.cooldown?.remainingHours ?? payload.remaining_hours ?? 24,
+            ),
+          );
+          const now = Date.now();
+          const cooldown: ReminderCooldownInfo = payload.cooldown ?? {
+            groupId: group.id,
+            debtorId: member.userId,
+            creditorId: "",
+            channel: "PUSH",
+            sentAt: payload.last_sent_at ?? new Date(now).toISOString(),
+            nextAllowedAt:
+              payload.next_allowed_at ??
+              new Date(
+                now + Math.min(REMINDER_COOLDOWN_MS, remainingHours * 3_600_000),
+              ).toISOString(),
+            remainingMs: remainingHours * 3_600_000,
+            remainingHours,
+          };
+          setCooldownOverrides((prev) => ({ ...prev, [key]: cooldown }));
+          pushToast({
+            tone: "warning",
+            title: "Reminder cooldown active",
+            description:
+              payload.error ||
+              `${member.name}: ${formatCooldownLabel(cooldown.remainingHours)}.`,
+          });
+          return;
+        }
+
+        if (!response.ok || !payload.ok) {
+          pushToast({
+            tone: "error",
+            title: "Could not send reminder",
+            description:
+              payload.error || "Unable to send settlement reminder.",
+          });
+          return;
+        }
+
+        const now = Date.now();
+        const cooldown: ReminderCooldownInfo = payload.cooldown ?? {
+          groupId: group.id,
+          debtorId: member.userId,
+          creditorId: "",
+          channel: payload.channel ?? "PUSH",
+          sentAt: new Date(now).toISOString(),
+          nextAllowedAt: new Date(now + REMINDER_COOLDOWN_MS).toISOString(),
+          remainingMs: REMINDER_COOLDOWN_MS,
+          remainingHours: 24,
+        };
+        setCooldownOverrides((prev) => ({ ...prev, [key]: cooldown }));
+        setNowTickMs(Date.now());
+
+        const viaSms = payload.channel === "SMS";
+        pushToast({
+          tone: "success",
+          title: viaSms ? "SMS reminder sent" : "Push reminder sent",
+          description: viaSms
+            ? `Dispatched SMS and in-app nudge to ${member.name}.`
+            : `Sent Push/in-app settlement reminder to ${member.name}.`,
+        });
+        router.refresh();
+      } catch {
+        pushToast({
+          tone: "error",
+          title: "Network error",
+          description: "Unable to send settlement reminder right now.",
+        });
+      } finally {
+        setSendingReminderKeys((prev) => {
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        });
+      }
+    },
+    [pushToast, router, sendingReminderKeys],
+  );
+
   const handleArchiveCheckCompleted = React.useCallback(
     (summary: { autoArchivedGroupIds: string[] }) => {
       if (summary.autoArchivedGroupIds.length > 0) {
@@ -1170,7 +1332,7 @@ export function SplitGroupsClient({
                     />
                   </div>
 
-                  <div className="flex items-center justify-between gap-2 border-t border-hairline pt-2.5 text-[12px]">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-t border-hairline pt-2.5 text-[12px]">
                     <span
                       className={cn(
                         "font-semibold tabular-nums",
@@ -1194,15 +1356,65 @@ export function SplitGroupsClient({
                             )}`
                           : "Settled"}
                     </span>
-                    {member.status === "FORMER_MEMBER" ? (
-                      <Badge tone="warning" size="sm">
-                        Former
-                      </Badge>
-                    ) : member.netBalanceCents === 0 ? (
-                      <Badge tone="neutral" size="sm">
-                        Balanced
-                      </Badge>
-                    ) : null}
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {member.status === "FORMER_MEMBER" ? (
+                        <Badge tone="warning" size="sm">
+                          Former
+                        </Badge>
+                      ) : member.netBalanceCents === 0 ? (
+                        <Badge tone="neutral" size="sm">
+                          Balanced
+                        </Badge>
+                      ) : null}
+                      {(() => {
+                        const currentMember = selectedGroup.members.find(
+                          (m) => m.isCurrentUser,
+                        );
+                        const canRemindMember =
+                          selectedGroup.status !== "ARCHIVED" &&
+                          currentMember?.status === "ACTIVE" &&
+                          !member.isCurrentUser &&
+                          member.netBalanceCents < 0;
+                        if (!canRemindMember) return null;
+                        const reminderKey = getReminderCooldownKey(
+                          selectedGroup.id,
+                          member.userId,
+                        );
+                        const cooldown = getActiveCooldown(
+                          selectedGroup.id,
+                          member.userId,
+                        );
+                        const isSending = Boolean(
+                          sendingReminderKeys[reminderKey],
+                        );
+                        return (
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            data-testid={`split-group-remind-${member.userId}`}
+                            loading={isSending}
+                            disabled={Boolean(cooldown) || isSending}
+                            aria-label={
+                              cooldown
+                                ? `${formatCooldownLabel(cooldown.remainingHours)} for ${member.name}`
+                                : `Remind ${member.name}`
+                            }
+                            onClick={() =>
+                              void handleSendMemberReminder(selectedGroup, member)
+                            }
+                            className={cn(
+                              "h-7 px-2.5 text-[11px]",
+                              cooldown ? "text-ink-muted-48" : "text-[#0066cc]",
+                            )}
+                          >
+                            {cooldown
+                              ? formatCooldownLabel(cooldown.remainingHours)
+                              : "Remind"}
+                          </Button>
+                        );
+                      })()}
+                    </div>
                   </div>
 
                   {(member.status === "FORMER_MEMBER" ||
