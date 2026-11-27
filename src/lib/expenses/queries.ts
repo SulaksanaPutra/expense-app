@@ -114,7 +114,7 @@ export async function getExpensesPageData(
       supabase
         .from("recurring_rules")
         .select(
-          "id, group_id, paid_by, description, category, amount_cents, currency, frequency, day_of_month, split_rule, is_active, next_run_date",
+          "id, group_id, created_by, paid_by, description, category, amount_cents, currency, frequency, day_of_month, split_rule, is_active, next_run_date",
         )
         .in("group_id", groupIds)
         .order("day_of_month", { ascending: true }),
@@ -192,6 +192,7 @@ export async function getExpensesPageData(
             : null,
         billingCycleAnchorDay: g.billing_cycle_anchor_day ?? 1,
         currentUserRole: currentMembership?.role ?? null,
+        currentUserStatus: currentMembership?.status ?? null,
         members: gMembers.map((m) => {
           const u = usersById.get(m.user_id);
           return {
@@ -290,6 +291,7 @@ export async function getExpensesPageData(
         id: r.id,
         groupId: r.group_id,
         groupName: groupMap.get(r.group_id)?.name ?? "Split Group",
+        createdBy: r.created_by ?? null,
         paidBy: r.paid_by,
         payerName: usersById.get(r.paid_by)?.full_name ?? "Member",
         description: r.description,

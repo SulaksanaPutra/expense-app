@@ -1,5 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
+  computeInitialNextRunDate,
+  isValidIsoDateString,
+} from "@/lib/expenses/recurring";
+import {
   convertForeignAmountToBaseMinorUnits,
   validateSplitBreakdown,
 } from "@/lib/expenses/split-engine";
@@ -12,6 +16,7 @@ import type {
   MemberRole,
   MemberStatus,
   PaymentRail,
+  RecurringFrequency,
   SplitBreakdownItem,
   SplitMode,
 } from "@/types/database";
@@ -138,13 +143,13 @@ export async function assertGroupWritableForLedger(
     (operation === "RECURRING_RULE_CREATE" ||
       operation === "RECURRING_RULE_UPDATE" ||
       operation === "RECURRING_RULE_DELETE") &&
-    (member.status !== "ACTIVE" || member.role !== "ADMIN")
+    member.status !== "ACTIVE"
   ) {
     return {
       ok: false,
       status: 403,
       code: "FORBIDDEN",
-      message: "Only active group admins can manage recurring rules.",
+      message: "Only active group members can manage recurring rules.",
     };
   }
 
@@ -560,9 +565,10 @@ export async function createGroupRecurringRule(
     description: string;
     category: string;
     amountCents: number;
+    frequency?: RecurringFrequency;
     dayOfMonth: number;
     splitRule?: SplitMode;
-    nextRunDate: string;
+    nextRunDate?: string;
   },
 ): Promise<
   | {
@@ -578,13 +584,81 @@ export async function createGroupRecurringRule(
   });
   if (!guard.ok) return guard;
 
+  const trimmedDescription = params.description.trim();
+  if (!trimmedDescription) {
+    return {
+      ok: false,
+      status: 400,
+      code: "INVALID_DESCRIPTION",
+      message: "Recurring rule description is required.",
+    };
+  }
+  if (trimmedDescription.length > 200) {
+    return {
+      ok: false,
+      status: 400,
+      code: "INVALID_DESCRIPTION",
+      message: "Recurring rule description must be 200 characters or fewer.",
+    };
+  }
+
   const amountCents = Math.trunc(params.amountCents);
-  if (!Number.isSafeInteger(amountCents) || amountCents <= 0) {
+  if (
+    !Number.isSafeInteger(params.amountCents) ||
+    !Number.isSafeInteger(amountCents) ||
+    amountCents <= 0
+  ) {
     return {
       ok: false,
       status: 400,
       code: "INVALID_AMOUNT",
       message: "Recurring rule amount_cents must be a positive integer.",
+    };
+  }
+
+  const frequency = params.frequency ?? "MONTHLY";
+  if (frequency !== "MONTHLY") {
+    return {
+      ok: false,
+      status: 400,
+      code: "INVALID_FREQUENCY",
+      message: "Recurring rule frequency must be MONTHLY.",
+    };
+  }
+
+  const dayOfMonth = Math.trunc(params.dayOfMonth);
+  if (
+    !Number.isInteger(params.dayOfMonth) ||
+    dayOfMonth < 1 ||
+    dayOfMonth > 28
+  ) {
+    return {
+      ok: false,
+      status: 400,
+      code: "INVALID_DAY_OF_MONTH",
+      message: "Recurring rule day_of_month must be an integer between 1 and 28.",
+    };
+  }
+
+  const splitRule = params.splitRule ?? guard.group.default_split_mode;
+  if (splitRule !== "EQUAL" && splitRule !== "CUSTOM_RATIOS") {
+    return {
+      ok: false,
+      status: 400,
+      code: "INVALID_SPLIT_RULE",
+      message: "Recurring rule split_rule must be EQUAL or CUSTOM_RATIOS.",
+    };
+  }
+
+  const nextRunDate = params.nextRunDate?.trim()
+    ? params.nextRunDate.trim()
+    : computeInitialNextRunDate(dayOfMonth);
+  if (!isValidIsoDateString(nextRunDate)) {
+    return {
+      ok: false,
+      status: 400,
+      code: "INVALID_DATE",
+      message: "Recurring rule next_run_date must be a valid YYYY-MM-DD date.",
     };
   }
 
@@ -609,16 +683,17 @@ export async function createGroupRecurringRule(
     .from("recurring_rules")
     .insert({
       group_id: params.groupId,
+      created_by: params.userId,
       paid_by: paidBy,
-      description: params.description.trim(),
+      description: trimmedDescription,
       category: params.category.trim() || "General",
       amount_cents: amountCents,
       currency: guard.group.base_currency,
-      frequency: "MONTHLY",
-      day_of_month: Math.min(Math.max(Math.trunc(params.dayOfMonth), 1), 28),
-      split_rule: params.splitRule ?? guard.group.default_split_mode,
+      frequency,
+      day_of_month: dayOfMonth,
+      split_rule: splitRule,
       is_active: true,
-      next_run_date: params.nextRunDate,
+      next_run_date: nextRunDate,
     })
     .select("*")
     .maybeSingle();
@@ -644,6 +719,12 @@ export async function updateGroupRecurringRule(
     isActive?: boolean;
     amountCents?: number;
     description?: string;
+    category?: string;
+    frequency?: RecurringFrequency;
+    dayOfMonth?: number;
+    splitRule?: SplitMode;
+    paidBy?: string;
+    nextRunDate?: string;
   },
 ): Promise<
   | {
@@ -659,11 +740,46 @@ export async function updateGroupRecurringRule(
   });
   if (!guard.ok) return guard;
 
+  const { data: existingRule, error: fetchError } = await supabase
+    .from("recurring_rules")
+    .select("id, group_id, created_by, paid_by")
+    .eq("id", params.ruleId)
+    .eq("group_id", params.groupId)
+    .maybeSingle();
+
+  if (fetchError) {
+    return {
+      ok: false,
+      status: 500,
+      code: "SERVER_ERROR",
+      message: fetchError.message || "Unable to load recurring rule.",
+    };
+  }
+
+  if (!existingRule) {
+    return {
+      ok: false,
+      status: 404,
+      code: "NOT_FOUND",
+      message: "Recurring rule not found.",
+    };
+  }
+
+  const ruleOwnerId = existingRule.created_by ?? existingRule.paid_by;
+  if (guard.member.role !== "ADMIN" && ruleOwnerId !== params.userId) {
+    return {
+      ok: false,
+      status: 403,
+      code: "FORBIDDEN",
+      message: "Only group admins or the rule creator can update this recurring rule.",
+    };
+  }
+
   const patch: Database["public"]["Tables"]["recurring_rules"]["Update"] = {};
   if (typeof params.isActive === "boolean") patch.is_active = params.isActive;
   if (typeof params.amountCents === "number") {
     const amt = Math.trunc(params.amountCents);
-    if (!Number.isSafeInteger(amt) || amt <= 0) {
+    if (!Number.isSafeInteger(params.amountCents) || !Number.isSafeInteger(amt) || amt <= 0) {
       return {
         ok: false,
         status: 400,
@@ -673,8 +789,83 @@ export async function updateGroupRecurringRule(
     }
     patch.amount_cents = amt;
   }
-  if (typeof params.description === "string" && params.description.trim()) {
-    patch.description = params.description.trim();
+  if (typeof params.description === "string") {
+    const trimmed = params.description.trim();
+    if (!trimmed || trimmed.length > 200) {
+      return {
+        ok: false,
+        status: 400,
+        code: "INVALID_DESCRIPTION",
+        message: "Recurring rule description must be 1 to 200 characters.",
+      };
+    }
+    patch.description = trimmed;
+  }
+  if (typeof params.category === "string" && params.category.trim()) {
+    patch.category = params.category.trim();
+  }
+  if (params.frequency !== undefined) {
+    if (params.frequency !== "MONTHLY") {
+      return {
+        ok: false,
+        status: 400,
+        code: "INVALID_FREQUENCY",
+        message: "Recurring rule frequency must be MONTHLY.",
+      };
+    }
+    patch.frequency = params.frequency;
+  }
+  if (params.dayOfMonth !== undefined) {
+    const day = Math.trunc(params.dayOfMonth);
+    if (!Number.isInteger(params.dayOfMonth) || day < 1 || day > 28) {
+      return {
+        ok: false,
+        status: 400,
+        code: "INVALID_DAY_OF_MONTH",
+        message: "Recurring rule day_of_month must be between 1 and 28.",
+      };
+    }
+    patch.day_of_month = day;
+  }
+  if (params.splitRule !== undefined) {
+    if (params.splitRule !== "EQUAL" && params.splitRule !== "CUSTOM_RATIOS") {
+      return {
+        ok: false,
+        status: 400,
+        code: "INVALID_SPLIT_RULE",
+        message: "Recurring rule split_rule must be EQUAL or CUSTOM_RATIOS.",
+      };
+    }
+    patch.split_rule = params.splitRule;
+  }
+  if (typeof params.paidBy === "string" && params.paidBy.trim()) {
+    const { data: payerMember } = await supabase
+      .from("group_members")
+      .select("status")
+      .eq("group_id", params.groupId)
+      .eq("user_id", params.paidBy.trim())
+      .maybeSingle();
+    if (!payerMember || payerMember.status !== "ACTIVE") {
+      return {
+        ok: false,
+        status: 400,
+        code: "INVALID_PAYER",
+        message: "Recurring rule payer must be an active group member.",
+      };
+    }
+    patch.paid_by = params.paidBy.trim();
+  }
+  if (typeof params.nextRunDate === "string") {
+    const trimmedDate = params.nextRunDate.trim();
+    if (!isValidIsoDateString(trimmedDate)) {
+      return {
+        ok: false,
+        status: 400,
+        code: "INVALID_DATE",
+        message: "Recurring rule next_run_date must be a valid YYYY-MM-DD date.",
+      };
+    }
+    patch.next_run_date = trimmedDate;
   }
 
   const { data: updated, error: updateError } = await supabase
@@ -714,6 +905,41 @@ export async function deleteGroupRecurringRule(
     operation: "RECURRING_RULE_DELETE",
   });
   if (!guard.ok) return guard;
+
+  const { data: existingRule, error: fetchError } = await supabase
+    .from("recurring_rules")
+    .select("id, group_id, created_by, paid_by")
+    .eq("id", params.ruleId)
+    .eq("group_id", params.groupId)
+    .maybeSingle();
+
+  if (fetchError) {
+    return {
+      ok: false,
+      status: 500,
+      code: "SERVER_ERROR",
+      message: fetchError.message || "Unable to load recurring rule.",
+    };
+  }
+
+  if (!existingRule) {
+    return {
+      ok: false,
+      status: 404,
+      code: "NOT_FOUND",
+      message: "Recurring rule not found.",
+    };
+  }
+
+  const ruleOwnerId = existingRule.created_by ?? existingRule.paid_by;
+  if (guard.member.role !== "ADMIN" && ruleOwnerId !== params.userId) {
+    return {
+      ok: false,
+      status: 403,
+      code: "FORBIDDEN",
+      message: "Only group admins or the rule creator can delete this recurring rule.",
+    };
+  }
 
   const { error: deleteError } = await supabase
     .from("recurring_rules")

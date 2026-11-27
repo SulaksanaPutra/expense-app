@@ -32,6 +32,7 @@ import {
   Badge,
   Button,
   Card,
+  ConfirmDialog,
   Dialog,
   Dropdown,
   Input,
@@ -61,6 +62,10 @@ import {
   ALL_GROUPS_VALUE,
   formatCycleLabel,
 } from "@/components/shell/url-state";
+import {
+  computeInitialNextRunDate,
+  isValidIsoDateString,
+} from "@/lib/expenses/recurring";
 import { EXPENSE_CATEGORIES } from "@/lib/expenses/split-engine";
 import {
   buildExpensesCsv,
@@ -84,7 +89,11 @@ import {
   getCurrencySymbol,
   parseCurrencyInputToMinorUnits,
 } from "@/lib/money";
-import type { ExpenseSplitMethod, SplitMode } from "@/types/database";
+import type {
+  ExpenseSplitMethod,
+  RecurringFrequency,
+  SplitMode,
+} from "@/types/database";
 import { RecordSettlementModal } from "./RecordSettlementModal";
 
 const PAGE_SIZE = 7;
@@ -107,6 +116,10 @@ const SORT_OPTIONS: SelectOption[] = [
 const SPLIT_RULE_OPTIONS: SelectOption[] = [
   { value: "EQUAL", label: "Equal Split" },
   { value: "CUSTOM_RATIOS", label: "Group Custom Ratios" },
+];
+
+const FREQUENCY_OPTIONS: SelectOption[] = [
+  { value: "MONTHLY", label: "Monthly" },
 ];
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -465,16 +478,28 @@ export function ExpensesClient({
   const [inspectExpense, setInspectExpense] =
     React.useState<ExpenseLedgerRecord | null>(null);
 
-  // Recurring rule creation dialog state
+  // Recurring rule creation & management dialog state
   const [recurringModalOpen, setRecurringModalOpen] = React.useState(false);
   const [recGroupId, setRecGroupId] = React.useState<string>("");
   const [recDescription, setRecDescription] = React.useState("");
   const [recCategory, setRecCategory] = React.useState<string>(EXPENSE_CATEGORIES[0]);
   const [recAmount, setRecAmount] = React.useState("");
+  const [recPaidBy, setRecPaidBy] = React.useState<string>(currentUserId);
+  const [recFrequency, setRecFrequency] =
+    React.useState<RecurringFrequency>("MONTHLY");
   const [recDayOfMonth, setRecDayOfMonth] = React.useState("1");
   const [recSplitRule, setRecSplitRule] = React.useState<SplitMode>("EQUAL");
+  const [recNextRunDate, setRecNextRunDate] = React.useState(() =>
+    computeInitialNextRunDate(1),
+  );
+  const [recNextRunManuallyEdited, setRecNextRunManuallyEdited] =
+    React.useState(false);
   const [recError, setRecError] = React.useState<string | null>(null);
   const [recSubmitting, setRecSubmitting] = React.useState(false);
+  const [togglingRuleId, setTogglingRuleId] = React.useState<string | null>(null);
+  const [deleteRuleTarget, setDeleteRuleTarget] =
+    React.useState<RecurringRuleRecord | null>(null);
+  const [deletingRule, setDeletingRule] = React.useState(false);
 
   const handleTabChange = (nextTab: ExpenseLedgerTab) => {
     syncQueryParams({ tab: nextTab, page: 1 });
@@ -590,12 +615,23 @@ export function ExpensesClient({
     [activeGroupId, recurringRules],
   );
 
-  const adminGroups = React.useMemo(
-    () =>
-      scopedGroups.filter(
-        (g) => g.status !== "ARCHIVED" && g.currentUserRole === "ADMIN",
-      ),
-    [scopedGroups],
+  const isCurrentUserActiveInGroup = React.useCallback(
+    (group: ExpenseGroupInfo) => {
+      if (group.status === "ARCHIVED") return false;
+      if (group.currentUserStatus) {
+        return group.currentUserStatus === "ACTIVE";
+      }
+      const membership = group.members.find((m) => m.userId === currentUserId);
+      return membership
+        ? membership.status === "ACTIVE"
+        : Boolean(group.currentUserRole);
+    },
+    [currentUserId],
+  );
+
+  const writableGroups = React.useMemo(
+    () => scopedGroups.filter(isCurrentUserActiveInGroup),
+    [isCurrentUserActiveInGroup, scopedGroups],
   );
 
   const categoryChipList = React.useMemo(() => {
@@ -633,16 +669,53 @@ export function ExpensesClient({
 
   const openNewRecurringDialog = () => {
     const targetGroup =
-      adminGroups.find((g) => g.id === activeGroupId) ?? adminGroups[0];
+      writableGroups.find((g) => g.id === activeGroupId) ?? writableGroups[0];
     if (!targetGroup) return;
+    const activeMembers = targetGroup.members.filter(
+      (m) => m.status === "ACTIVE",
+    );
+    const defaultPayer =
+      activeMembers.find((m) => m.userId === currentUserId)?.userId ??
+      activeMembers[0]?.userId ??
+      currentUserId;
+
     setRecGroupId(targetGroup.id);
     setRecDescription("");
     setRecCategory(EXPENSE_CATEGORIES[0]);
     setRecAmount("");
+    setRecPaidBy(defaultPayer);
+    setRecFrequency("MONTHLY");
     setRecDayOfMonth("1");
     setRecSplitRule(targetGroup.defaultSplitMode);
+    setRecNextRunDate(computeInitialNextRunDate(1));
+    setRecNextRunManuallyEdited(false);
     setRecError(null);
     setRecurringModalOpen(true);
+  };
+
+  const handleRecGroupChange = (nextGroupId: string) => {
+    setRecGroupId(nextGroupId);
+    const nextGroup = initialGroups.find((g) => g.id === nextGroupId);
+    if (!nextGroup) return;
+    const activeMembers = nextGroup.members.filter(
+      (m) => m.status === "ACTIVE",
+    );
+    const defaultPayer =
+      activeMembers.find((m) => m.userId === currentUserId)?.userId ??
+      activeMembers[0]?.userId ??
+      currentUserId;
+    setRecPaidBy(defaultPayer);
+    setRecSplitRule(nextGroup.defaultSplitMode);
+  };
+
+  const handleRecDayChange = (nextVal: string) => {
+    setRecDayOfMonth(nextVal);
+    if (!recNextRunManuallyEdited) {
+      const parsed = Number.parseInt(nextVal, 10);
+      if (Number.isInteger(parsed) && parsed >= 1 && parsed <= 28) {
+        setRecNextRunDate(computeInitialNextRunDate(parsed));
+      }
+    }
   };
 
   const handleCreateRecurringRule = async (
@@ -672,16 +745,14 @@ export function ExpensesClient({
       setRecError("Billing day must be between 1 and 28.");
       return;
     }
+    const resolvedNextRunDate = recNextRunDate.trim() || computeInitialNextRunDate(day);
+    if (!isValidIsoDateString(resolvedNextRunDate)) {
+      setRecError("Enter a valid first run date (YYYY-MM-DD).");
+      return;
+    }
 
     setRecSubmitting(true);
     try {
-      const now = new Date();
-      const nextDate = new Date(
-        Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, day),
-      )
-        .toISOString()
-        .slice(0, 10);
-
       const res = await fetch(
         `/api/groups/${encodeURIComponent(targetGroup.id)}/recurring-rules`,
         {
@@ -691,9 +762,11 @@ export function ExpensesClient({
             description: recDescription.trim(),
             category: recCategory,
             amount_cents: amountCents,
+            paid_by: recPaidBy,
+            frequency: recFrequency,
             day_of_month: day,
             split_rule: recSplitRule,
-            next_run_date: nextDate,
+            next_run_date: resolvedNextRunDate,
           }),
         },
       );
@@ -703,12 +776,13 @@ export function ExpensesClient({
         rule?: {
           id: string;
           group_id: string;
+          created_by?: string | null;
           paid_by: string;
           description: string;
           category: string;
           amount_cents: number;
           currency: string;
-          frequency: "MONTHLY";
+          frequency: RecurringFrequency;
           day_of_month: number;
           split_rule: SplitMode;
           is_active: boolean;
@@ -731,6 +805,7 @@ export function ExpensesClient({
           id: data.rule!.id,
           groupId: data.rule!.group_id,
           groupName: targetGroup.name,
+          createdBy: data.rule!.created_by ?? currentUserId,
           paidBy: data.rule!.paid_by,
           payerName: payer?.name ?? "Member",
           description: data.rule!.description,
@@ -749,8 +824,9 @@ export function ExpensesClient({
       pushToast({
         tone: "success",
         title: "Recurring rule added",
-        description: `${data.rule.description} runs on day ${data.rule.day_of_month} each month.`,
+        description: `${data.rule.description} scheduled for day ${data.rule.day_of_month} (next ${data.rule.next_run_date}).`,
       });
+      router.refresh();
     } catch {
       setRecError("Network error while saving recurring rule.");
       setRecSubmitting(false);
@@ -758,6 +834,7 @@ export function ExpensesClient({
   };
 
   const handleToggleRecurringRule = async (rule: RecurringRuleRecord) => {
+    setTogglingRuleId(rule.id);
     try {
       const res = await fetch(
         `/api/groups/${encodeURIComponent(rule.groupId)}/recurring-rules`,
@@ -777,6 +854,7 @@ export function ExpensesClient({
           title: "Update failed",
           description: data.error || "Unable to update recurring rule.",
         });
+        setTogglingRuleId(null);
         return;
       }
       setRuleActiveOverrides((prev) => ({
@@ -788,16 +866,22 @@ export function ExpensesClient({
         title: rule.isActive ? "Recurring rule paused" : "Recurring rule resumed",
         description: rule.description,
       });
+      router.refresh();
     } catch {
       pushToast({
         tone: "error",
         title: "Network error",
         description: "Unable to update recurring rule.",
       });
+    } finally {
+      setTogglingRuleId(null);
     }
   };
 
-  const handleDeleteRecurringRule = async (rule: RecurringRuleRecord) => {
+  const handleConfirmDeleteRecurringRule = async () => {
+    if (!deleteRuleTarget) return;
+    const rule = deleteRuleTarget;
+    setDeletingRule(true);
     try {
       const res = await fetch(
         `/api/groups/${encodeURIComponent(rule.groupId)}/recurring-rules?rule_id=${encodeURIComponent(rule.id)}`,
@@ -810,20 +894,27 @@ export function ExpensesClient({
           title: "Delete failed",
           description: data.error || "Unable to delete recurring rule.",
         });
+        setDeletingRule(false);
         return;
       }
-      setDeletedRuleIds((prev) => [...prev, rule.id]);
+      setDeletedRuleIds((prev) =>
+        prev.includes(rule.id) ? prev : [...prev, rule.id],
+      );
+      setDeleteRuleTarget(null);
+      setDeletingRule(false);
       pushToast({
         tone: "info",
         title: "Recurring rule removed",
         description: rule.description,
       });
+      router.refresh();
     } catch {
       pushToast({
         tone: "error",
         title: "Network error",
         description: "Unable to delete recurring rule.",
       });
+      setDeletingRule(false);
     }
   };
 
@@ -1491,7 +1582,12 @@ export function ExpensesClient({
         </>
       ) : (
         /* Recurring Rules Tab Panel */
-        <Card variant="section" padding="md" className="flex flex-col gap-4">
+        <Card
+          variant="section"
+          padding="md"
+          data-testid="recurring-rules-panel"
+          className="flex flex-col gap-4"
+        >
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-divider-soft pb-4">
             <div className="flex items-center gap-3">
               <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-hairline bg-canvas-parchment text-[#0066cc]">
@@ -1502,13 +1598,13 @@ export function ExpensesClient({
                   Recurring Expense Templates
                 </h2>
                 <p className="text-[12px] text-ink-muted-48">
-                  Monthly scheduled splits configured for{" "}
+                  Scheduled recurring splits configured for{" "}
                   {activeGroup ? activeGroup.name : "your active groups"}.
                 </p>
               </div>
             </div>
 
-            {adminGroups.length > 0 && (
+            {writableGroups.length > 0 && (
               <Button
                 type="button"
                 variant="primary"
@@ -1522,25 +1618,41 @@ export function ExpensesClient({
           </div>
 
           {scopedRecurringRules.length === 0 ? (
-            <div className="rounded-[14px] border border-hairline bg-surface-pearl px-6 py-10 text-center">
-              <p className="text-[14px] font-semibold text-ink">
-                No recurring rules configured
-              </p>
-              <p className="mt-1 text-[13px] text-ink-muted-48">
-                {adminGroups.length > 0
-                  ? "Add a recurring monthly template (such as rent or internet) to automate ledger reminders."
-                  : "Group admins can configure recurring monthly expense templates here."}
-              </p>
+            <div className="flex flex-col items-center gap-3 rounded-[14px] border border-hairline bg-surface-pearl px-6 py-10 text-center">
+              <div>
+                <p className="text-[14px] font-semibold text-ink">
+                  No recurring rules configured
+                </p>
+                <p className="mt-1 text-[13px] text-ink-muted-48">
+                  {writableGroups.length > 0
+                    ? "Create a recurring template (such as rent or internet) to automatically materialize scheduled expenses."
+                    : "Active group members can configure recurring expense templates here."}
+                </p>
+              </div>
+              {writableGroups.length > 0 && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  leftIcon={<Plus className="h-3.5 w-3.5" aria-hidden="true" />}
+                  onClick={openNewRecurringDialog}
+                >
+                  Create First Rule
+                </Button>
+              )}
             </div>
           ) : (
             <div className="overflow-hidden rounded-[14px] border border-hairline">
-              <Table aria-label="Recurring Expense Templates">
+              <Table
+                aria-label="Recurring Expense Templates"
+                className="[&_th]:px-2 [&_th]:py-2.5 [&_td]:px-2 [&_td]:py-3"
+              >
                 <TableHeader>
                   <TableRow>
                     <TableHead>Description</TableHead>
-                    <TableHead>Group</TableHead>
                     <TableHead>Category</TableHead>
                     <TableHead>Paid By</TableHead>
+                    <TableHead>Split Rule</TableHead>
                     <TableHead>Schedule</TableHead>
                     <TableHead className="text-right">Amount</TableHead>
                     <TableHead className="text-center">Status</TableHead>
@@ -1550,19 +1662,29 @@ export function ExpensesClient({
                 <TableBody>
                   {scopedRecurringRules.map((rule) => {
                     const group = initialGroups.find((g) => g.id === rule.groupId);
-                    const isAdmin =
-                      group?.currentUserRole === "ADMIN" &&
-                      group?.status !== "ARCHIVED";
+                    const isActiveMember = group
+                      ? isCurrentUserActiveInGroup(group)
+                      : false;
+                    const isAdmin = group?.currentUserRole === "ADMIN";
+                    const isCreator =
+                      (rule.createdBy ?? rule.paidBy) === currentUserId;
+                    const canManage = isActiveMember && (isAdmin || isCreator);
+                    const isToggling = togglingRuleId === rule.id;
 
                     return (
-                      <TableRow key={rule.id}>
-                        <TableCell className="font-semibold text-[13px] text-ink">
-                          {rule.description}
+                      <TableRow
+                        key={rule.id}
+                        data-testid={`recurring-rule-row-${rule.id}`}
+                      >
+                        <TableCell className="min-w-[120px] max-w-[180px]">
+                          <span className="block truncate text-[13px] font-semibold text-ink">
+                            {rule.description}
+                          </span>
+                          <span className="block truncate text-[11px] text-ink-muted-48">
+                            {rule.groupName}
+                          </span>
                         </TableCell>
-                        <TableCell className="text-[12px] text-ink-muted-80">
-                          {rule.groupName}
-                        </TableCell>
-                        <TableCell>
+                        <TableCell className="whitespace-nowrap">
                           <Badge
                             tone="category"
                             size="sm"
@@ -1571,24 +1693,39 @@ export function ExpensesClient({
                             {rule.category}
                           </Badge>
                         </TableCell>
-                        <TableCell className="text-[12px] text-ink">
+                        <TableCell className="whitespace-nowrap text-[12px] text-ink">
                           {rule.paidBy === currentUserId
                             ? `You (${rule.payerName})`
                             : rule.payerName}
                         </TableCell>
-                        <TableCell className="text-[12px] text-ink-muted-80">
-                          <span className="inline-flex items-center gap-1">
+                        <TableCell className="whitespace-nowrap">
+                          <Badge tone="neutral" size="sm">
+                            {rule.splitRule === "CUSTOM_RATIOS"
+                              ? "Custom Ratios"
+                              : "Equal Split"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-[12px] text-ink-muted-80">
+                          <div className="inline-flex items-center gap-1.5">
                             <CalendarClock
-                              className="h-3.5 w-3.5 text-ink-muted-48"
+                              className="h-3.5 w-3.5 shrink-0 text-ink-muted-48"
                               aria-hidden="true"
                             />
-                            Day {rule.dayOfMonth} · Next {rule.nextRunDate}
-                          </span>
+                            <div>
+                              <span className="block font-medium text-ink">
+                                {rule.frequency === "MONTHLY" ? "Monthly" : rule.frequency}{" "}
+                                · Day {rule.dayOfMonth}
+                              </span>
+                              <span className="block text-[11px] text-ink-muted-48">
+                                Next {rule.nextRunDate}
+                              </span>
+                            </div>
+                          </div>
                         </TableCell>
-                        <TableCell className="text-right text-[13px] font-semibold tabular-nums text-ink">
+                        <TableCell className="whitespace-nowrap text-right text-[13px] font-semibold tabular-nums text-ink">
                           {formatMinorUnits(rule.amountCents, rule.currency)}
                         </TableCell>
-                        <TableCell className="text-center">
+                        <TableCell className="whitespace-nowrap text-center">
                           <Badge
                             tone={rule.isActive ? "success" : "neutral"}
                             size="sm"
@@ -1596,13 +1733,14 @@ export function ExpensesClient({
                             {rule.isActive ? "Active" : "Paused"}
                           </Badge>
                         </TableCell>
-                        <TableCell className="text-center">
-                          {isAdmin ? (
+                        <TableCell className="whitespace-nowrap text-center">
+                          {canManage ? (
                             <div className="inline-flex items-center gap-1">
                               <Button
                                 type="button"
                                 variant="ghost"
                                 size="sm"
+                                disabled={isToggling}
                                 aria-label={
                                   rule.isActive
                                     ? `Pause ${rule.description}`
@@ -1621,8 +1759,9 @@ export function ExpensesClient({
                                 type="button"
                                 variant="ghost"
                                 size="sm"
+                                disabled={isToggling}
                                 aria-label={`Delete ${rule.description}`}
-                                onClick={() => void handleDeleteRecurringRule(rule)}
+                                onClick={() => setDeleteRuleTarget(rule)}
                                 className="h-7 px-2 text-red-600 hover:bg-red-50"
                               >
                                 <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
@@ -1630,7 +1769,7 @@ export function ExpensesClient({
                             </div>
                           ) : (
                             <span className="text-[11px] text-ink-muted-48">
-                              Admin only
+                              Creator or Admin
                             </span>
                           )}
                         </TableCell>
@@ -1836,7 +1975,7 @@ export function ExpensesClient({
         open={recurringModalOpen}
         onClose={() => !recSubmitting && setRecurringModalOpen(false)}
         title="Add Recurring Rule"
-        description="Schedule a monthly recurring expense template for a group."
+        description="Schedule a recurring expense template that materializes automatically on its run date."
         size="md"
         footer={
           <>
@@ -1874,16 +2013,16 @@ export function ExpensesClient({
             />
           )}
 
-          {adminGroups.length > 1 && (
+          {writableGroups.length > 1 && (
             <Select
               label="Split Group"
               aria-label="Split Group"
-              options={adminGroups.map((g) => ({
+              options={writableGroups.map((g) => ({
                 value: g.id,
                 label: `${g.name} (${g.baseCurrency})`,
               }))}
               value={recGroupId}
-              onChange={setRecGroupId}
+              onChange={handleRecGroupChange}
             />
           )}
 
@@ -1916,6 +2055,31 @@ export function ExpensesClient({
               value={recAmount}
               onChange={(e) => setRecAmount(e.target.value)}
             />
+            <Select
+              label="Paid By"
+              aria-label="Paid By"
+              options={(
+                initialGroups
+                  .find((g) => g.id === recGroupId)
+                  ?.members.filter((m) => m.status === "ACTIVE") ?? []
+              ).map((m) => ({
+                value: m.userId,
+                label:
+                  m.userId === currentUserId ? `You (${m.name})` : m.name,
+              }))}
+              value={recPaidBy}
+              onChange={setRecPaidBy}
+            />
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <Select
+              label="Frequency"
+              aria-label="Frequency"
+              options={FREQUENCY_OPTIONS}
+              value={recFrequency}
+              onChange={(v) => setRecFrequency(v as RecurringFrequency)}
+            />
             <Input
               label="Day of Month (1–28)"
               type="number"
@@ -1923,7 +2087,17 @@ export function ExpensesClient({
               max={28}
               required
               value={recDayOfMonth}
-              onChange={(e) => setRecDayOfMonth(e.target.value)}
+              onChange={(e) => handleRecDayChange(e.target.value)}
+            />
+            <Input
+              label="First Run Date"
+              type="date"
+              required
+              value={recNextRunDate}
+              onChange={(e) => {
+                setRecNextRunManuallyEdited(true);
+                setRecNextRunDate(e.target.value);
+              }}
             />
           </div>
 
@@ -1945,6 +2119,22 @@ export function ExpensesClient({
           </div>
         </form>
       </Dialog>
+
+      {/* Delete Recurring Rule Confirmation */}
+      <ConfirmDialog
+        open={deleteRuleTarget !== null}
+        onClose={() => !deletingRule && setDeleteRuleTarget(null)}
+        onConfirm={handleConfirmDeleteRecurringRule}
+        title="Delete Recurring Rule"
+        description={
+          deleteRuleTarget
+            ? `Remove "${deleteRuleTarget.description}" from ${deleteRuleTarget.groupName}? Previously materialized expenses remain in the ledger.`
+            : undefined
+        }
+        confirmLabel="Delete Rule"
+        variant="danger"
+        loading={deletingRule}
+      />
 
       {toasts.length > 0 && (
         <ToastContainer toasts={toasts} onDismiss={dismissToast} />

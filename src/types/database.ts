@@ -276,6 +276,7 @@ export interface Database {
         Row: {
           id: string;
           group_id: string;
+          created_by?: string | null;
           paid_by: string;
           description: string;
           category: string;
@@ -292,6 +293,7 @@ export interface Database {
         Insert: {
           id?: string;
           group_id: string;
+          created_by?: string | null;
           paid_by: string;
           description: string;
           category: string;
@@ -308,6 +310,7 @@ export interface Database {
         Update: {
           id?: string;
           group_id?: string;
+          created_by?: string | null;
           paid_by?: string;
           description?: string;
           category?: string;
@@ -358,6 +361,7 @@ export interface Database {
           receipt_url: string | null;
           is_recurring_generated: boolean;
           recurring_rule_id: string | null;
+          recurring_occurrence_date?: string | null;
           adjustment_for_expense_id: string | null;
           is_locked: boolean;
           deleted_at: string | null;
@@ -383,6 +387,7 @@ export interface Database {
           receipt_url?: string | null;
           is_recurring_generated?: boolean;
           recurring_rule_id?: string | null;
+          recurring_occurrence_date?: string | null;
           adjustment_for_expense_id?: string | null;
           is_locked?: boolean;
           deleted_at?: string | null;
@@ -408,6 +413,7 @@ export interface Database {
           receipt_url?: string | null;
           is_recurring_generated?: boolean;
           recurring_rule_id?: string | null;
+          recurring_occurrence_date?: string | null;
           adjustment_for_expense_id?: string | null;
           is_locked?: boolean;
           deleted_at?: string | null;
@@ -676,6 +682,10 @@ export interface Database {
       };
       release_receipt_storage_bytes: {
         Args: { p_file_bytes: number };
+        Returns: number;
+      };
+      materialize_due_recurring_rules: {
+        Args: { p_run_date?: string };
         Returns: number;
       };
     };

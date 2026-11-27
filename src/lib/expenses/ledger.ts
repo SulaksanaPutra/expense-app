@@ -54,6 +54,7 @@ export interface ExpenseGroupInfo {
   operationalBudgetCents: number | null;
   billingCycleAnchorDay: number;
   currentUserRole: MemberRole | null;
+  currentUserStatus?: MemberStatus | null;
   members: ExpenseGroupMemberInfo[];
 }
 
@@ -109,6 +110,7 @@ export interface RecurringRuleRecord {
   id: string;
   groupId: string;
   groupName: string;
+  createdBy?: string | null;
   paidBy: string;
   payerName: string;
   description: string;
