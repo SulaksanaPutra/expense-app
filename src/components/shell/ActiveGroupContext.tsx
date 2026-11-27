@@ -379,13 +379,22 @@ export function ActiveGroupProvider({
   const [mobileDrawerOpen, setMobileDrawerOpen] = React.useState(false);
   const [searchOpen, setSearchOpen] = React.useState(false);
   const [addExpenseOpen, setAddExpenseOpen] = React.useState(false);
-  const [notifications, setNotifications] =
-    React.useState<ShellNotificationItem[]>(initialNotifications);
+  const [readNotificationIds, setReadNotificationIds] = React.useState<
+    Set<string>
+  >(() => new Set());
   const [userStorageOverride, setUserStorageOverride] = React.useState<{
     userId: string;
     baseBytes: number | undefined;
     overrideBytes: number;
   } | null>(null);
+
+  const notifications = React.useMemo<ShellNotificationItem[]>(
+    () =>
+      initialNotifications.map((item) =>
+        readNotificationIds.has(item.id) ? { ...item, unread: false } : item,
+      ),
+    [initialNotifications, readNotificationIds],
+  );
 
   const effectiveUser = React.useMemo<ShellUserSummary | null>(() => {
     if (!user) return null;
@@ -415,8 +424,17 @@ export function ActiveGroupProvider({
   );
 
   const markAllNotificationsRead = React.useCallback(() => {
-    setNotifications((prev) => prev.map((item) => ({ ...item, unread: false })));
-  }, []);
+    setReadNotificationIds(new Set(initialNotifications.map((item) => item.id)));
+    if (typeof fetch === "function") {
+      void fetch("/api/notifications", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      }).catch(() => {
+        // Non-fatal in unit tests or offline contexts.
+      });
+    }
+  }, [initialNotifications]);
 
   const unreadNotificationCount = React.useMemo(
     () => notifications.filter((n) => n.unread).length,

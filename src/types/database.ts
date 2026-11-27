@@ -9,6 +9,12 @@ export type PaymentRail = "VENMO" | "APPLE_CARD" | "CASH" | "OTHER";
 export type BillingCycleStatus = "OPEN" | "CLOSED";
 export type RecurringFrequency = "MONTHLY";
 export type ReminderChannel = "PUSH" | "EMAIL" | "SMS";
+export type NotificationType =
+  | "EXPENSE_REVISION"
+  | "NEW_EXPENSE"
+  | "SETTLEMENT_CONFIRMATION"
+  | "REMINDER_NUDGE"
+  | "LEASE_ARCHIVE_PROMPT";
 export type GroupAuditEventType =
   | "GROUP_CREATED"
   | "RATIOS_UPDATED"
@@ -639,6 +645,93 @@ export interface Database {
             columns: ["actor_id"];
             isOneToOne: false;
             referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      notifications: {
+        Row: {
+          id: string;
+          user_id: string;
+          group_id: string | null;
+          actor_id: string | null;
+          expense_id: string | null;
+          revision_id: string | null;
+          type: NotificationType;
+          title: string;
+          description: string;
+          delta_cents: number | null;
+          currency: string | null;
+          href: string | null;
+          is_read: boolean;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          group_id?: string | null;
+          actor_id?: string | null;
+          expense_id?: string | null;
+          revision_id?: string | null;
+          type: NotificationType;
+          title: string;
+          description: string;
+          delta_cents?: number | null;
+          currency?: string | null;
+          href?: string | null;
+          is_read?: boolean;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          group_id?: string | null;
+          actor_id?: string | null;
+          expense_id?: string | null;
+          revision_id?: string | null;
+          type?: NotificationType;
+          title?: string;
+          description?: string;
+          delta_cents?: number | null;
+          currency?: string | null;
+          href?: string | null;
+          is_read?: boolean;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "notifications_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "notifications_group_id_fkey";
+            columns: ["group_id"];
+            isOneToOne: false;
+            referencedRelation: "groups";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "notifications_actor_id_fkey";
+            columns: ["actor_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "notifications_expense_id_fkey";
+            columns: ["expense_id"];
+            isOneToOne: false;
+            referencedRelation: "expenses";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "notifications_revision_id_fkey";
+            columns: ["revision_id"];
+            isOneToOne: false;
+            referencedRelation: "expense_revisions";
             referencedColumns: ["id"];
           },
         ];

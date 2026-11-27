@@ -12,6 +12,7 @@ import {
   Lightbulb,
   Lock,
   Pause,
+  Pencil,
   PieChart,
   Play,
   Plus,
@@ -32,6 +33,7 @@ import {
   Badge,
   Button,
   Card,
+  ConfirmDialog,
   Dialog,
   Dropdown,
   Input,
@@ -57,6 +59,7 @@ import type {
   ToastItem,
 } from "@/components/ui";
 import { LiveSyncPill, useActiveGroup } from "@/components/shell";
+import type { ShellGroupSummary } from "@/components/shell/types";
 import {
   ALL_GROUPS_VALUE,
   formatCycleLabel,
@@ -66,6 +69,7 @@ import {
   buildExpensesCsv,
   computeExpensesKpiSummary,
   computePerGroupDebtEdges,
+  evaluateExpenseLockAndSettlement,
   filterAndSortExpenses,
   getUserShareCents,
   isBillingCycleClosedForWindow,
@@ -84,7 +88,8 @@ import {
   getCurrencySymbol,
   parseCurrencyInputToMinorUnits,
 } from "@/lib/money";
-import type { ExpenseSplitMethod, SplitMode } from "@/types/database";
+import type { Database, ExpenseSplitMethod, SplitMode } from "@/types/database";
+import { AddEditExpenseModal } from "./AddEditExpenseModal";
 import { RecordSettlementModal } from "./RecordSettlementModal";
 
 const PAGE_SIZE = 7;
@@ -241,11 +246,23 @@ export function ExpensesClient({
   const router = useRouter();
   const pathname = usePathname() || "/expenses";
   const searchParams = useSearchParams();
-  const { activeGroupId, activeGroup, cycle, openAddExpense } = useActiveGroup();
+  const {
+    groups: shellGroups,
+    activeGroupId,
+    activeGroup,
+    cycle,
+    user: shellUser,
+    updateReceiptStorageUsedBytes,
+    openAddExpense,
+  } = useActiveGroup();
 
   const [addedExpenses, setAddedExpenses] = React.useState<ExpenseLedgerRecord[]>(
     [],
   );
+  const [editedExpenses, setEditedExpenses] = React.useState<
+    Record<string, ExpenseLedgerRecord>
+  >({});
+  const [deletedExpenseIds, setDeletedExpenseIds] = React.useState<string[]>([]);
   const [addedSettlements, setAddedSettlements] = React.useState<
     ExpenseSettlementRecord[]
   >([]);
@@ -256,13 +273,20 @@ export function ExpensesClient({
   const [deletedRuleIds, setDeletedRuleIds] = React.useState<string[]>([]);
 
   const expenses = React.useMemo(() => {
+    const deletedSet = new Set(deletedExpenseIds);
     const byId = new Map<string, ExpenseLedgerRecord>();
-    for (const item of addedExpenses) byId.set(item.id, item);
-    for (const item of initialExpenses) {
-      if (!byId.has(item.id)) byId.set(item.id, item);
+    for (const item of addedExpenses) {
+      if (!deletedSet.has(item.id)) byId.set(item.id, item);
     }
-    return Array.from(byId.values());
-  }, [addedExpenses, initialExpenses]);
+    for (const item of initialExpenses) {
+      if (!deletedSet.has(item.id) && !byId.has(item.id)) {
+        byId.set(item.id, item);
+      }
+    }
+    return Array.from(byId.values()).map((item) =>
+      item.id in editedExpenses ? editedExpenses[item.id] : item,
+    );
+  }, [addedExpenses, deletedExpenseIds, editedExpenses, initialExpenses]);
 
   const settlements = React.useMemo(() => {
     const byId = new Map<string, ExpenseSettlementRecord>();
@@ -464,6 +488,157 @@ export function ExpensesClient({
   const [settleModalOpen, setSettleModalOpen] = React.useState(false);
   const [inspectExpense, setInspectExpense] =
     React.useState<ExpenseLedgerRecord | null>(null);
+  const [editingExpense, setEditingExpense] =
+    React.useState<ExpenseLedgerRecord | null>(null);
+  const [deletingExpense, setDeletingExpense] =
+    React.useState<ExpenseLedgerRecord | null>(null);
+  const [isDeletingExpense, setIsDeletingExpense] = React.useState(false);
+  const [deleteExpenseError, setDeleteExpenseError] = React.useState<
+    string | null
+  >(null);
+
+  const modalGroups = React.useMemo<ShellGroupSummary[]>(() => {
+    const shellById = new Map(shellGroups.map((g) => [g.id, g]));
+    return initialGroups.map((g) => {
+      const existing = shellById.get(g.id);
+      if (existing) return existing;
+      return {
+        id: g.id,
+        name: g.name,
+        slug: g.slug,
+        status: g.status,
+        groupType: "RESIDENTIAL",
+        baseCurrency: g.baseCurrency,
+        defaultSplitMode: g.defaultSplitMode,
+        activeSplitCount: 0,
+        members: g.members
+          .filter((m) => m.status === "ACTIVE")
+          .map((m) => ({
+            id: m.userId,
+            name: m.name,
+          })),
+      };
+    });
+  }, [initialGroups, shellGroups]);
+
+  const handleExpenseUpdated = React.useCallback(
+    (payload: {
+      expense: Database["public"]["Tables"]["expenses"]["Row"];
+      revision?: Database["public"]["Tables"]["expense_revisions"]["Row"];
+      notifications?: Database["public"]["Tables"]["notifications"]["Row"][];
+    }) => {
+      const updated = payload.expense;
+      const group = initialGroups.find((g) => g.id === updated.group_id);
+      const payer = group?.members.find((m) => m.userId === updated.paid_by);
+      const breakdown = Array.isArray(updated.split_breakdown)
+        ? updated.split_breakdown
+        : [];
+      const lockEval = evaluateExpenseLockAndSettlement({
+        expense: {
+          id: updated.id,
+          groupId: updated.group_id,
+          paidBy: updated.paid_by,
+          expenseDate: updated.expense_date,
+          isLocked: Boolean(updated.is_locked),
+          splitBreakdown: breakdown,
+        },
+        currentUserId,
+        billingCycles: initialBillingCycles,
+        settlements,
+      });
+
+      const nextRecord: ExpenseLedgerRecord = {
+        id: updated.id,
+        groupId: updated.group_id,
+        groupName: group?.name ?? "Split Group",
+        groupBaseCurrency: group?.baseCurrency ?? updated.currency,
+        groupBillingAnchorDay: group?.billingCycleAnchorDay ?? 1,
+        createdBy: updated.created_by,
+        paidBy: updated.paid_by,
+        payerName: payer?.name ?? "Member",
+        description: updated.description,
+        category: updated.category,
+        expenseDate: updated.expense_date,
+        amountCents: Number(updated.amount_cents),
+        currency: updated.currency,
+        originalAmountCents:
+          updated.original_amount_cents !== null &&
+          updated.original_amount_cents !== undefined
+            ? Number(updated.original_amount_cents)
+            : null,
+        originalCurrency: updated.original_currency ?? null,
+        exchangeRate:
+          updated.exchange_rate !== null && updated.exchange_rate !== undefined
+            ? Number(updated.exchange_rate)
+            : null,
+        exchangeRateSource: updated.exchange_rate_source ?? null,
+        splitMethod: updated.split_method,
+        splitBreakdown: breakdown,
+        receiptUrl: updated.receipt_url ?? null,
+        isRecurringGenerated: Boolean(updated.is_recurring_generated),
+        recurringRuleId: updated.recurring_rule_id ?? null,
+        adjustmentForExpenseId: updated.adjustment_for_expense_id ?? null,
+        isLocked: lockEval.isLocked,
+        isCycleClosed: lockEval.isCycleClosed,
+        isSettledByWatermark: lockEval.isSettledByWatermark,
+        isSettledForUser: lockEval.isSettledForUser,
+      };
+
+      setEditedExpenses((prev) => ({ ...prev, [updated.id]: nextRecord }));
+      const notifCount = payload.notifications?.length ?? 0;
+      pushToast({
+        tone: "success",
+        title: "Expense updated",
+        description:
+          notifCount > 0
+            ? `${updated.description} (${formatMinorUnits(updated.amount_cents, updated.currency)}) saved. Recorded revision and notified ${notifCount} ${notifCount === 1 ? "member" : "members"}.`
+            : `${updated.description} (${formatMinorUnits(updated.amount_cents, updated.currency)}) saved with revision history.`,
+      });
+      router.refresh();
+    },
+    [currentUserId, initialBillingCycles, initialGroups, pushToast, router, settlements],
+  );
+
+  const handleConfirmSoftDelete = React.useCallback(async () => {
+    if (!deletingExpense || isDeletingExpense) return;
+    setDeleteExpenseError(null);
+    setIsDeletingExpense(true);
+
+    try {
+      const res = await fetch(
+        `/api/groups/${encodeURIComponent(deletingExpense.groupId)}/expenses/${encodeURIComponent(deletingExpense.id)}`,
+        { method: "DELETE" },
+      );
+      const data = (await res.json().catch(() => null)) as {
+        ok?: boolean;
+        error?: string;
+      } | null;
+
+      if (!res.ok) {
+        setDeleteExpenseError(
+          data?.error || "Unable to delete expense. Please try again.",
+        );
+        setIsDeletingExpense(false);
+        return;
+      }
+
+      const deletedTarget = deletingExpense;
+      setDeletedExpenseIds((prev) =>
+        prev.includes(deletedTarget.id) ? prev : [...prev, deletedTarget.id],
+      );
+      setDeletingExpense(null);
+      setIsDeletingExpense(false);
+      pushToast({
+        tone: "success",
+        title: "Expense deleted",
+        description: `${deletedTarget.description} removed from active balances and ledger.`,
+      });
+      router.refresh();
+    } catch {
+      setDeleteExpenseError("Network error while deleting expense.");
+      setIsDeletingExpense(false);
+    }
+  }, [deletingExpense, isDeletingExpense, pushToast, router]);
 
   // Recurring rule creation dialog state
   const [recurringModalOpen, setRecurringModalOpen] = React.useState(false);
@@ -1321,6 +1496,23 @@ export function ExpensesClient({
                       const payerFirstName =
                         exp.payerName.split(" ")[0] || exp.payerName;
 
+                      const expGroup = initialGroups.find(
+                        (g) => g.id === exp.groupId,
+                      );
+                      const currentMember = expGroup?.members.find(
+                        (m) => m.userId === currentUserId,
+                      );
+                      const isActiveMember = currentMember?.status === "ACTIVE";
+                      const isGroupAdmin =
+                        isActiveMember && expGroup?.currentUserRole === "ADMIN";
+                      const isCreator =
+                        isActiveMember && exp.createdBy === currentUserId;
+                      const isGroupArchived = expGroup?.status === "ARCHIVED";
+                      const canModify =
+                        !exp.isLocked &&
+                        !isGroupArchived &&
+                        (isGroupAdmin || isCreator);
+
                       const rowMenuItems: DropdownItem[] = [
                         {
                           id: "inspect",
@@ -1329,6 +1521,15 @@ export function ExpensesClient({
                           onSelect: () => setInspectExpense(exp),
                         },
                       ];
+
+                      if (canModify) {
+                        rowMenuItems.push({
+                          id: "edit",
+                          label: "Edit Expense",
+                          icon: <Pencil className="h-3.5 w-3.5" aria-hidden="true" />,
+                          onSelect: () => setEditingExpense(exp),
+                        });
+                      }
 
                       if (scopedDebts.some((d) => d.groupId === exp.groupId)) {
                         rowMenuItems.push({
@@ -1342,6 +1543,24 @@ export function ExpensesClient({
                           ),
                           onSelect: () => setSettleModalOpen(true),
                         });
+                      }
+
+                      if (canModify) {
+                        rowMenuItems.push(
+                          { id: "delete-divider", separator: true },
+                          {
+                            id: "delete",
+                            label: "Delete Expense",
+                            danger: true,
+                            icon: (
+                              <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                            ),
+                            onSelect: () => {
+                              setDeleteExpenseError(null);
+                              setDeletingExpense(exp);
+                            },
+                          },
+                        );
                       }
 
                       return (
@@ -1945,6 +2164,55 @@ export function ExpensesClient({
           </div>
         </form>
       </Dialog>
+
+      {/* Edit Expense Modal */}
+      <AddEditExpenseModal
+        open={editingExpense !== null}
+        onClose={() => setEditingExpense(null)}
+        mode="edit"
+        expense={editingExpense}
+        groups={modalGroups}
+        activeGroupId={editingExpense?.groupId ?? activeGroupId}
+        currentUser={
+          shellUser ?? {
+            id: currentUserId,
+            fullName: "Member",
+            email: "",
+          }
+        }
+        cycle={cycle}
+        onReceiptStorageUsedBytesChange={updateReceiptStorageUsedBytes}
+        onUpdated={handleExpenseUpdated}
+      />
+
+      {/* Soft-Delete Confirmation Dialog */}
+      <ConfirmDialog
+        open={deletingExpense !== null}
+        onClose={() => {
+          if (!isDeletingExpense) {
+            setDeleteExpenseError(null);
+            setDeletingExpense(null);
+          }
+        }}
+        onConfirm={handleConfirmSoftDelete}
+        title="Delete Expense"
+        description={
+          deletingExpense
+            ? `Delete "${deletingExpense.description}" (${formatMinorUnits(deletingExpense.amountCents, deletingExpense.currency)}) from ${deletingExpense.groupName}? It will be removed from active group balances and ledger lists.`
+            : undefined
+        }
+        confirmLabel="Delete Expense"
+        variant="danger"
+        loading={isDeletingExpense}
+      >
+        {deleteExpenseError && (
+          <AlertBanner
+            tone="error"
+            title="Could not delete expense"
+            description={deleteExpenseError}
+          />
+        )}
+      </ConfirmDialog>
 
       {toasts.length > 0 && (
         <ToastContainer toasts={toasts} onDismiss={dismissToast} />

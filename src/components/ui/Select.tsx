@@ -393,6 +393,9 @@ export function Dropdown({
   className,
 }: DropdownProps) {
   const [open, setOpen] = React.useState(false);
+  const [menuStyle, setMenuStyle] = React.useState<React.CSSProperties | null>(
+    null,
+  );
   const generatedId = React.useId();
   const triggerId = `${generatedId}-trigger`;
   const menuId = `${generatedId}-menu`;
@@ -400,6 +403,58 @@ export function Dropdown({
   const containerRef = React.useRef<HTMLDivElement>(null);
   const triggerRef = React.useRef<HTMLButtonElement>(null);
   const itemRefs = React.useRef<Array<HTMLButtonElement | null>>([]);
+
+  const computeMenuPosition = React.useCallback((): React.CSSProperties | null => {
+    const triggerEl = triggerRef.current;
+    if (!triggerEl) return null;
+    const rect = triggerEl.getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0) {
+      return null;
+    }
+    const viewportHeight = window.innerHeight || 800;
+    const viewportWidth = window.innerWidth || 1280;
+    const spaceBelow = viewportHeight - rect.bottom;
+    const openUpward = spaceBelow < 210 && rect.top > 210;
+
+    const nextStyle: React.CSSProperties = {
+      position: "fixed",
+      zIndex: 50,
+    };
+    if (openUpward) {
+      nextStyle.bottom = Math.max(8, viewportHeight - rect.top + 6);
+    } else {
+      nextStyle.top = Math.min(viewportHeight - 16, rect.bottom + 6);
+    }
+    if (align === "right") {
+      nextStyle.right = Math.max(8, viewportWidth - rect.right);
+    } else {
+      nextStyle.left = Math.max(8, rect.left);
+    }
+    return nextStyle;
+  }, [align]);
+
+  const openDropdown = React.useCallback(() => {
+    setMenuStyle(computeMenuPosition());
+    setOpen(true);
+  }, [computeMenuPosition]);
+
+  const closeDropdown = React.useCallback(() => {
+    setOpen(false);
+    setMenuStyle(null);
+  }, []);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const handleReposition = () => {
+      setMenuStyle(computeMenuPosition());
+    };
+    window.addEventListener("scroll", handleReposition, true);
+    window.addEventListener("resize", handleReposition);
+    return () => {
+      window.removeEventListener("scroll", handleReposition, true);
+      window.removeEventListener("resize", handleReposition);
+    };
+  }, [open, computeMenuPosition]);
 
   const actionableItems = React.useMemo(
     () => items.filter((item) => !item.separator),
@@ -426,13 +481,13 @@ export function Dropdown({
         containerRef.current &&
         !containerRef.current.contains(e.target as Node)
       ) {
-        setOpen(false);
+        closeDropdown();
       }
     };
 
     document.addEventListener("mousedown", handleOutside);
     return () => document.removeEventListener("mousedown", handleOutside);
-  }, [open]);
+  }, [open, closeDropdown]);
 
   const focusItem = (idx: number) => {
     itemRefs.current[idx]?.focus();
@@ -451,7 +506,7 @@ export function Dropdown({
     if (disabled) return;
     if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      setOpen(true);
+      openDropdown();
       queueMicrotask(() => {
         const first = actionableItems.findIndex((i) => !i.disabled);
         if (first >= 0) focusItem(first);
@@ -465,7 +520,7 @@ export function Dropdown({
   ) => {
     if (e.key === "Escape") {
       e.preventDefault();
-      setOpen(false);
+      closeDropdown();
       triggerRef.current?.focus();
     } else if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -488,7 +543,7 @@ export function Dropdown({
         }
       }
     } else if (e.key === "Tab") {
-      setOpen(false);
+      closeDropdown();
     }
   };
 
@@ -504,7 +559,12 @@ export function Dropdown({
         aria-controls={open ? menuId : undefined}
         aria-label={triggerAriaLabel}
         onClick={() => {
-          if (!disabled) setOpen((prev) => !prev);
+          if (disabled) return;
+          if (open) {
+            closeDropdown();
+          } else {
+            openDropdown();
+          }
         }}
         onKeyDown={handleTriggerKeyDown}
         className={cn(
@@ -524,9 +584,11 @@ export function Dropdown({
           id={menuId}
           role="menu"
           aria-labelledby={triggerId}
+          style={menuStyle ?? undefined}
           className={cn(
-            "absolute top-full z-40 mt-1.5 min-w-[180px] rounded-[14px] border border-hairline bg-canvas p-1.5 shadow-[0_8px_24px_rgba(0,0,0,0.08)]",
-            align === "right" ? "right-0" : "left-0",
+            "z-40 min-w-[180px] rounded-[14px] border border-hairline bg-canvas p-1.5 shadow-[0_8px_24px_rgba(0,0,0,0.08)]",
+            !menuStyle && "absolute top-full mt-1.5",
+            !menuStyle && (align === "right" ? "right-0" : "left-0"),
           )}
         >
           {items.map((item) => {
@@ -553,7 +615,7 @@ export function Dropdown({
                 onClick={() => {
                   if (item.disabled) return;
                   item.onSelect?.();
-                  setOpen(false);
+                  closeDropdown();
                   triggerRef.current?.focus();
                 }}
                 onKeyDown={(e) => handleMenuKeyDown(e, currentIdx)}
