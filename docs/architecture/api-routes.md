@@ -3,7 +3,7 @@
 Deterministically generated from `src/app/api/**/route.ts` via `npm run docs:api`.
 
 - **OpenAPI Spec:** [`docs/architecture/openapi.json`](./openapi.json)
-- **Total Endpoints:** 31 operations across 21 paths
+- **Total Endpoints:** 36 operations across 25 paths
 
 | Path | Method | Tag | Path Params | Status Codes | Summary | Source |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -11,6 +11,7 @@ Deterministically generated from `src/app/api/**/route.ts` via `npm run docs:api
 | `/api/account` | `DELETE` | `account` | - | 200, 401, 503 | DELETE /api/account | `src/app/api/account/route.ts` |
 | `/api/cron/recurring-expenses` | `GET` | `cron` | - | 200 | GET /api/cron/recurring-expenses | `src/app/api/cron/recurring-expenses/route.ts` |
 | `/api/cron/recurring-expenses` | `POST` | `cron` | - | 201 | POST /api/cron/recurring-expenses | `src/app/api/cron/recurring-expenses/route.ts` |
+| `/api/expenses/export` | `GET` | `expenses` | - | 200, 400, 401, 503 | Export cycle- and group-scoped ledger transactions in RFC-4180 CSV or JSON. | `src/app/api/expenses/export/route.ts` |
 | `/api/fx` | `GET` | `fx` | - | 200, 400 | GET /api/fx | `src/app/api/fx/route.ts` |
 | `/api/groups` | `POST` | `groups` | - | 201, 400, 401, 503 | POST /api/groups | `src/app/api/groups/route.ts` |
 | `/api/groups/archive-check` | `POST` | `groups` | - | 200, 401, 500, 503 | POST /api/groups/archive-check | `src/app/api/groups/archive-check/route.ts` |
@@ -38,3 +39,7 @@ Deterministically generated from `src/app/api/**/route.ts` via `npm run docs:api
 | `/api/receipts` | `GET` | `receipts` | - | 200, 307, 400, 401, 403, 404, 503 | GET /api/receipts | `src/app/api/receipts/route.ts` |
 | `/api/receipts` | `POST` | `receipts` | - | 201, 400, 401, 413, 500, 503 | POST /api/receipts | `src/app/api/receipts/route.ts` |
 | `/api/search` | `GET` | `search` | - | 200, 401, 500, 503 | GET /api/search | `src/app/api/search/route.ts` |
+| `/api/settings` | `GET` | `settings` | - | 200, 401, 500, 503 | GET /api/settings | `src/app/api/settings/route.ts` |
+| `/api/settings` | `PATCH` | `settings` | - | 200, 400, 401, 503 | PATCH /api/settings | `src/app/api/settings/route.ts` |
+| `/api/settings/export` | `GET` | `settings` | - | 200, 400, 401, 500, 503 | Export full ledger history across all user groups in RFC-4180 CSV or JSON. | `src/app/api/settings/export/route.ts` |
+| `/api/settings/phone-verify` | `POST` | `settings` | - | 200, 400, 401, 500, 503 | POST /api/settings/phone-verify | `src/app/api/settings/phone-verify/route.ts` |

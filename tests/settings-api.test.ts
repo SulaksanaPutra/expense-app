@@ -80,12 +80,21 @@ interface InMemorySettlementRow {
   settled_at: string;
 }
 
+interface InMemoryBillingCycleRow {
+  id: string;
+  group_id: string;
+  period_start: string;
+  period_end: string;
+  status: "OPEN" | "CLOSED";
+}
+
 interface InMemoryDb {
   users: InMemoryUserRow[];
   groups: InMemoryGroupRow[];
   group_members: InMemoryMemberRow[];
   expenses: InMemoryExpenseRow[];
   settlements: InMemorySettlementRow[];
+  billing_cycles: InMemoryBillingCycleRow[];
 }
 
 function createInMemorySupabase(db: InMemoryDb) {
@@ -339,6 +348,7 @@ describe("Settings API & Consumer Persistence Integration", () => {
         },
       ],
       settlements: [],
+      billing_cycles: [],
     };
 
     getUserMock.mockResolvedValue({

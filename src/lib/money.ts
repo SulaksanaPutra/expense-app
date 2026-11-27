@@ -61,21 +61,65 @@ export interface FormatMinorUnitsOptions {
   absolute?: boolean;
 }
 
-export function formatMinorUnits(
-  minorUnits: number,
+function toSafeBigIntMinorUnits(minorUnits: number | bigint): bigint {
+  if (typeof minorUnits === "bigint") return minorUnits;
+  if (!Number.isFinite(minorUnits)) return BigInt(0);
+  return BigInt(Math.trunc(minorUnits));
+}
+
+/**
+ * Formats integer minor units into an exact decimal string (e.g. 18250 USD -> "182.50",
+ * 1500 JPY -> "1500") using BigInt string arithmetic with zero IEEE 754 float drift.
+ */
+export function formatMinorUnitsDecimal(
+  minorUnits: number | bigint,
   currency = "USD",
   options: FormatMinorUnitsOptions = {},
 ): string {
-  const safeUnits = Number.isFinite(minorUnits) ? Math.trunc(minorUnits) : 0;
+  const zero = BigInt(0);
+  const safeUnits = toSafeBigIntMinorUnits(minorUnits);
   const normalizedCurrency = isValidCurrencyCode(currency.toUpperCase())
     ? currency.toUpperCase()
     : "USD";
   const digits = getCurrencyMinorDigits(normalizedCurrency);
-  const divisor = 10 ** digits;
 
-  const isNegative = safeUnits < 0 && !options.absolute;
-  const absUnits = Math.abs(safeUnits);
-  const majorValue = absUnits / divisor;
+  const isNegative = safeUnits < zero && !options.absolute;
+  const absUnits = safeUnits < zero ? -safeUnits : safeUnits;
+
+  let unsignedDecimal: string;
+  if (digits === 0) {
+    unsignedDecimal = absUnits.toString();
+  } else {
+    const raw = absUnits.toString().padStart(digits + 1, "0");
+    const whole = raw.slice(0, -digits);
+    const frac = raw.slice(-digits);
+    unsignedDecimal = `${whole}.${frac}`;
+  }
+
+  if (isNegative) {
+    return `-${unsignedDecimal}`;
+  }
+  if (options.showPlus && safeUnits > zero) {
+    return `+${unsignedDecimal}`;
+  }
+  return unsignedDecimal;
+}
+
+export function formatMinorUnits(
+  minorUnits: number | bigint,
+  currency = "USD",
+  options: FormatMinorUnitsOptions = {},
+): string {
+  const zero = BigInt(0);
+  const safeUnits = toSafeBigIntMinorUnits(minorUnits);
+  const normalizedCurrency = isValidCurrencyCode(currency.toUpperCase())
+    ? currency.toUpperCase()
+    : "USD";
+  const digits = getCurrencyMinorDigits(normalizedCurrency);
+  const isNegative = safeUnits < zero && !options.absolute;
+  const unsignedDecimal = formatMinorUnitsDecimal(safeUnits, normalizedCurrency, {
+    absolute: true,
+  });
 
   let formatted: string;
   try {
@@ -84,15 +128,15 @@ export function formatMinorUnits(
       currency: normalizedCurrency,
       minimumFractionDigits: digits,
       maximumFractionDigits: digits,
-    }).format(majorValue);
+    }).format(unsignedDecimal as unknown as number);
   } catch {
-    formatted = `$${majorValue.toFixed(2)}`;
+    formatted = `$${unsignedDecimal}`;
   }
 
   if (isNegative) {
     return `-${formatted}`;
   }
-  if (options.showPlus && safeUnits > 0) {
+  if (options.showPlus && safeUnits > zero) {
     return `+${formatted}`;
   }
   return formatted;

@@ -1,5 +1,5 @@
 import { parseCycleParam } from "@/components/shell/url-state";
-import { formatMinorUnits } from "@/lib/money";
+import { formatMinorUnits, formatMinorUnitsDecimal } from "@/lib/money";
 import {
   computeGroupMemberNetBalances,
   computeMemberNetBalancesFromEdges,
@@ -625,8 +625,14 @@ export function computeExpensesKpiSummary(params: {
   };
 }
 
-function escapeCsvCell(value: string): string {
-  const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+export function escapeCsvCell(value: string): string {
+  const isSafeNegativeNumberOrCurrency =
+    /^-\d+(?:\.\d+)?$/.test(value) ||
+    /^-(?:[$€£¥₹]|CA\$|A\$|CHF\s?)\d/.test(value);
+  const safe =
+    !isSafeNegativeNumberOrCurrency && /^[=+\-@\t\r]/.test(value)
+      ? `'${value}`
+      : value;
   if (/[",\n\r]/.test(safe)) {
     return `"${safe.replaceAll('"', '""')}"`;
   }
@@ -650,11 +656,21 @@ export function buildExpensesCsv(
     "Original Amount",
     "Original Currency",
     "Exchange Rate",
+    "Exchange Rate Source",
     "Status",
+    "Total Amount (Minor Units)",
+    "Your Share (Minor Units)",
+    "Original Amount (Minor Units)",
+    "Receipt URL",
   ];
 
   const rows = expenses.map((exp) => {
-    const shareCents = getUserShareCents(exp, currentUserId);
+    const baseCurrency = (exp.groupBaseCurrency || exp.currency || "USD").toUpperCase();
+    const totalMinor = Math.trunc(exp.amountCents);
+    const shareMinor = getUserShareCents(exp, currentUserId);
+    const origMinor =
+      exp.originalAmountCents !== null ? Math.trunc(exp.originalAmountCents) : null;
+    const origCurrency = exp.originalCurrency ? exp.originalCurrency.toUpperCase() : "";
     const status = exp.isLocked
       ? "LOCKED"
       : exp.isSettledForUser
@@ -668,19 +684,170 @@ export function buildExpensesCsv(
       exp.category,
       exp.paidBy === currentUserId ? `You (${exp.payerName})` : exp.payerName,
       exp.splitMethod,
-      formatMinorUnits(shareCents, exp.currency),
-      formatMinorUnits(exp.amountCents, exp.currency),
-      exp.currency,
-      exp.originalAmountCents !== null && exp.originalCurrency
-        ? formatMinorUnits(exp.originalAmountCents, exp.originalCurrency)
+      formatMinorUnits(shareMinor, baseCurrency),
+      formatMinorUnits(totalMinor, baseCurrency),
+      baseCurrency,
+      origMinor !== null && origCurrency
+        ? formatMinorUnits(origMinor, origCurrency)
         : "",
-      exp.originalCurrency ?? "",
+      origCurrency,
       exp.exchangeRate !== null ? String(exp.exchangeRate) : "",
+      exp.exchangeRateSource ?? "",
       status,
+      String(totalMinor),
+      String(shareMinor),
+      origMinor !== null ? String(origMinor) : "",
+      exp.receiptUrl ?? "",
     ];
 
     return cells.map((cell) => escapeCsvCell(cell)).join(",");
   });
 
-  return [headers.join(","), ...rows].join("\n");
+  const headerLine = headers.map((h) => escapeCsvCell(h)).join(",");
+  return [headerLine, ...rows].join("\r\n");
+}
+
+export interface FullLedgerCsvSettlementItem {
+  id: string;
+  groupId: string;
+  groupName: string;
+  groupBaseCurrency: string;
+  payerId: string;
+  payerName: string;
+  recipientId: string;
+  recipientName: string;
+  amountCents: number;
+  paymentRail: string;
+  settledAt: string;
+}
+
+export function buildFullLedgerCsv(params: {
+  expenses: readonly ExpenseLedgerRecord[];
+  settlements: readonly FullLedgerCsvSettlementItem[];
+  currentUserId: string;
+}): string {
+  const { expenses, settlements, currentUserId } = params;
+  const headers = [
+    "Date",
+    "Group",
+    "Record Type",
+    "Description",
+    "Category",
+    "Paid By",
+    "Split Method",
+    "Your Share",
+    "Total Amount",
+    "Currency",
+    "Original Amount",
+    "Original Currency",
+    "Exchange Rate",
+    "Exchange Rate Source",
+    "Status",
+    "Total Amount (Decimal)",
+    "Total Amount (Minor Units)",
+    "Your Share (Minor Units)",
+    "Original Amount (Minor Units)",
+    "Receipt URL",
+  ];
+
+  type SortableEntry = {
+    sortMs: number;
+    sortId: string;
+    cells: string[];
+  };
+
+  const entries: SortableEntry[] = [];
+
+  for (const exp of expenses) {
+    const baseCurrency = (exp.groupBaseCurrency || exp.currency || "USD").toUpperCase();
+    const totalMinor = Math.trunc(exp.amountCents);
+    const shareMinor = getUserShareCents(exp, currentUserId);
+    const origMinor =
+      exp.originalAmountCents !== null ? Math.trunc(exp.originalAmountCents) : null;
+    const origCurrency = exp.originalCurrency ? exp.originalCurrency.toUpperCase() : "";
+    const status = exp.isLocked
+      ? "LOCKED"
+      : exp.isSettledForUser
+        ? "Settled"
+        : "Pending";
+
+    entries.push({
+      sortMs: Date.parse(exp.expenseDate) || 0,
+      sortId: exp.id,
+      cells: [
+        exp.expenseDate.slice(0, 10),
+        exp.groupName,
+        "EXPENSE",
+        exp.description,
+        exp.category,
+        exp.paidBy === currentUserId ? `You (${exp.payerName})` : exp.payerName,
+        exp.splitMethod,
+        formatMinorUnits(shareMinor, baseCurrency),
+        formatMinorUnits(totalMinor, baseCurrency),
+        baseCurrency,
+        origMinor !== null && origCurrency
+          ? formatMinorUnits(origMinor, origCurrency)
+          : "",
+        origCurrency,
+        exp.exchangeRate !== null ? String(exp.exchangeRate) : "",
+        exp.exchangeRateSource ?? "",
+        status,
+        formatMinorUnitsDecimal(totalMinor, baseCurrency),
+        String(totalMinor),
+        String(shareMinor),
+        origMinor !== null ? String(origMinor) : "",
+        exp.receiptUrl ?? "",
+      ],
+    });
+  }
+
+  for (const s of settlements) {
+    const baseCurrency = (s.groupBaseCurrency || "USD").toUpperCase();
+    const totalMinor = Math.trunc(s.amountCents);
+    const userImpactMinor =
+      s.payerId === currentUserId
+        ? -totalMinor
+        : s.recipientId === currentUserId
+          ? totalMinor
+          : 0;
+    const payerLabel =
+      s.payerId === currentUserId ? `You (${s.payerName})` : s.payerName;
+    const recipientLabel =
+      s.recipientId === currentUserId ? `You (${s.recipientName})` : s.recipientName;
+
+    entries.push({
+      sortMs: Date.parse(s.settledAt) || 0,
+      sortId: s.id,
+      cells: [
+        s.settledAt.slice(0, 10),
+        s.groupName,
+        "SETTLEMENT",
+        `Settlement: ${payerLabel} -> ${recipientLabel}`,
+        "Settlement",
+        payerLabel,
+        s.paymentRail,
+        formatMinorUnits(userImpactMinor, baseCurrency),
+        formatMinorUnits(totalMinor, baseCurrency),
+        baseCurrency,
+        "",
+        "",
+        "",
+        "",
+        "Settled",
+        formatMinorUnitsDecimal(totalMinor, baseCurrency),
+        String(totalMinor),
+        String(userImpactMinor),
+        "",
+        "",
+      ],
+    });
+  }
+
+  entries.sort((a, b) => b.sortMs - a.sortMs || b.sortId.localeCompare(a.sortId));
+
+  const headerLine = headers.map((h) => escapeCsvCell(h)).join(",");
+  const rows = entries.map((entry) =>
+    entry.cells.map((cell) => escapeCsvCell(cell)).join(","),
+  );
+  return [headerLine, ...rows].join("\r\n");
 }
