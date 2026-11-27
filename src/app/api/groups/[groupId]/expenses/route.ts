@@ -2,10 +2,74 @@ import { NextResponse, type NextRequest } from "next/server";
 import { hasSupabaseEnv } from "@/lib/auth/guards";
 import { createGroupExpense } from "@/lib/groups/ledger-guards";
 import { createClient } from "@/lib/supabase/server";
-import type { ExpenseSplitMethod, SplitBreakdownItem } from "@/types/database";
+import type {
+  ExchangeRateSource,
+  ExpenseSplitMethod,
+  SplitBreakdownItem,
+} from "@/types/database";
 
 interface RouteContext {
   params: Promise<{ groupId: string }>;
+}
+
+export async function GET(_request: NextRequest, context: RouteContext) {
+  if (!hasSupabaseEnv()) {
+    return NextResponse.json(
+      { error: "Supabase environment is not configured." },
+      { status: 503 },
+    );
+  }
+
+  const { groupId } = await context.params;
+  if (!groupId || !groupId.trim()) {
+    return NextResponse.json(
+      { error: "Group ID is required." },
+      { status: 400 },
+    );
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !user) {
+    return NextResponse.json(
+      { error: "Authentication required." },
+      { status: 401 },
+    );
+  }
+
+  const { data: member } = await supabase
+    .from("group_members")
+    .select("user_id")
+    .eq("group_id", groupId.trim())
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (!member) {
+    return NextResponse.json(
+      { error: "You are not a member of this split group." },
+      { status: 403 },
+    );
+  }
+
+  const { data: expenses, error } = await supabase
+    .from("expenses")
+    .select("*")
+    .eq("group_id", groupId.trim())
+    .is("deleted_at", null)
+    .order("expense_date", { ascending: false });
+
+  if (error) {
+    return NextResponse.json(
+      { error: error.message || "Unable to load group expenses." },
+      { status: 500 },
+    );
+  }
+
+  return NextResponse.json({ ok: true, expenses: expenses ?? [] }, { status: 200 });
 }
 
 export async function POST(request: NextRequest, context: RouteContext) {
@@ -73,6 +137,25 @@ export async function POST(request: NextRequest, context: RouteContext) {
     splitBreakdown: Array.isArray(record.split_breakdown)
       ? (record.split_breakdown as SplitBreakdownItem[])
       : undefined,
+    originalAmountCents:
+      record.original_amount_cents === null ||
+      record.original_amount_cents === undefined
+        ? null
+        : Number(record.original_amount_cents),
+    originalCurrency:
+      typeof record.original_currency === "string"
+        ? record.original_currency
+        : null,
+    exchangeRate:
+      record.exchange_rate === null || record.exchange_rate === undefined
+        ? null
+        : Number(record.exchange_rate),
+    exchangeRateSource:
+      typeof record.exchange_rate_source === "string"
+        ? (record.exchange_rate_source as ExchangeRateSource)
+        : null,
+    receiptUrl:
+      typeof record.receipt_url === "string" ? record.receipt_url : null,
   });
 
   if (!result.ok) {

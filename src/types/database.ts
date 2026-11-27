@@ -9,6 +9,12 @@ export type PaymentRail = "VENMO" | "APPLE_CARD" | "CASH" | "OTHER";
 export type BillingCycleStatus = "OPEN" | "CLOSED";
 export type RecurringFrequency = "MONTHLY";
 export type ReminderChannel = "PUSH" | "EMAIL" | "SMS";
+export type NotificationType =
+  | "EXPENSE_REVISION"
+  | "NEW_EXPENSE"
+  | "SETTLEMENT_CONFIRMATION"
+  | "REMINDER_NUDGE"
+  | "LEASE_ARCHIVE_PROMPT";
 export type GroupAuditEventType =
   | "GROUP_CREATED"
   | "RATIOS_UPDATED"
@@ -276,6 +282,7 @@ export interface Database {
         Row: {
           id: string;
           group_id: string;
+          created_by?: string | null;
           paid_by: string;
           description: string;
           category: string;
@@ -292,6 +299,7 @@ export interface Database {
         Insert: {
           id?: string;
           group_id: string;
+          created_by?: string | null;
           paid_by: string;
           description: string;
           category: string;
@@ -308,6 +316,7 @@ export interface Database {
         Update: {
           id?: string;
           group_id?: string;
+          created_by?: string | null;
           paid_by?: string;
           description?: string;
           category?: string;
@@ -358,6 +367,7 @@ export interface Database {
           receipt_url: string | null;
           is_recurring_generated: boolean;
           recurring_rule_id: string | null;
+          recurring_occurrence_date?: string | null;
           adjustment_for_expense_id: string | null;
           is_locked: boolean;
           deleted_at: string | null;
@@ -383,6 +393,7 @@ export interface Database {
           receipt_url?: string | null;
           is_recurring_generated?: boolean;
           recurring_rule_id?: string | null;
+          recurring_occurrence_date?: string | null;
           adjustment_for_expense_id?: string | null;
           is_locked?: boolean;
           deleted_at?: string | null;
@@ -408,6 +419,7 @@ export interface Database {
           receipt_url?: string | null;
           is_recurring_generated?: boolean;
           recurring_rule_id?: string | null;
+          recurring_occurrence_date?: string | null;
           adjustment_for_expense_id?: string | null;
           is_locked?: boolean;
           deleted_at?: string | null;
@@ -643,6 +655,93 @@ export interface Database {
           },
         ];
       };
+      notifications: {
+        Row: {
+          id: string;
+          user_id: string;
+          group_id: string | null;
+          actor_id: string | null;
+          expense_id: string | null;
+          revision_id: string | null;
+          type: NotificationType;
+          title: string;
+          description: string;
+          delta_cents: number | null;
+          currency: string | null;
+          href: string | null;
+          is_read: boolean;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          group_id?: string | null;
+          actor_id?: string | null;
+          expense_id?: string | null;
+          revision_id?: string | null;
+          type: NotificationType;
+          title: string;
+          description: string;
+          delta_cents?: number | null;
+          currency?: string | null;
+          href?: string | null;
+          is_read?: boolean;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          group_id?: string | null;
+          actor_id?: string | null;
+          expense_id?: string | null;
+          revision_id?: string | null;
+          type?: NotificationType;
+          title?: string;
+          description?: string;
+          delta_cents?: number | null;
+          currency?: string | null;
+          href?: string | null;
+          is_read?: boolean;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "notifications_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "notifications_group_id_fkey";
+            columns: ["group_id"];
+            isOneToOne: false;
+            referencedRelation: "groups";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "notifications_actor_id_fkey";
+            columns: ["actor_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "notifications_expense_id_fkey";
+            columns: ["expense_id"];
+            isOneToOne: false;
+            referencedRelation: "expenses";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "notifications_revision_id_fkey";
+            columns: ["revision_id"];
+            isOneToOne: false;
+            referencedRelation: "expense_revisions";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
     };
     Views: Record<string, never>;
     Functions: {
@@ -669,6 +768,18 @@ export interface Database {
       user_has_unsettled_group_balance: {
         Args: { p_user_id?: string };
         Returns: boolean;
+      };
+      reserve_receipt_storage_bytes: {
+        Args: { p_file_bytes: number; p_quota_bytes?: number };
+        Returns: Array<{ allowed: boolean; used_bytes: number }>;
+      };
+      release_receipt_storage_bytes: {
+        Args: { p_file_bytes: number };
+        Returns: number;
+      };
+      materialize_due_recurring_rules: {
+        Args: { p_run_date?: string };
+        Returns: number;
       };
     };
     Enums: Record<string, never>;

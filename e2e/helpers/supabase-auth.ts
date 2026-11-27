@@ -162,6 +162,39 @@ export async function authenticateContextAsUser(
   await context.addCookies(cookies);
 }
 
+export async function cleanupE2EReceiptsForUser(userId: string) {
+  const admin = createAdminSupabase();
+  const { data: folders } = await admin.storage
+    .from("receipts")
+    .list(userId, { limit: 200 });
+
+  if (folders && folders.length > 0) {
+    const objectPaths: string[] = [];
+    for (const entry of folders) {
+      if (entry.id === null) {
+        const { data: files } = await admin.storage
+          .from("receipts")
+          .list(`${userId}/${entry.name}`, { limit: 200 });
+        for (const f of files ?? []) {
+          if (f.name) {
+            objectPaths.push(`${userId}/${entry.name}/${f.name}`);
+          }
+        }
+      } else if (entry.name) {
+        objectPaths.push(`${userId}/${entry.name}`);
+      }
+    }
+    if (objectPaths.length > 0) {
+      await admin.storage.from("receipts").remove(objectPaths);
+    }
+  }
+
+  await admin
+    .from("users")
+    .update({ receipt_storage_used_bytes: 0 })
+    .eq("id", userId);
+}
+
 export async function cleanupE2EGroupsForUser(userId: string) {
   const admin = createAdminSupabase();
   const { data: ownedGroups } = await admin
@@ -181,6 +214,7 @@ async function deleteGroupsAndChildren(
   ids: string[],
 ) {
   if (ids.length === 0) return;
+  await admin.from("notifications").delete().in("group_id", ids);
   await admin.from("reminder_logs").delete().in("group_id", ids);
   await admin.from("settlements").delete().in("group_id", ids);
   await admin.from("expenses").delete().in("group_id", ids);
@@ -206,14 +240,19 @@ export async function cleanupAllE2EData(options?: { deleteUsers?: boolean }) {
     );
   }
 
+  const { data: listed } = await admin.auth.admin.listUsers({
+    page: 1,
+    perPage: 200,
+  });
+  const e2eUsers = (listed?.users ?? []).filter((u) =>
+    /^e2e-.*@ledgersplit\.test$/i.test(u.email ?? ""),
+  );
+
+  for (const user of e2eUsers) {
+    await cleanupE2EReceiptsForUser(user.id);
+  }
+
   if (options?.deleteUsers) {
-    const { data: listed } = await admin.auth.admin.listUsers({
-      page: 1,
-      perPage: 200,
-    });
-    const e2eUsers = (listed?.users ?? []).filter((u) =>
-      /^e2e-.*@ledgersplit\.test$/i.test(u.email ?? ""),
-    );
     for (const user of e2eUsers) {
       await admin.auth.admin.deleteUser(user.id);
     }

@@ -94,6 +94,7 @@ export interface ActiveGroupContextValue {
   activeGroup: ShellGroupSummary | null;
   cycle: string;
   user: ShellUserSummary | null;
+  updateReceiptStorageUsedBytes: (usedBytes: number) => void;
   liveSyncStatus: LiveSyncStatus;
   notifications: ShellNotificationItem[];
   unreadNotificationCount: number;
@@ -378,12 +379,62 @@ export function ActiveGroupProvider({
   const [mobileDrawerOpen, setMobileDrawerOpen] = React.useState(false);
   const [searchOpen, setSearchOpen] = React.useState(false);
   const [addExpenseOpen, setAddExpenseOpen] = React.useState(false);
-  const [notifications, setNotifications] =
-    React.useState<ShellNotificationItem[]>(initialNotifications);
+  const [readNotificationIds, setReadNotificationIds] = React.useState<
+    Set<string>
+  >(() => new Set());
+  const [userStorageOverride, setUserStorageOverride] = React.useState<{
+    userId: string;
+    baseBytes: number | undefined;
+    overrideBytes: number;
+  } | null>(null);
+
+  const notifications = React.useMemo<ShellNotificationItem[]>(
+    () =>
+      initialNotifications.map((item) =>
+        readNotificationIds.has(item.id) ? { ...item, unread: false } : item,
+      ),
+    [initialNotifications, readNotificationIds],
+  );
+
+  const effectiveUser = React.useMemo<ShellUserSummary | null>(() => {
+    if (!user) return null;
+    if (
+      userStorageOverride &&
+      userStorageOverride.userId === user.id &&
+      userStorageOverride.baseBytes === user.receiptStorageUsedBytes
+    ) {
+      return {
+        ...user,
+        receiptStorageUsedBytes: userStorageOverride.overrideBytes,
+      };
+    }
+    return user;
+  }, [user, userStorageOverride]);
+
+  const updateReceiptStorageUsedBytes = React.useCallback(
+    (usedBytes: number) => {
+      if (!user || !Number.isFinite(usedBytes) || usedBytes < 0) return;
+      setUserStorageOverride({
+        userId: user.id,
+        baseBytes: user.receiptStorageUsedBytes,
+        overrideBytes: Math.trunc(usedBytes),
+      });
+    },
+    [user],
+  );
 
   const markAllNotificationsRead = React.useCallback(() => {
-    setNotifications((prev) => prev.map((item) => ({ ...item, unread: false })));
-  }, []);
+    setReadNotificationIds(new Set(initialNotifications.map((item) => item.id)));
+    if (typeof fetch === "function") {
+      void fetch("/api/notifications", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      }).catch(() => {
+        // Non-fatal in unit tests or offline contexts.
+      });
+    }
+  }, [initialNotifications]);
 
   const unreadNotificationCount = React.useMemo(
     () => notifications.filter((n) => n.unread).length,
@@ -410,7 +461,8 @@ export function ActiveGroupProvider({
       activeGroupId,
       activeGroup,
       cycle,
-      user,
+      user: effectiveUser,
+      updateReceiptStorageUsedBytes,
       liveSyncStatus,
       notifications,
       unreadNotificationCount,
@@ -454,7 +506,8 @@ export function ActiveGroupProvider({
       stepCycle,
       toggleSidebarCollapsed,
       unreadNotificationCount,
-      user,
+      effectiveUser,
+      updateReceiptStorageUsedBytes,
     ],
   );
 

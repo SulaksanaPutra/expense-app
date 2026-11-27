@@ -3,18 +3,32 @@ import { AppShell } from "@/components/shell";
 import type {
   ShellGroupMember,
   ShellGroupSummary,
+  ShellNotificationItem,
   ShellUserSummary,
 } from "@/components/shell";
 import { getAuthenticatedUser, hasSupabaseEnv } from "@/lib/auth/guards";
 import { createClient } from "@/lib/supabase/server";
 
+function formatNotificationTimestamp(isoString: string): string {
+  const parsed = new Date(isoString);
+  if (Number.isNaN(parsed.getTime())) return isoString;
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "UTC",
+  }).format(parsed);
+}
+
 async function loadShellContext(): Promise<{
   user: ShellUserSummary | null;
   groups: ShellGroupSummary[];
+  notifications: ShellNotificationItem[];
 }> {
   const authUser = await getAuthenticatedUser();
   if (!authUser) {
-    return { user: null, groups: [] };
+    return { user: null, groups: [], notifications: [] };
   }
 
   const metaName =
@@ -29,35 +43,56 @@ async function loadShellContext(): Promise<{
   };
 
   if (!hasSupabaseEnv()) {
-    return { user: shellUser, groups: [] };
+    return { user: shellUser, groups: [], notifications: [] };
   }
 
   try {
     const supabase = await createClient();
 
-    const [{ data: profile }, { data: groupRows }] = await Promise.all([
-      supabase
-        .from("users")
-        .select("id, full_name, email")
-        .eq("id", authUser.id)
-        .maybeSingle(),
-      supabase
-        .from("groups")
-        .select("id, name, slug, group_type, status, base_currency")
-        .neq("status", "ARCHIVED")
-        .order("created_at", { ascending: true }),
-    ]);
+    const [{ data: profile }, { data: groupRows }, notificationsResult] =
+      await Promise.all([
+        supabase
+          .from("users")
+          .select("id, full_name, email, receipt_storage_used_bytes")
+          .eq("id", authUser.id)
+          .maybeSingle(),
+        supabase
+          .from("groups")
+          .select(
+            "id, name, slug, group_type, status, base_currency, default_split_mode",
+          )
+          .neq("status", "ARCHIVED")
+          .order("created_at", { ascending: true }),
+        supabase
+          .from("notifications")
+          .select("id, title, description, href, is_read, created_at")
+          .eq("user_id", authUser.id)
+          .order("created_at", { ascending: false })
+          .limit(25),
+      ]);
+
+    const notifications: ShellNotificationItem[] = (
+      notificationsResult?.data ?? []
+    ).map((n) => ({
+      id: n.id,
+      title: n.title,
+      description: n.description,
+      timestamp: formatNotificationTimestamp(n.created_at),
+      unread: !n.is_read,
+      href: n.href ?? undefined,
+    }));
 
     if (profile) {
       shellUser = {
         id: profile.id,
         fullName: profile.full_name || shellUser.fullName,
         email: profile.email || shellUser.email,
+        receiptStorageUsedBytes: Number(profile.receipt_storage_used_bytes ?? 0),
       };
     }
 
     if (!groupRows || groupRows.length === 0) {
-      return { user: shellUser, groups: [] };
+      return { user: shellUser, groups: [], notifications };
     }
 
     const groupIds = groupRows.map((g) => g.id);
@@ -65,9 +100,10 @@ async function loadShellContext(): Promise<{
     const [{ data: memberRows }, { data: expenseRows }] = await Promise.all([
       supabase
         .from("group_members")
-        .select("group_id, user_id, status")
+        .select("group_id, user_id, status, share_percentage, joined_at")
         .in("group_id", groupIds)
-        .eq("status", "ACTIVE"),
+        .eq("status", "ACTIVE")
+        .order("joined_at", { ascending: true }),
       supabase
         .from("expenses")
         .select("group_id")
@@ -97,6 +133,7 @@ async function loadShellContext(): Promise<{
       list.push({
         id: row.user_id,
         name: memberProfile?.full_name || "Member",
+        sharePercentage: Number(row.share_percentage ?? 0),
       });
       membersByGroup.set(row.group_id, list);
     }
@@ -116,13 +153,14 @@ async function loadShellContext(): Promise<{
       groupType: g.group_type,
       status: g.status,
       baseCurrency: g.base_currency,
+      defaultSplitMode: g.default_split_mode,
       activeSplitCount: splitCountByGroup.get(g.id) ?? 0,
       members: membersByGroup.get(g.id) ?? [],
     }));
 
-    return { user: shellUser, groups };
+    return { user: shellUser, groups, notifications };
   } catch {
-    return { user: shellUser, groups: [] };
+    return { user: shellUser, groups: [], notifications: [] };
   }
 }
 
@@ -131,13 +169,13 @@ export default async function AuthenticatedAppLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const { user, groups } = await loadShellContext();
+  const { user, groups, notifications } = await loadShellContext();
 
   return (
     <React.Suspense
       fallback={<div className="min-h-screen w-full bg-canvas-parchment" />}
     >
-      <AppShell groups={groups} user={user}>
+      <AppShell groups={groups} user={user} initialNotifications={notifications}>
         {children}
       </AppShell>
     </React.Suspense>

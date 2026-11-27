@@ -14,7 +14,11 @@
     "typecheck": "tsc --noEmit",
     "db:status": "supabase migration list --remote",
     "db:push": "supabase db push --remote --yes",
-    "db:seed": "supabase db query --remote --yes --file supabase/seed.sql"
+    "db:seed": "supabase db query --remote --yes --file supabase/seed.sql",
+    "docs:erd": "node scripts/docs-erd.mjs",
+    "docs:api": "node scripts/docs-api.mjs",
+    "docs:module-map": "node scripts/docs-module-map.mjs",
+    "docs:all": "npm run docs:erd && npm run docs:api && npm run docs:module-map"
   },
   "dependencies": {
     "@supabase/ssr": "^0.9.0",
@@ -34,6 +38,7 @@
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^5.1.0",
+    "dependency-cruiser": "^18.9.0",
     "eslint": "^9.39.0",
     "eslint-config-next": "^16.4.6",
     "jsdom": "^28.0.0",

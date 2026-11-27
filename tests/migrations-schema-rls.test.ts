@@ -196,4 +196,37 @@ describe("Supabase Postgres Schema & RLS Migrations", () => {
       /CREATE TRIGGER trg_group_members_departure_guard[\s\S]*?BEFORE DELETE ON public\.group_members/i,
     );
   });
+
+  it("provisions private receipts storage bucket, storage RLS policies, and atomic 500 MB quota RPCs", () => {
+    expect(fullSql).toMatch(/INSERT INTO storage\.buckets[\s\S]*?'receipts'/i);
+    expect(fullSql).toMatch(/CREATE POLICY "receipts_insert_own"[\s\S]*?ON storage\.objects/i);
+    expect(fullSql).toMatch(
+      /CREATE POLICY "receipts_select_owner_or_group_member"[\s\S]*?ON storage\.objects/i,
+    );
+    expect(fullSql).toMatch(/CREATE POLICY "receipts_delete_own"[\s\S]*?ON storage\.objects/i);
+    expect(fullSql).toMatch(
+      /CREATE OR REPLACE FUNCTION public\.reserve_receipt_storage_bytes/i,
+    );
+    expect(fullSql).toMatch(
+      /CREATE OR REPLACE FUNCTION public\.release_receipt_storage_bytes/i,
+    );
+  });
+
+  it("supports active member recurring rule ownership and idempotent cron materialization", () => {
+    expect(fullSql).toMatch(
+      /ALTER TABLE public\.recurring_rules[\s\S]*?ADD COLUMN IF NOT EXISTS created_by UUID/i,
+    );
+    expect(fullSql).toMatch(
+      /CREATE POLICY "recurring_rules_insert_active_member"[\s\S]*?ON public\.recurring_rules[\s\S]*?public\.is_active_group_member\(group_id\)/i,
+    );
+    expect(fullSql).toMatch(
+      /CREATE POLICY "recurring_rules_update_admin_or_creator"[\s\S]*?ON public\.recurring_rules/i,
+    );
+    expect(fullSql).toMatch(
+      /CREATE UNIQUE INDEX IF NOT EXISTS idx_expenses_recurring_rule_occurrence_uniq[\s\S]*?ON public\.expenses\(recurring_rule_id,\s*recurring_occurrence_date\)/i,
+    );
+    expect(fullSql).toMatch(
+      /CREATE OR REPLACE FUNCTION public\.materialize_due_recurring_rules/i,
+    );
+  });
 });
