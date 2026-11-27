@@ -28,7 +28,19 @@ import { AddEditExpenseModal } from "@/components/expenses";
 import { cn } from "@/lib/cn";
 import { formatMinorUnits } from "@/lib/money";
 import { useActiveGroup } from "./ActiveGroupContext";
-import { getCyclePickerOptions } from "./url-state";
+import { buildShellHref, getCyclePickerOptions } from "./url-state";
+
+interface GlobalSearchExpenseResult {
+  id: string;
+  groupId: string;
+  groupName: string;
+  description: string;
+  category: string;
+  amountCents: number;
+  currency: string;
+  expenseDate: string;
+  cycleSlug: string;
+}
 
 export interface TopBarProps {
   mobileMenuButtonRef?: React.RefObject<HTMLButtonElement | null>;
@@ -59,6 +71,10 @@ export function TopBar({ mobileMenuButtonRef }: TopBarProps) {
 
   const [notifOpen, setNotifOpen] = React.useState(false);
   const [searchQuery, setSearchQuery] = React.useState("");
+  const [searchExpenses, setSearchExpenses] = React.useState<
+    GlobalSearchExpenseResult[]
+  >([]);
+  const [isSearching, setIsSearching] = React.useState(false);
   const [toasts, setToasts] = React.useState<ToastItem[]>([]);
   const toastCounterRef = React.useRef(0);
   const notifContainerRef = React.useRef<HTMLDivElement>(null);
@@ -160,11 +176,67 @@ export function TopBar({ mobileMenuButtonRef }: TopBarProps) {
     return groups.filter((g) => g.name.toLowerCase().includes(q));
   }, [groups, searchQuery]);
 
+  React.useEffect(() => {
+    if (!searchOpen) {
+      return;
+    }
+
+    const q = searchQuery.trim();
+    if (!q) {
+      return;
+    }
+
+    if (typeof fetch !== "function") {
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setIsSearching(true);
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`, {
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          setSearchExpenses([]);
+          return;
+        }
+        const data = (await res.json()) as {
+          expenses?: GlobalSearchExpenseResult[];
+        };
+        if (!controller.signal.aborted && Array.isArray(data.expenses)) {
+          setSearchExpenses(data.expenses);
+        }
+      } catch {
+        if (!controller.signal.aborted) {
+          setSearchExpenses([]);
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsSearching(false);
+        }
+      }
+    }, 150);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [searchOpen, searchQuery]);
+
+  const trimmedSearchQuery = searchQuery.trim();
+  const visibleSearchExpenses =
+    searchOpen && trimmedSearchQuery.length > 0 ? searchExpenses : [];
+  const visibleSearching =
+    searchOpen && trimmedSearchQuery.length > 0 && isSearching;
+
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = searchQuery.trim();
     setSearchOpen(false);
     setSearchQuery("");
+    setSearchExpenses([]);
+    setIsSearching(false);
     router.push(
       buildNavHref("/expenses", trimmed ? { q: trimmed } : undefined),
     );
@@ -416,6 +488,63 @@ export function TopBar({ mobileMenuButtonRef }: TopBarProps) {
                 Expenses
               </Badge>
             </Button>
+          )}
+
+          {trimmedSearchQuery.length > 0 && (
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted-48">
+                  Matching Expenses
+                </span>
+                {visibleSearching && (
+                  <span className="text-[11px] text-ink-muted-48">
+                    Searching...
+                  </span>
+                )}
+              </div>
+              {visibleSearchExpenses.length === 0 ? (
+                !visibleSearching && (
+                  <p className="rounded-sm bg-canvas-parchment px-3 py-2.5 text-[12px] text-ink-muted-48">
+                    No matching expense records found.
+                  </p>
+                )
+              ) : (
+                <ul className="flex max-h-48 flex-col gap-1 overflow-y-auto">
+                  {visibleSearchExpenses.map((exp) => (
+                    <li key={exp.id}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSearchOpen(false);
+                          setSearchQuery("");
+                          router.push(
+                            buildShellHref(
+                              "/expenses",
+                              { group: exp.groupId, cycle: exp.cycleSlug },
+                              { q: exp.description },
+                            ),
+                          );
+                        }}
+                        className="flex w-full items-center justify-between gap-3 rounded-sm px-3 py-2 text-left text-[13px] text-ink transition-colors hover:bg-canvas-parchment focus-visible:outline-2 focus-visible:outline-primary-focus"
+                      >
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate font-medium">
+                            {exp.description}
+                          </span>
+                          <span className="block truncate text-[11px] text-ink-muted-48">
+                            {exp.groupName} · {exp.category} ·{" "}
+                            {exp.expenseDate.slice(0, 10)}
+                          </span>
+                        </span>
+                        <span className="shrink-0 font-semibold tabular-nums text-[12px] text-ink">
+                          {formatMinorUnits(exp.amountCents, exp.currency)}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           )}
 
           <div className="flex flex-col gap-1.5">

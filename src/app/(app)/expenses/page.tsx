@@ -1,16 +1,40 @@
-import { ProtectedRoutePlaceholder } from "@/components/auth/ProtectedRoutePlaceholder";
-import { LiveSyncPill } from "@/components/shell";
-import { requireAuthenticatedUser } from "@/lib/auth/guards";
+import { ExpensesClient } from "@/components/expenses";
+import { hasSupabaseEnv, requireAuthenticatedUser } from "@/lib/auth/guards";
+import { getExpensesPageData } from "@/lib/expenses/queries";
+import { createClient } from "@/lib/supabase/server";
 
 export default async function ExpensesPage() {
   const user = await requireAuthenticatedUser("/expenses");
 
+  if (!hasSupabaseEnv()) {
+    return (
+      <ExpensesClient
+        currentUserId={user.id}
+        userBaseCurrency="USD"
+        personalShareCapCents={null}
+        initialGroups={[]}
+        initialExpenses={[]}
+        initialSettlements={[]}
+        initialBillingCycles={[]}
+        initialRecurringRules={[]}
+      />
+    );
+  }
+
+  const supabase = await createClient();
+  const data = await getExpensesPageData(supabase, user.id);
+
   return (
-    <ProtectedRoutePlaceholder
-      title="Expenses Ledger"
-      titleBadge={<LiveSyncPill />}
-      description="Itemized shared ledger transactions and recurring expense rules."
-      userEmail={user.email ?? undefined}
+    <ExpensesClient
+      currentUserId={data.currentUserId}
+      userBaseCurrency={data.userBaseCurrency}
+      personalShareCapCents={data.personalShareCapCents}
+      initialGroups={data.groups}
+      initialExpenses={data.expenses}
+      initialSettlements={data.settlements}
+      initialBillingCycles={data.billingCycles}
+      initialRecurringRules={data.recurringRules}
+      loadError={data.loadError}
     />
   );
 }
