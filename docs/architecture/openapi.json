@@ -649,6 +649,39 @@
         }
       }
     },
+    "/api/groups/{groupId}/simplify": {
+      "parameters": [
+        {
+          "name": "groupId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "patch": {
+        "operationId": "patch_groups_groupId_simplify",
+        "tags": [
+          "groups"
+        ],
+        "summary": "Toggle per-group bipartite debt simplification (`Group.simplify_debts`).",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
     "/api/notifications": {
       "get": {
         "operationId": "get_notifications",
