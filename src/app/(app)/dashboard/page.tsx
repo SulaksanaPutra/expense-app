@@ -30,6 +30,7 @@ export default async function DashboardPage() {
       initialGroups={data.groups}
       initialSettlements={data.settlements}
       initialBillingCycles={data.billingCycles}
+      initialReminderCooldowns={data.reminderCooldowns}
       loadError={data.loadError}
     />
   );
