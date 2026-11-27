@@ -18,13 +18,36 @@ function normalizePosix(p) {
   return p.replace(/\\/g, "/");
 }
 
-function getTopLevelModule(modulePath) {
+function getFeatureModule(modulePath) {
   const normalized = normalizePosix(modulePath);
   if (!normalized.startsWith("src/")) return null;
-  const rest = normalized.slice("src/".length);
-  const slashIdx = rest.indexOf("/");
-  if (slashIdx === -1) return rest;
-  return rest.slice(0, slashIdx);
+  const parts = normalized.slice("src/".length).split("/");
+  if (parts.length === 1) return parts[0];
+
+  const [top, second, third] = parts;
+  if (top === "app") {
+    if ((second === "(app)" || second === "api" || second === "auth") && third && !third.includes(".")) {
+      return `${top}/${second}/${third}`;
+    }
+    if (second && !second.includes(".")) {
+      return `${top}/${second}`;
+    }
+    return top;
+  }
+
+  if ((top === "components" || top === "lib") && second && !second.includes(".")) {
+    return `${top}/${second}`;
+  }
+
+  return top;
+}
+
+function getLayerName(moduleName) {
+  if (moduleName.startsWith("app/api")) return "API Routes";
+  if (moduleName.startsWith("app/") || moduleName === "app") return "App Routes";
+  if (moduleName.startsWith("components/") || moduleName === "components") return "UI Components";
+  if (moduleName.startsWith("lib/") || moduleName === "lib") return "Domain & Lib";
+  return "Shared & Entry";
 }
 
 function toMermaidId(moduleName) {
@@ -73,7 +96,7 @@ async function main() {
   );
 
   for (const mod of sortedModules) {
-    const sourceBucket = getTopLevelModule(mod.source);
+    const sourceBucket = getFeatureModule(mod.source);
     if (!sourceBucket) continue;
 
     const bucket = ensureBucket(sourceBucket);
@@ -81,7 +104,7 @@ async function main() {
 
     for (const dep of mod.dependencies) {
       if (!dep.resolved) continue;
-      const targetBucket = getTopLevelModule(dep.resolved);
+      const targetBucket = getFeatureModule(dep.resolved);
       if (!targetBucket) continue;
 
       bucket.internalDepCount += 1;
@@ -126,7 +149,7 @@ async function main() {
     );
 
   const lines = [];
-  lines.push("# Source Module Dependency Map");
+  lines.push("# Feature & Domain Module Dependency Map");
   lines.push("");
   lines.push(
     "Deterministically generated from `src/` via `dependency-cruiser` (`npm run docs:module-map`).",
@@ -135,9 +158,28 @@ async function main() {
   lines.push("```mermaid");
   lines.push("flowchart LR");
 
+  const layerOrder = [
+    "App Routes",
+    "API Routes",
+    "UI Components",
+    "Domain & Lib",
+    "Shared & Entry",
+  ];
+  const bucketsByLayer = new Map(layerOrder.map((layer) => [layer, []]));
   for (const bucket of sortedBuckets) {
-    const id = toMermaidId(bucket.name);
-    lines.push(`    ${id}["src/${bucket.name}"]`);
+    const layer = getLayerName(bucket.name);
+    bucketsByLayer.get(layer).push(bucket);
+  }
+
+  for (const layer of layerOrder) {
+    const layerBuckets = bucketsByLayer.get(layer) ?? [];
+    if (layerBuckets.length === 0) continue;
+    lines.push(`    subgraph ${toMermaidId(layer)}["${layer}"]`);
+    for (const bucket of layerBuckets) {
+      const id = toMermaidId(bucket.name);
+      lines.push(`        ${id}["src/${bucket.name}"]`);
+    }
+    lines.push("    end");
   }
 
   if (sortedEdges.length > 0) {
@@ -207,7 +249,7 @@ async function main() {
   fs.writeFileSync(OUTPUT_PATH, lines.join("\n"), "utf8");
 
   console.log(
-    `Generated ${path.relative(ROOT, OUTPUT_PATH).replace(/\\/g, "/")} (${sortedBuckets.length} top-level modules, ${sortedEdges.length} cross-module edges, ${cruiseData.summary?.error ?? 0} errors, ${cruiseData.summary?.warn ?? 0} warnings).`,
+    `Generated ${path.relative(ROOT, OUTPUT_PATH).replace(/\\/g, "/")} (${sortedBuckets.length} feature modules, ${sortedEdges.length} cross-module edges, ${cruiseData.summary?.error ?? 0} errors, ${cruiseData.summary?.warn ?? 0} warnings).`,
   );
 
   if ((cruiseData.summary?.error ?? 0) > 0) {
