@@ -229,9 +229,10 @@ test.describe("Issue #77 — Foreign-Currency FX Spot Rate, Manual Override & Au
       ]);
 
       // 6. Verify Dashboard renders converted USD amount + Orig: €100.00
-      await expect(page.getByText(`[E2E] Paris Hotel ${tag}`)).toBeVisible();
-      await expect(page.getByText("$125.00")).toBeVisible();
-      await expect(page.getByText("Orig: €100.00")).toBeVisible();
+      const txCard = page.getByTestId("recent-shared-transactions-card");
+      await expect(txCard.getByText(`[E2E] Paris Hotel ${tag}`)).toBeVisible();
+      await expect(txCard.getByText("$125.00")).toBeVisible();
+      await expect(txCard.getByText("Orig: €100.00")).toBeVisible();
       await assertNoHorizontalOverflow(page);
     } finally {
       await cleanupE2EGroupsForUser(adminUserId);

@@ -181,15 +181,46 @@ test.describe("Issue #81 — Recurring Rules tab & idempotent cron materializati
       recurringPanel.getByText(tempDesc, { exact: true }),
     ).toBeHidden();
 
-    // 4. Pause then resume the Fiber rule
-    await page.getByRole("button", { name: `Pause ${fiberDesc}` }).click();
+    // Dismiss stacked toast notifications so bottom-right row actions are unobstructed
+    const closeToastBtns = page.getByRole("button", { name: "Close notification" });
+    while ((await closeToastBtns.count()) > 0) {
+      await closeToastBtns.first().click();
+    }
+
+    // 4. Pause then resume the Fiber rule (wait for PATCH persistence on each toggle)
+    const [pauseRes] = await Promise.all([
+      page.waitForResponse(
+        (res) =>
+          res.url().includes(`/api/groups/${groupId}/recurring-rules`) &&
+          res.request().method() === "PATCH",
+      ),
+      page.getByRole("button", { name: `Pause ${fiberDesc}` }).click(),
+    ]);
+    expect(pauseRes.status()).toBe(200);
     await expect(
       page.getByRole("button", { name: `Resume ${fiberDesc}` }),
     ).toBeVisible();
-    await page.getByRole("button", { name: `Resume ${fiberDesc}` }).click();
+
+    while ((await closeToastBtns.count()) > 0) {
+      await closeToastBtns.first().click();
+    }
+
+    const [resumeRes] = await Promise.all([
+      page.waitForResponse(
+        (res) =>
+          res.url().includes(`/api/groups/${groupId}/recurring-rules`) &&
+          res.request().method() === "PATCH",
+      ),
+      page.getByRole("button", { name: `Resume ${fiberDesc}` }).click(),
+    ]);
+    expect(resumeRes.status()).toBe(200);
     await expect(
       page.getByRole("button", { name: `Pause ${fiberDesc}` }),
     ).toBeVisible();
+
+    while ((await closeToastBtns.count()) > 0) {
+      await closeToastBtns.first().click();
+    }
 
     // Capture desktop/mobile verification screenshot on the Recurring tab
     await page.evaluate(() => window.scrollTo(0, 0));

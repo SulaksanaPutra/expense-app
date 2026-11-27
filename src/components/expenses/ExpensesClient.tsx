@@ -375,7 +375,9 @@ export function ExpensesClient({
       if (!deletedSet.has(item.id)) byId.set(item.id, item);
     }
     for (const item of addedRules) {
-      if (!deletedSet.has(item.id)) byId.set(item.id, item);
+      if (!deletedSet.has(item.id) && !byId.has(item.id)) {
+        byId.set(item.id, item);
+      }
     }
     return Array.from(byId.values()).map((r) =>
       r.id in ruleActiveOverrides
@@ -592,12 +594,13 @@ export function ExpensesClient({
           );
           setAddedRules((prev) => prev.filter((r) => r.id !== ruleId));
         } else if (detail.eventType === "UPDATE") {
-          setRuleActiveOverrides((prev) => {
-            if (!(ruleId in prev)) return prev;
-            const next = { ...prev };
-            delete next[ruleId];
-            return next;
-          });
+          const nextIsActive = detail.newRow?.is_active;
+          if (typeof nextIsActive === "boolean") {
+            setRuleActiveOverrides((prev) => ({
+              ...prev,
+              [ruleId]: nextIsActive,
+            }));
+          }
         }
       }
     };
