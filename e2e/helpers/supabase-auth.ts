@@ -45,11 +45,22 @@ export function createAdminSupabase() {
 
 export async function ensureE2EUser(email: string, fullName: string) {
   const admin = createAdminSupabase();
-  const { data: listed, error: listErr } = await admin.auth.admin.listUsers({
-    page: 1,
-    perPage: 200,
-  });
-  if (listErr) throw listErr;
+  let listed: Awaited<ReturnType<typeof admin.auth.admin.listUsers>>["data"] | null = null;
+  let listErr: unknown = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const res = await admin.auth.admin.listUsers({
+      page: 1,
+      perPage: 200,
+    });
+    if (!res.error) {
+      listed = res.data;
+      listErr = null;
+      break;
+    }
+    listErr = res.error;
+    await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+  }
+  if (listErr || !listed) throw listErr;
 
   let user = listed.users.find(
     (u) => u.email?.toLowerCase() === email.toLowerCase(),
@@ -162,7 +173,49 @@ export async function cleanupE2EGroupsForUser(userId: string) {
   if (!ownedGroups || ownedGroups.length === 0) return;
 
   const ids = ownedGroups.map((g) => g.id);
+  await deleteGroupsAndChildren(admin, ids);
+}
+
+async function deleteGroupsAndChildren(
+  admin: ReturnType<typeof createAdminSupabase>,
+  ids: string[],
+) {
+  if (ids.length === 0) return;
+  await admin.from("reminder_logs").delete().in("group_id", ids);
+  await admin.from("settlements").delete().in("group_id", ids);
+  await admin.from("expenses").delete().in("group_id", ids);
+  await admin.from("recurring_rules").delete().in("group_id", ids);
+  await admin.from("billing_cycles").delete().in("group_id", ids);
   await admin.from("group_audit_logs").delete().in("group_id", ids);
   await admin.from("group_members").delete().in("group_id", ids);
   await admin.from("groups").delete().in("id", ids);
+}
+
+export async function cleanupAllE2EData(options?: { deleteUsers?: boolean }) {
+  const admin = createAdminSupabase();
+
+  const { data: e2eGroups } = await admin
+    .from("groups")
+    .select("id")
+    .ilike("name", "[E2E]%");
+
+  if (e2eGroups && e2eGroups.length > 0) {
+    await deleteGroupsAndChildren(
+      admin,
+      e2eGroups.map((g) => g.id),
+    );
+  }
+
+  if (options?.deleteUsers) {
+    const { data: listed } = await admin.auth.admin.listUsers({
+      page: 1,
+      perPage: 200,
+    });
+    const e2eUsers = (listed?.users ?? []).filter((u) =>
+      /^e2e-.*@ledgersplit\.test$/i.test(u.email ?? ""),
+    );
+    for (const user of e2eUsers) {
+      await admin.auth.admin.deleteUser(user.id);
+    }
+  }
 }
