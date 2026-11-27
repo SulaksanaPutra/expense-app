@@ -1,5 +1,24 @@
 import { parseCycleParam } from "@/components/shell/url-state";
 import { formatMinorUnits } from "@/lib/money";
+import {
+  computeGroupMemberNetBalances,
+  computeMemberNetBalancesFromEdges,
+  computeMultiGroupDebtEdges,
+  computePairwiseGroupDebtEdges,
+  computePerGroupDebtEdges,
+  simplifyBipartiteGroupDebts,
+  type SimplifiedDebtEdge,
+} from "./debt-simplification";
+
+export {
+  computeGroupMemberNetBalances,
+  computeMemberNetBalancesFromEdges,
+  computeMultiGroupDebtEdges,
+  computePairwiseGroupDebtEdges,
+  computePerGroupDebtEdges,
+  simplifyBipartiteGroupDebts,
+  type SimplifiedDebtEdge,
+};
 
 function getBillingCycleWindowLocal(
   cycleSlug: string,
@@ -122,18 +141,6 @@ export interface RecurringRuleRecord {
   splitRule: SplitMode;
   isActive: boolean;
   nextRunDate: string;
-}
-
-export interface SimplifiedDebtEdge {
-  groupId: string;
-  groupName: string;
-  currency: string;
-  payerId: string;
-  payerName: string;
-  recipientId: string;
-  recipientName: string;
-  recipientInstantTag: string | null;
-  amountCents: number;
 }
 
 export interface CategoryTotalItem {
@@ -368,138 +375,6 @@ export function getUserShareCents(
 ): number {
   const entry = expense.splitBreakdown.find((item) => item.user_id === userId);
   return entry ? Math.trunc(entry.share_cents) : 0;
-}
-
-export function computePerGroupDebtEdges(params: {
-  group: ExpenseGroupInfo;
-  expenses: readonly Pick<
-    ExpenseLedgerRecord,
-    "groupId" | "paidBy" | "amountCents" | "splitBreakdown"
-  >[];
-  settlements: readonly ExpenseSettlementRecord[];
-}): SimplifiedDebtEdge[] {
-  const { group, expenses, settlements } = params;
-  const memberById = new Map(group.members.map((m) => [m.userId, m]));
-
-  if (group.simplifyDebts) {
-    const netByUser = new Map<string, number>();
-    for (const m of group.members) {
-      netByUser.set(m.userId, 0);
-    }
-
-    for (const exp of expenses) {
-      if (exp.groupId !== group.id) continue;
-      netByUser.set(
-        exp.paidBy,
-        (netByUser.get(exp.paidBy) ?? 0) + Math.trunc(exp.amountCents),
-      );
-      for (const part of exp.splitBreakdown) {
-        netByUser.set(
-          part.user_id,
-          (netByUser.get(part.user_id) ?? 0) - Math.trunc(part.share_cents),
-        );
-      }
-    }
-
-    for (const s of settlements) {
-      if (s.groupId !== group.id) continue;
-      const amt = Math.trunc(s.amountCents);
-      netByUser.set(s.payerId, (netByUser.get(s.payerId) ?? 0) + amt);
-      netByUser.set(s.recipientId, (netByUser.get(s.recipientId) ?? 0) - amt);
-    }
-
-    const debtors: Array<{ userId: string; amount: number }> = [];
-    const creditors: Array<{ userId: string; amount: number }> = [];
-
-    for (const [userId, bal] of netByUser.entries()) {
-      if (bal < 0) debtors.push({ userId, amount: -bal });
-      else if (bal > 0) creditors.push({ userId, amount: bal });
-    }
-
-    debtors.sort((a, b) => b.amount - a.amount || a.userId.localeCompare(b.userId));
-    creditors.sort((a, b) => b.amount - a.amount || a.userId.localeCompare(b.userId));
-
-    const edges: SimplifiedDebtEdge[] = [];
-    let dIdx = 0;
-    let cIdx = 0;
-
-    while (dIdx < debtors.length && cIdx < creditors.length) {
-      const debtor = debtors[dIdx];
-      const creditor = creditors[cIdx];
-      const transfer = Math.min(debtor.amount, creditor.amount);
-
-      if (transfer > 0) {
-        const payerInfo = memberById.get(debtor.userId);
-        const recipientInfo = memberById.get(creditor.userId);
-        edges.push({
-          groupId: group.id,
-          groupName: group.name,
-          currency: group.baseCurrency,
-          payerId: debtor.userId,
-          payerName: payerInfo?.name ?? "Member",
-          recipientId: creditor.userId,
-          recipientName: recipientInfo?.name ?? "Member",
-          recipientInstantTag: recipientInfo?.instantSettlementTag ?? null,
-          amountCents: transfer,
-        });
-      }
-
-      debtor.amount -= transfer;
-      creditor.amount -= transfer;
-      if (debtor.amount === 0) dIdx += 1;
-      if (creditor.amount === 0) cIdx += 1;
-    }
-
-    return edges;
-  }
-
-  // Pairwise non-simplified mode: track directed owed(A -> B)
-  const pairMap = new Map<string, number>();
-  const addDirected = (fromId: string, toId: string, amount: number) => {
-    if (fromId === toId || amount === 0) return;
-    const [a, b] = fromId < toId ? [fromId, toId] : [toId, fromId];
-    const key = `${a}::${b}`;
-    const signed = fromId < toId ? amount : -amount;
-    pairMap.set(key, (pairMap.get(key) ?? 0) + signed);
-  };
-
-  for (const exp of expenses) {
-    if (exp.groupId !== group.id) continue;
-    for (const part of exp.splitBreakdown) {
-      if (part.user_id !== exp.paidBy) {
-        addDirected(part.user_id, exp.paidBy, Math.trunc(part.share_cents));
-      }
-    }
-  }
-
-  for (const s of settlements) {
-    if (s.groupId !== group.id) continue;
-    addDirected(s.payerId, s.recipientId, -Math.trunc(s.amountCents));
-  }
-
-  const edges: SimplifiedDebtEdge[] = [];
-  for (const [key, net] of pairMap.entries()) {
-    if (net === 0) continue;
-    const [a, b] = key.split("::");
-    const payerId = net > 0 ? a : b;
-    const recipientId = net > 0 ? b : a;
-    const amountCents = Math.abs(net);
-    const payerInfo = memberById.get(payerId);
-    const recipientInfo = memberById.get(recipientId);
-    edges.push({
-      groupId: group.id,
-      groupName: group.name,
-      currency: group.baseCurrency,
-      payerId,
-      payerName: payerInfo?.name ?? "Member",
-      recipientId,
-      recipientName: recipientInfo?.name ?? "Member",
-      recipientInstantTag: recipientInfo?.instantSettlementTag ?? null,
-      amountCents,
-    });
-  }
-
-  return edges.sort((x, y) => y.amountCents - x.amountCents);
 }
 
 export function filterAndSortExpenses(params: {
