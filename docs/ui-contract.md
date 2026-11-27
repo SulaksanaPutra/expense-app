@@ -45,7 +45,7 @@ All feature views and modals must consume these shared primitives rather than ha
 | Top Bar Notification Bell | `Wired` | Supabase Realtime + `Notification` query | Red dot indicates unread items (new expense, share revision, settlement confirmation, reminder nudge, lease archive prompt). Clicking opens notification popover with "Mark all read". |
 | Top Bar `+ Add Expense` CTA | `Wired` | Global `ModalContext` | Opens `AddEditExpenseModal` from any route, pre-selected to the current `Active Group` (or prompts group selection if `All Groups` is active). |
 | Top Bar User Profile Menu | `Wired` | Supabase Auth session (`User`) | Displays user avatar/initials. Dropdown links to `/settings` and `Sign Out`. |
-| Header `Live Sync` Pill | `Wired` | Supabase Realtime channel status | Green dot when subscribed (`Live Sync`), amber when reconnecting (`Syncing...`), muted when offline. |
+| Page Header `Live Sync` Pill (`LiveSyncPill`) | `Wired` | Supabase Realtime channel status | Rendered in the page headers of `/dashboard` and `/expenses` only (per `.stitch/dashboard.png` and `.stitch/expenses.png`; omitted from Top Bar, `/split-groups`, and `/settings`). Green dot when subscribed (`Live Sync`), amber when reconnecting (`Syncing...`), muted when offline. |
 
 ### Canonical Shared Modals
 - **`AddEditExpenseModal`**:

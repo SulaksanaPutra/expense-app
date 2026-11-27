@@ -1,4 +1,5 @@
 import { ProtectedRoutePlaceholder } from "@/components/auth/ProtectedRoutePlaceholder";
+import { LiveSyncPill } from "@/components/shell";
 import { requireAuthenticatedUser } from "@/lib/auth/guards";
 
 export default async function ExpensesPage() {
@@ -6,7 +7,8 @@ export default async function ExpensesPage() {
 
   return (
     <ProtectedRoutePlaceholder
-      title="Expenses"
+      title="Expenses Ledger"
+      titleBadge={<LiveSyncPill />}
       description="Itemized shared ledger transactions and recurring expense rules."
       userEmail={user.email ?? undefined}
     />

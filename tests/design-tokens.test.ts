@@ -70,10 +70,17 @@ describe("Design Tokens & Tailwind Configuration (.stitch/DESIGN.md)", () => {
     expect(extendRadius.sm).toBe("8px");
     expect(extendRadius.md).toBe("11px");
 
-    expect(extendSpacing.xxs).toBe("4px");
-    expect(extendSpacing.xs).toBe("8px");
-    expect(extendSpacing.lg).toBe("24px");
-    expect(extendSpacing.section).toBe("80px");
+    expect(DESIGN_TOKENS.spacing.xxs).toBe("4px");
+    expect(DESIGN_TOKENS.spacing.xs).toBe("8px");
+    expect(DESIGN_TOKENS.spacing.lg).toBe("24px");
+    expect(DESIGN_TOKENS.spacing.section).toBe("80px");
+
+    expect(extendSpacing["ds-xxs"]).toBe("4px");
+    expect(extendSpacing["ds-xs"]).toBe("8px");
+    expect(extendSpacing["ds-lg"]).toBe("24px");
+    expect(extendSpacing["ds-section"]).toBe("80px");
+    expect(extendSpacing.md).toBeUndefined();
+    expect(extendSpacing.lg).toBeUndefined();
   });
 
   it("declares matching CSS variables and @theme tokens in src/app/globals.css", () => {

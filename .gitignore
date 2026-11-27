@@ -36,5 +36,8 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# opencode scratch
+# opencode scratch & verification artifacts
 .opencode/
+.verification/
+playwright-report/
+test-results/
