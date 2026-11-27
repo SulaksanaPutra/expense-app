@@ -20,9 +20,12 @@ const config: Config = {
         ...DESIGN_TOKENS.rounded,
         card: DESIGN_TOKENS.rounded.lg,
       },
-      spacing: {
-        ...DESIGN_TOKENS.spacing,
-      },
+      spacing: Object.fromEntries(
+        Object.entries(DESIGN_TOKENS.spacing).map(([key, value]) => [
+          `ds-${key}`,
+          value,
+        ]),
+      ),
     },
   },
   plugins: [],

@@ -1,4 +1,5 @@
 import { ProtectedRoutePlaceholder } from "@/components/auth/ProtectedRoutePlaceholder";
+import { LiveSyncPill } from "@/components/shell";
 import { requireAuthenticatedUser } from "@/lib/auth/guards";
 
 export default async function DashboardPage() {
@@ -6,7 +7,8 @@ export default async function DashboardPage() {
 
   return (
     <ProtectedRoutePlaceholder
-      title="Dashboard"
+      title="Dashboard Overview"
+      titleBadge={<LiveSyncPill />}
       description="Monthly spend overview, peer balances, and recent shared transactions."
       userEmail={user.email ?? undefined}
     />

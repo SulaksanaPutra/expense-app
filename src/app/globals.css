@@ -43,15 +43,15 @@
   --radius-pill: 9999px;
   --radius-full: 9999px;
 
-  /* Spacing */
-  --spacing-xxs: 4px;
-  --spacing-xs: 8px;
-  --spacing-sm: 12px;
-  --spacing-md: 17px;
-  --spacing-lg: 24px;
-  --spacing-xl: 32px;
-  --spacing-xxl: 48px;
-  --spacing-section: 80px;
+  /* Design System Spacing (namespaced to avoid colliding with Tailwind v4 container/max-w-* scales) */
+  --space-xxs: 4px;
+  --space-xs: 8px;
+  --space-sm: 12px;
+  --space-md: 17px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-xxl: 48px;
+  --space-section: 80px;
 }
 
 @theme inline {
@@ -88,24 +88,6 @@
   --radius-card: var(--radius-card);
   --radius-pill: var(--radius-pill);
   --radius-full: var(--radius-full);
-}
-
-@layer utilities {
-  .max-w-xs {
-    max-width: 20rem;
-  }
-  .max-w-sm {
-    max-width: 24rem;
-  }
-  .max-w-md {
-    max-width: 28rem;
-  }
-  .max-w-lg {
-    max-width: 32rem;
-  }
-  .max-w-xl {
-    max-width: 36rem;
-  }
 }
 
 @layer base {
