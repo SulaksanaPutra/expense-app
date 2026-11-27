@@ -503,4 +503,174 @@ describe("AddEditExpenseModal (create mode) & Entry Point Triggers", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(2);
     expect(JSON.parse(String(fetchSpy.mock.calls[1][1]?.body)).receipt_url).toBeNull();
   });
+
+  it("fetches spot rate on foreign currency, switches to MANUAL_OVERRIDE on edit, recalculates splits, and submits FX audit fields", async () => {
+    const user = userEvent.setup();
+
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input) => {
+        const url = String(input);
+        if (url.includes("/api/fx")) {
+          return new Response(
+            JSON.stringify({ ok: true, from: "EUR", to: "USD", rate: 1.08, source: "API" }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            expense: {
+              id: "exp-fx-1",
+              group_id: "grp-apt-4b",
+              description: "Paris Hotel",
+              amount_cents: 12500,
+              currency: "USD",
+              original_amount_cents: 10000,
+              original_currency: "EUR",
+              exchange_rate: 1.25,
+              exchange_rate_source: "MANUAL_OVERRIDE",
+            },
+          }),
+          { status: 201, headers: { "Content-Type": "application/json" } },
+        );
+      });
+
+    render(
+      <AppShell groups={THREE_MEMBER_GROUPS} user={CURRENT_USER}>
+        <div>Workspace</div>
+      </AppShell>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Add Expense" }));
+    const dialog = screen.getByRole("dialog", { name: "Add Expense" });
+
+    await user.type(within(dialog).getByLabelText(/Total Bill Amount/i), "100.00");
+    await user.type(within(dialog).getByLabelText(/Description/i), "Paris Hotel");
+
+    // Select EUR -> fetches spot rate 1.08, marks API Spot Rate, previews $108.00 USD
+    await user.click(within(dialog).getByRole("button", { name: /Currency/i }));
+    await user.click(within(dialog).getByRole("option", { name: /EUR/i }));
+
+    expect(await within(dialog).findByText("$108.00 USD")).toBeInTheDocument();
+    expect(within(dialog).getByTestId("fx-rate-source-badge")).toHaveTextContent(
+      "API Spot Rate",
+    );
+    expect(within(dialog).getByTestId("split-share-usr-alex")).toHaveTextContent(
+      "$36.00 (33.34%)",
+    );
+
+    // Edit Exchange Rate -> marks Manual Override & recalculates 3-way splits ($125.00 -> 4167 / 4167 / 4166)
+    const rateInput = within(dialog).getByRole("textbox", {
+      name: /Exchange Rate/i,
+    });
+    await user.clear(rateInput);
+    await user.type(rateInput, "1.25");
+
+    expect(within(dialog).getByTestId("fx-rate-source-badge")).toHaveTextContent(
+      "Manual Override",
+    );
+    expect(within(dialog).getByTestId("fx-base-total")).toHaveTextContent(
+      "$125.00 USD",
+    );
+    expect(within(dialog).getByTestId("split-share-usr-alex")).toHaveTextContent(
+      "$41.67 (33.34%)",
+    );
+    expect(within(dialog).getByTestId("split-share-usr-elena")).toHaveTextContent(
+      "$41.67 (33.33%)",
+    );
+    expect(within(dialog).getByTestId("split-share-usr-marcus")).toHaveTextContent(
+      "$41.66 (33.33%)",
+    );
+
+    const saveBtn = within(dialog).getByRole("button", {
+      name: /Save Expense/i,
+    });
+    expect(saveBtn).toHaveTextContent("Save Expense ($125.00)");
+    await user.click(saveBtn);
+
+    const postCall = fetchSpy.mock.calls.find(([u]) =>
+      String(u).includes("/expenses"),
+    );
+    expect(postCall).toBeDefined();
+    const sentBody = JSON.parse(String(postCall?.[1]?.body));
+    expect(sentBody.amount_cents).toBe(12500);
+    expect(sentBody.original_amount_cents).toBe(10000);
+    expect(sentBody.original_currency).toBe("EUR");
+    expect(sentBody.exchange_rate).toBe(1.25);
+    expect(sentBody.exchange_rate_source).toBe("MANUAL_OVERRIDE");
+    expect(sentBody.split_breakdown).toEqual([
+      { user_id: "usr-alex", share_cents: 4167, percentage: 33.34 },
+      { user_id: "usr-elena", share_cents: 4167, percentage: 33.33 },
+      { user_id: "usr-marcus", share_cents: 4166, percentage: 33.33 },
+    ]);
+  });
+
+  it("handles FX API failure gracefully, validates manual exchange rate, and restores API rate on refresh", async () => {
+    const user = userEvent.setup();
+    let fxAttempt = 0;
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      if (String(input).includes("/api/fx")) {
+        fxAttempt += 1;
+        if (fxAttempt === 1) {
+          return new Response(JSON.stringify({ error: "Upstream unavailable" }), {
+            status: 503,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({ ok: true, from: "JPY", to: "USD", rate: 0.0067, source: "API" }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ error: "Unexpected call" }), {
+        status: 500,
+      });
+    });
+
+    render(
+      <AppShell groups={THREE_MEMBER_GROUPS} user={CURRENT_USER}>
+        <div>Workspace</div>
+      </AppShell>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Add Expense" }));
+    const dialog = screen.getByRole("dialog", { name: "Add Expense" });
+
+    await user.type(within(dialog).getByLabelText(/Total Bill Amount/i), "10000");
+    await user.click(within(dialog).getByRole("button", { name: /Currency/i }));
+    await user.click(within(dialog).getByRole("option", { name: /JPY/i }));
+
+    expect(
+      await within(dialog).findByText(
+        "Live spot rate unavailable. Enter an exchange rate manually.",
+      ),
+    ).toBeInTheDocument();
+
+    const saveBtn = within(dialog).getByRole("button", {
+      name: /Save Expense/i,
+    });
+    expect(saveBtn).toBeDisabled();
+
+    // Enter invalid rate 0 and blur -> validation message shown
+    const rateInput = within(dialog).getByRole("textbox", {
+      name: /Exchange Rate/i,
+    });
+    await user.type(rateInput, "0");
+    fireEvent.blur(rateInput);
+    expect(
+      within(dialog).getByText("Enter a positive exchange rate (e.g. 1.085)."),
+    ).toBeInTheDocument();
+    expect(saveBtn).toBeDisabled();
+
+    // Click refresh button -> restores API Spot Rate for JPY -> USD
+    await user.click(
+      within(dialog).getByRole("button", { name: "Refresh spot exchange rate" }),
+    );
+    expect(await within(dialog).findByText("$67.00 USD")).toBeInTheDocument();
+    expect(within(dialog).getByTestId("fx-rate-source-badge")).toHaveTextContent(
+      "API Spot Rate",
+    );
+  });
 });

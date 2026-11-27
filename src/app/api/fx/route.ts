@@ -44,9 +44,9 @@ export async function GET(request: NextRequest) {
     });
   }
 
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 2000);
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 2000);
     const response = await fetch(
       `https://api.frankfurter.app/latest?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
       {
@@ -54,7 +54,6 @@ export async function GET(request: NextRequest) {
         next: { revalidate: 300 },
       },
     );
-    clearTimeout(timer);
 
     if (response.ok) {
       const data = (await response.json()) as {
@@ -73,6 +72,8 @@ export async function GET(request: NextRequest) {
     }
   } catch {
     // Fall back to deterministic reference rate when offline or rate-limited.
+  } finally {
+    clearTimeout(timer);
   }
 
   return NextResponse.json({

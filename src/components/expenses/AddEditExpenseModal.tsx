@@ -78,6 +78,27 @@ const CATEGORY_OPTIONS: SelectOption[] = EXPENSE_CATEGORIES.map((cat) => ({
   label: cat,
 }));
 
+async function fetchSpotRateFromApi(
+  fromCur: string,
+  toCur: string,
+  signal: AbortSignal,
+): Promise<number | null> {
+  const res = await fetch(
+    `/api/fx?from=${encodeURIComponent(fromCur)}&to=${encodeURIComponent(toCur)}`,
+    { signal },
+  );
+  if (!res.ok) return null;
+  const data = (await res.json()) as { rate?: number };
+  if (
+    typeof data.rate === "number" &&
+    Number.isFinite(data.rate) &&
+    data.rate > 0
+  ) {
+    return data.rate;
+  }
+  return null;
+}
+
 function getTodayIsoDate(): string {
   const now = new Date();
   const y = now.getFullYear();
@@ -227,6 +248,9 @@ function AddEditExpenseModalInner({
   const [exchangeRateSource, setExchangeRateSource] =
     React.useState<ExchangeRateSource>("API");
   const [fxLoading, setFxLoading] = React.useState(false);
+  const [fxError, setFxError] = React.useState<string | null>(null);
+  const fxAbortRef = React.useRef<AbortController | null>(null);
+  const fxRequestSeqRef = React.useRef(0);
 
   const [description, setDescription] = React.useState("");
   const [category, setCategory] = React.useState<string>(EXPENSE_CATEGORIES[0]);
@@ -253,19 +277,30 @@ function AddEditExpenseModalInner({
   const [serverError, setServerError] = React.useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
 
+  const cancelPendingFxFetch = React.useCallback(() => {
+    fxRequestSeqRef.current += 1;
+    if (fxAbortRef.current) {
+      fxAbortRef.current.abort();
+      fxAbortRef.current = null;
+    }
+  }, []);
+
   const applyGroupDefaults = React.useCallback(
     (group: ShellGroupSummary | null) => {
+      cancelPendingFxFetch();
       const next = buildInitialGroupState(group, currentUser);
       setCurrency(next.currency);
       setExchangeRateInput("1");
       setExchangeRateSource("API");
+      setFxLoading(false);
+      setFxError(null);
       setPaidBy(next.paidBy);
       setSplitMethod(next.splitMethod);
       setIncludedMemberIds(next.includedMemberIds);
       setPercentageInputs(next.percentageInputs);
       setExactInputs(next.exactInputs);
     },
-    [currentUser],
+    [cancelPendingFxFetch, currentUser],
   );
 
   const resetAllState = React.useCallback(
@@ -301,73 +336,86 @@ function AddEditExpenseModalInner({
   const isForeignCurrency =
     selectedGroup !== null && currency !== baseCurrency;
 
-  const fetchSpotRate = React.useCallback(
-    async (fromCur: string, toCur: string, signal?: AbortSignal) => {
-      if (fromCur === toCur) {
-        setExchangeRateInput("1");
-        setExchangeRateSource("API");
-        setFxLoading(false);
-        return;
-      }
-      setFxLoading(true);
-      try {
-        const res = await fetch(
-          `/api/fx?from=${encodeURIComponent(fromCur)}&to=${encodeURIComponent(toCur)}`,
-          { signal },
-        );
-        if (res.ok) {
-          const data = (await res.json()) as { rate?: number };
-          if (
-            typeof data.rate === "number" &&
-            Number.isFinite(data.rate) &&
-            data.rate > 0
-          ) {
-            setExchangeRateInput(String(data.rate));
-            setExchangeRateSource("API");
-          }
+  const handleRefreshSpotRate = React.useCallback(() => {
+    cancelPendingFxFetch();
+    if (!selectedGroup || currency === selectedGroup.baseCurrency) {
+      setExchangeRateInput("1");
+      setExchangeRateSource("API");
+      setFxLoading(false);
+      setFxError(null);
+      return;
+    }
+
+    const requestSeq = fxRequestSeqRef.current;
+    const controller = new AbortController();
+    fxAbortRef.current = controller;
+    setFxLoading(true);
+    setFxError(null);
+
+    fetchSpotRateFromApi(currency, selectedGroup.baseCurrency, controller.signal)
+      .then((rate) => {
+        if (controller.signal.aborted || requestSeq !== fxRequestSeqRef.current) {
+          return;
         }
-      } catch {
-        // Ignore abort or transient offline error; user can enter manual override rate.
-      } finally {
-        setFxLoading(false);
-      }
-    },
-    [],
-  );
+        if (rate !== null) {
+          setExchangeRateInput(String(rate));
+          setExchangeRateSource("API");
+          setFxError(null);
+        } else {
+          setFxError("Live spot rate unavailable. Enter an exchange rate manually.");
+        }
+      })
+      .catch(() => {
+        if (!controller.signal.aborted && requestSeq === fxRequestSeqRef.current) {
+          setFxError("Live spot rate unavailable. Enter an exchange rate manually.");
+        }
+      })
+      .finally(() => {
+        if (requestSeq === fxRequestSeqRef.current) {
+          fxAbortRef.current = null;
+          setFxLoading(false);
+        }
+      });
+  }, [cancelPendingFxFetch, currency, selectedGroup]);
 
   React.useEffect(() => {
     if (!open || !selectedGroup || currency === selectedGroup.baseCurrency) {
       return;
     }
 
+    const requestSeq = fxRequestSeqRef.current;
     const controller = new AbortController();
-    fetch(
-      `/api/fx?from=${encodeURIComponent(currency)}&to=${encodeURIComponent(selectedGroup.baseCurrency)}`,
-      { signal: controller.signal },
-    )
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data: { rate?: number } | null) => {
-        if (
-          data &&
-          typeof data.rate === "number" &&
-          Number.isFinite(data.rate) &&
-          data.rate > 0
-        ) {
-          setExchangeRateInput(String(data.rate));
+    fxAbortRef.current = controller;
+
+    fetchSpotRateFromApi(currency, selectedGroup.baseCurrency, controller.signal)
+      .then((rate) => {
+        if (controller.signal.aborted || requestSeq !== fxRequestSeqRef.current) {
+          return;
+        }
+        if (rate !== null) {
+          setExchangeRateInput(String(rate));
           setExchangeRateSource("API");
+          setFxError(null);
+        } else {
+          setFxError("Live spot rate unavailable. Enter an exchange rate manually.");
         }
       })
       .catch(() => {
-        // Ignore abort or transient offline error; user can enter manual override rate.
+        if (!controller.signal.aborted && requestSeq === fxRequestSeqRef.current) {
+          setFxError("Live spot rate unavailable. Enter an exchange rate manually.");
+        }
       })
       .finally(() => {
-        if (!controller.signal.aborted) {
+        if (requestSeq === fxRequestSeqRef.current) {
+          fxAbortRef.current = null;
           setFxLoading(false);
         }
       });
 
-    return () => controller.abort();
-  }, [open, selectedGroup, currency]);
+    return () => {
+      controller.abort();
+    };
+  }, [currency, open, selectedGroup]);
 
   const parsedInputAmountCents = React.useMemo(
     () => parseCurrencyInputToMinorUnits(amountInput, currency),
@@ -379,7 +427,9 @@ function AddEditExpenseModalInner({
     const cleaned = exchangeRateInput.trim();
     if (!/^\d+(?:\.\d+)?$/.test(cleaned)) return null;
     const num = Number(cleaned);
-    return Number.isFinite(num) && num > 0 ? num : null;
+    if (!Number.isFinite(num) || num <= 0 || num >= 1_000_000) return null;
+    const rounded = Number(num.toFixed(6));
+    return rounded > 0 ? rounded : null;
   }, [exchangeRateInput, isForeignCurrency]);
 
   const effectiveBaseAmountCents = React.useMemo(() => {
@@ -953,10 +1003,40 @@ function AddEditExpenseModalInner({
   const baseCurrencySymbol = getCurrencySymbol(baseCurrency);
   const cycleLabel = cycle ? formatCycleLabel(cycle) : "Current Period";
 
-  const amountError =
-    touched.amount && (!parsedInputAmountCents || parsedInputAmountCents <= 0)
-      ? "Enter an amount greater than 0."
-      : undefined;
+  const amountError = React.useMemo(() => {
+    if (!touched.amount) return undefined;
+    if (parsedInputAmountCents !== null && parsedInputAmountCents > 0) {
+      return undefined;
+    }
+    const digits = getCurrencyMinorDigits(currency);
+    const trimmed = amountInput.trim();
+    if (digits === 0 && trimmed.includes(".")) {
+      return `${currency} does not use decimal places. Enter a whole number.`;
+    }
+    if (digits > 0 && /^\d+\.\d+$/.test(trimmed)) {
+      const frac = trimmed.split(".")[1] ?? "";
+      if (frac.length > digits) {
+        return `Use up to ${digits} decimal places for ${currency}.`;
+      }
+    }
+    return "Enter an amount greater than 0.";
+  }, [amountInput, currency, parsedInputAmountCents, touched.amount]);
+
+  const exchangeRateError = React.useMemo(() => {
+    if (!isForeignCurrency || !touched.exchangeRate || parsedExchangeRate !== null) {
+      return undefined;
+    }
+    const trimmed = exchangeRateInput.trim();
+    if (!trimmed) {
+      return "Enter an exchange rate.";
+    }
+    const numeric = Number(trimmed);
+    if (Number.isFinite(numeric) && numeric >= 1_000_000) {
+      return "Exchange rate must be less than 1,000,000.";
+    }
+    return "Enter a positive exchange rate (e.g. 1.085).";
+  }, [exchangeRateInput, isForeignCurrency, parsedExchangeRate, touched.exchangeRate]);
+
   const descriptionError =
     touched.description && !isDescriptionValid
       ? "Please enter a description for this expense."
@@ -1145,11 +1225,17 @@ function AddEditExpenseModalInner({
                 onChange={(nextCur) => {
                   setCurrency(nextCur);
                   if (selectedGroup && nextCur === selectedGroup.baseCurrency) {
+                    cancelPendingFxFetch();
                     setExchangeRateInput("1");
                     setExchangeRateSource("API");
                     setFxLoading(false);
+                    setFxError(null);
                   } else if (selectedGroup) {
+                    cancelPendingFxFetch();
+                    setExchangeRateInput("");
+                    setExchangeRateSource("API");
                     setFxLoading(true);
+                    setFxError(null);
                   }
                   setServerError(null);
                 }}
@@ -1200,17 +1286,23 @@ function AddEditExpenseModalInner({
           </div>
 
           {isForeignCurrency && selectedGroup && (
-            <div className="mt-1 flex flex-col gap-2.5 rounded-md border border-hairline bg-canvas p-3">
+            <div
+              data-testid="fx-conversion-box"
+              className="mt-1 flex flex-col gap-2.5 rounded-md border border-hairline bg-canvas p-3"
+            >
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted-48">
                   FX Conversion to {baseCurrency}
                 </span>
                 <div className="flex items-center gap-1.5">
                   <Badge
+                    data-testid="fx-rate-source-badge"
                     tone={
                       exchangeRateSource === "MANUAL_OVERRIDE"
                         ? "warning"
-                        : "info"
+                        : fxError
+                          ? "danger"
+                          : "info"
                     }
                     size="sm"
                   >
@@ -1218,50 +1310,87 @@ function AddEditExpenseModalInner({
                       ? "Manual Override"
                       : fxLoading
                         ? "Fetching rate..."
-                        : "API Spot Rate"}
+                        : fxError
+                          ? "Rate unavailable"
+                          : "API Spot Rate"}
                   </Badge>
-                  <button
+                  <Button
                     type="button"
+                    variant="icon-circle"
+                    size="sm"
+                    disabled={fxLoading}
                     aria-label="Refresh spot exchange rate"
-                    onClick={() => void fetchSpotRate(currency, baseCurrency)}
-                    className="inline-flex h-6 w-6 items-center justify-center rounded-full text-ink-muted-48 hover:bg-canvas-parchment hover:text-ink"
+                    onClick={handleRefreshSpotRate}
+                    className="h-6 w-6 border-transparent bg-transparent text-ink-muted-48 hover:bg-canvas-parchment hover:text-ink"
                   >
-                    <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
-                  </button>
+                    <RefreshCw
+                      className={cn("h-3.5 w-3.5", fxLoading && "animate-spin")}
+                      aria-hidden="true"
+                    />
+                  </Button>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:items-end">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:items-start">
                 <Input
                   label={`Exchange Rate (1 ${currency} → ${baseCurrency})`}
                   name="exchange_rate"
                   type="text"
                   inputMode="decimal"
+                  required
+                  placeholder={fxLoading ? "Fetching..." : "1.0000"}
                   value={exchangeRateInput}
                   onChange={(e) => {
+                    cancelPendingFxFetch();
+                    setFxLoading(false);
+                    setFxError(null);
                     setExchangeRateInput(e.target.value);
                     setExchangeRateSource("MANUAL_OVERRIDE");
+                    setServerError(null);
                   }}
                   onBlur={() =>
                     setTouched((prev) => ({ ...prev, exchangeRate: true }))
                   }
-                  error={
-                    touched.exchangeRate && parsedExchangeRate === null
-                      ? "Enter a positive exchange rate."
-                      : undefined
-                  }
+                  error={exchangeRateError}
                 />
-                <div className="flex h-11 items-center justify-between rounded-md border border-hairline bg-surface-pearl px-3.5">
-                  <span className="text-[12px] font-medium text-ink-muted-48">
-                    Base Total
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-[12px] font-semibold tracking-wide text-ink-muted-80">
+                    Converted Total ({baseCurrency})
                   </span>
-                  <span className="text-[15px] font-semibold tabular-nums text-ink">
-                    {effectiveBaseAmountCents !== null
-                      ? `${formatMinorUnits(effectiveBaseAmountCents, baseCurrency)} ${baseCurrency}`
-                      : `— ${baseCurrency}`}
-                  </span>
+                  <div
+                    data-testid="fx-base-total"
+                    className="flex h-11 items-center justify-between rounded-md border border-hairline bg-surface-pearl px-3.5"
+                  >
+                    <span className="text-[12px] font-medium text-ink-muted-48">
+                      Base Total
+                    </span>
+                    <span className="text-[15px] font-semibold tabular-nums text-ink">
+                      {effectiveBaseAmountCents !== null
+                        ? `${formatMinorUnits(effectiveBaseAmountCents, baseCurrency)} ${baseCurrency}`
+                        : `— ${baseCurrency}`}
+                    </span>
+                  </div>
                 </div>
               </div>
+
+              {fxError && (
+                <p role="alert" className="text-[12px] font-medium text-red-600">
+                  {fxError}
+                </p>
+              )}
+
+              {!fxError &&
+                parsedInputAmountCents !== null &&
+                parsedInputAmountCents > 0 &&
+                parsedExchangeRate !== null &&
+                effectiveBaseAmountCents !== null && (
+                  <p className="text-[12px] tabular-nums text-ink-muted-48">
+                    {formatMinorUnits(parsedInputAmountCents, currency)} ×{" "}
+                    {parsedExchangeRate} ={" "}
+                    {formatMinorUnits(effectiveBaseAmountCents, baseCurrency)}{" "}
+                    {baseCurrency}
+                  </p>
+                )}
             </div>
           )}
         </Card>
@@ -1340,13 +1469,15 @@ function AddEditExpenseModalInner({
               Split Method
             </span>
             {splitMethod === "PERCENTAGE" && selectedMemberIds.length > 0 && (
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="sm"
                 onClick={handleDistributePercentagesEvenly}
-                className="text-[12px] font-medium text-[#0066cc] hover:underline"
+                className="h-6 px-2 text-[12px] font-medium text-[#0066cc] hover:underline"
               >
                 Distribute evenly
-              </button>
+              </Button>
             )}
           </div>
           <SegmentedControl
