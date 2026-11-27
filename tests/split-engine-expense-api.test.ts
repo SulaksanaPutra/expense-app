@@ -276,7 +276,7 @@ describe("BIGINT Minor-Unit Split Engine", () => {
     }
   });
 
-  it("converts foreign-currency minor units (including 0-decimal JPY) using 1e6 fixed-point rate scaling", () => {
+  it("converts foreign-currency minor units (including 0-decimal JPY and half-up rounding) using 1e6 fixed-point rate scaling", () => {
     const usdFromEur = convertForeignAmountToBaseMinorUnits({
       originalAmountCents: 10000, // €100.00
       originalCurrency: "EUR",
@@ -292,6 +292,36 @@ describe("BIGINT Minor-Unit Split Engine", () => {
       baseCurrency: "USD",
     });
     expect(usdFromJpy).toBe(63003);
+
+    // 2-decimal USD ($100.00 = 10000 cents) -> 0-decimal JPY at 150.25 -> ¥15,025
+    const jpyFromUsd = convertForeignAmountToBaseMinorUnits({
+      originalAmountCents: 10000,
+      originalCurrency: "USD",
+      exchangeRate: 150.25,
+      baseCurrency: "JPY",
+    });
+    expect(jpyFromUsd).toBe(15025);
+
+    // Half-up rounding boundary: €10.01 (1001 cents) * 1.005 = 1006.005 -> 1006 cents;
+    // €10.00 (1000 cents) * 1.0005 = 1000.5 -> 1001 cents
+    expect(
+      convertForeignAmountToBaseMinorUnits({
+        originalAmountCents: 1000,
+        originalCurrency: "EUR",
+        exchangeRate: 1.0005,
+        baseCurrency: "USD",
+      }),
+    ).toBe(1001);
+
+    // Rejects invalid rates or non-positive amounts
+    expect(
+      convertForeignAmountToBaseMinorUnits({
+        originalAmountCents: 1000,
+        originalCurrency: "EUR",
+        exchangeRate: 0,
+        baseCurrency: "USD",
+      }),
+    ).toBeNull();
   });
 
   it("checks 500 MB receipt storage quota accurately", () => {
@@ -565,13 +595,86 @@ describe("Expense Create API, FX Audit & Receipt Quota", () => {
     expect(expRes.status).toBe(201);
   });
 
-  it("returns FX spot rate for valid currency pairs", async () => {
-    const res = await fxGet(
+  it("rejects tampered FX conversion amount_cents and out-of-range exchange_rate values", async () => {
+    getUserMock.mockResolvedValue({
+      data: { user: { id: "u-alex", email: "alex@example.com" } },
+      error: null,
+    });
+
+    const mismatchRes = await expensePost(
+      new NextRequest("http://localhost:3000/api/groups/grp-apt4b/expenses", {
+        method: "POST",
+        body: JSON.stringify({
+          paid_by: "u-alex",
+          description: "Tampered FX Amount",
+          category: "Transit & Travel",
+          amount_cents: 9999, // does not match 10000 EUR * 1.1 = 11000 USD
+          split_method: "EXACT",
+          split_breakdown: [
+            { user_id: "u-alex", share_cents: 5000 },
+            { user_id: "u-elena", share_cents: 4999 },
+          ],
+          original_amount_cents: 10000,
+          original_currency: "EUR",
+          exchange_rate: 1.1,
+          exchange_rate_source: "MANUAL_OVERRIDE",
+        }),
+      }),
+      { params: Promise.resolve({ groupId: "grp-apt4b" }) },
+    );
+    expect(mismatchRes.status).toBe(400);
+    expect((await mismatchRes.json()).code).toBe("FX_CONVERSION_MISMATCH");
+
+    const overflowRes = await expensePost(
+      new NextRequest("http://localhost:3000/api/groups/grp-apt4b/expenses", {
+        method: "POST",
+        body: JSON.stringify({
+          paid_by: "u-alex",
+          description: "Overflow FX Rate",
+          category: "Transit & Travel",
+          amount_cents: 10000,
+          split_method: "EQUAL",
+          original_amount_cents: 100,
+          original_currency: "JPY",
+          exchange_rate: 1_000_000,
+          exchange_rate_source: "MANUAL_OVERRIDE",
+        }),
+      }),
+      { params: Promise.resolve({ groupId: "grp-apt4b" }) },
+    );
+    expect(overflowRes.status).toBe(400);
+    expect((await overflowRes.json()).code).toBe("INVALID_FX_AUDIT");
+  });
+
+  it("returns FX spot rate for valid currency pairs and rejects invalid currency codes", async () => {
+    const sameRes = await fxGet(
       new NextRequest("http://localhost:3000/api/fx?from=USD&to=USD"),
     );
-    expect(res.status).toBe(200);
-    const json = await res.json();
-    expect(json.rate).toBe(1);
-    expect(json.source).toBe("API");
+    expect(sameRes.status).toBe(200);
+    const sameJson = await sameRes.json();
+    expect(sameJson.rate).toBe(1);
+    expect(sameJson.source).toBe("API");
+
+    const badRes = await fxGet(
+      new NextRequest("http://localhost:3000/api/fx?from=US&to=USD"),
+    );
+    expect(badRes.status).toBe(400);
+
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ amount: 1, base: "EUR", rates: { USD: 1.0925 } }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    const liveRes = await fxGet(
+      new NextRequest("http://localhost:3000/api/fx?from=EUR&to=USD"),
+    );
+    expect(liveRes.status).toBe(200);
+    const liveJson = await liveRes.json();
+    expect(liveJson.rate).toBe(1.0925);
+    expect(liveJson.source).toBe("API");
+    fetchSpy.mockRestore();
   });
 });

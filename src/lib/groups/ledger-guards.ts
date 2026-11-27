@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
+  convertForeignAmountToBaseMinorUnits,
   validateSplitBreakdown,
 } from "@/lib/expenses/split-engine";
 import { isValidCurrencyCode } from "@/lib/money";
@@ -255,6 +256,17 @@ export async function createGroupExpense(
         ? params.originalCurrency.trim().toUpperCase()
         : "";
     if (rawOrigCur && rawOrigCur === guard.group.base_currency) {
+      if (
+        params.originalAmountCents != null &&
+        params.originalAmountCents !== amountCents
+      ) {
+        return {
+          ok: false,
+          status: 400,
+          code: "FX_CONVERSION_MISMATCH",
+          message: `Expense amount_cents (${amountCents}) must match original_amount_cents (${params.originalAmountCents}) when currency equals ${guard.group.base_currency}.`,
+        };
+      }
       // Base currency matches group base currency; clear redundant FX audit fields.
       originalAmountCents = null;
       originalCurrency = null;
@@ -269,6 +281,7 @@ export async function createGroupExpense(
         typeof params.exchangeRate !== "number" ||
         !Number.isFinite(params.exchangeRate) ||
         params.exchangeRate <= 0 ||
+        params.exchangeRate >= 1_000_000 ||
         (params.exchangeRateSource !== "API" &&
           params.exchangeRateSource !== "MANUAL_OVERRIDE")
       ) {
@@ -277,12 +290,49 @@ export async function createGroupExpense(
           status: 400,
           code: "INVALID_FX_AUDIT",
           message:
-            "Foreign-currency expenses require original_amount_cents, original_currency, positive exchange_rate, and exchange_rate_source.",
+            "Foreign-currency expenses require original_amount_cents, original_currency, positive exchange_rate (< 1,000,000), and exchange_rate_source.",
         };
       }
+
+      const normalizedRate = Number(params.exchangeRate.toFixed(6));
+      if (!Number.isFinite(normalizedRate) || normalizedRate <= 0) {
+        return {
+          ok: false,
+          status: 400,
+          code: "INVALID_FX_AUDIT",
+          message: "Exchange rate must remain positive at 6 decimal places.",
+        };
+      }
+
+      const expectedAmountCents = convertForeignAmountToBaseMinorUnits({
+        originalAmountCents: params.originalAmountCents,
+        originalCurrency: rawOrigCur,
+        exchangeRate: normalizedRate,
+        baseCurrency: guard.group.base_currency,
+      });
+
+      if (expectedAmountCents === null) {
+        return {
+          ok: false,
+          status: 400,
+          code: "INVALID_FX_AUDIT",
+          message:
+            "Unable to convert original_amount_cents to group base_currency with the supplied exchange_rate.",
+        };
+      }
+
+      if (expectedAmountCents !== amountCents) {
+        return {
+          ok: false,
+          status: 400,
+          code: "FX_CONVERSION_MISMATCH",
+          message: `Converted amount_cents (${amountCents}) does not match ${params.originalAmountCents} ${rawOrigCur} at rate ${normalizedRate} (${expectedAmountCents} ${guard.group.base_currency}).`,
+        };
+      }
+
       originalAmountCents = params.originalAmountCents;
       originalCurrency = rawOrigCur;
-      exchangeRate = Number(params.exchangeRate.toFixed(6));
+      exchangeRate = normalizedRate;
       exchangeRateSource = params.exchangeRateSource;
     }
   }
