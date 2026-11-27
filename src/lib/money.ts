@@ -134,3 +134,22 @@ export function parseCurrencyInputToMinorUnits(
 
   return parsed;
 }
+
+/**
+ * Parses a signed decimal currency string (e.g. "-25.50" or "25.50") into
+ * integer minor units for offsetting adjustments.
+ */
+export function parseSignedCurrencyInputToMinorUnits(
+  raw: string,
+  currency = "USD",
+): number | null {
+  const cleaned = raw.trim().replaceAll(",", "").replaceAll(" ", "");
+  if (!cleaned) return null;
+
+  const isNegative = cleaned.startsWith("-");
+  const unsigned = isNegative || cleaned.startsWith("+") ? cleaned.slice(1) : cleaned;
+  const minor = parseCurrencyInputToMinorUnits(unsigned, currency);
+  if (minor === null) return null;
+  if (minor === 0) return 0;
+  return isNegative ? -minor : minor;
+}

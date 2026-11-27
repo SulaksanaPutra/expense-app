@@ -1,6 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ShellGroupSummary } from "@/components/shell/types";
 import { parseCycleParam } from "@/components/shell/url-state";
+import {
+  isBillingCycleClosedForWindow,
+  type ExpenseBillingCycleRecord,
+} from "@/lib/expenses/ledger";
 import { isValidCurrencyCode } from "@/lib/money";
 import type {
   Database,
@@ -535,6 +539,7 @@ export async function getSplitGroupsPageData(
       { data: expenseRows, error: expensesError },
       { data: settlementRows, error: settlementsError },
       { data: recurringRows, error: recurringError },
+      { data: billingCycleRows },
     ] = await Promise.all([
       supabase
         .from("group_members")
@@ -557,6 +562,14 @@ export async function getSplitGroupsPageData(
         .select("group_id, is_active")
         .in("group_id", groupIds)
         .eq("is_active", true),
+      Promise.resolve()
+        .then(() =>
+          supabase
+            .from("billing_cycles")
+            .select("id, group_id, period_start, period_end, status")
+            .in("group_id", groupIds),
+        )
+        .catch(() => ({ data: [] })),
     ]);
 
     if (membersError || expensesError || settlementsError || recurringError) {
@@ -815,6 +828,25 @@ export async function getSplitGroupsPageData(
 
       const currentMember = members.find((m) => m.isCurrentUser) ?? null;
 
+      const billingCyclesForGroup: ExpenseBillingCycleRecord[] = (
+        billingCycleRows ?? []
+      )
+        .filter((bc) => bc.group_id === g.id)
+        .map((bc) => ({
+          id: bc.id,
+          groupId: bc.group_id,
+          periodStart: bc.period_start,
+          periodEnd: bc.period_end,
+          status: bc.status,
+        }));
+
+      const isCurrentCycleClosed = isBillingCycleClosedForWindow(
+        g.id,
+        cycleSlug,
+        g.billing_cycle_anchor_day,
+        billingCyclesForGroup,
+      );
+
       const detail: SplitGroupDetail = {
         id: g.id,
         name: g.name,
@@ -842,6 +874,7 @@ export async function getSplitGroupsPageData(
         userNetLedgerCents: metrics.userNetLedgerCents,
         recurringRuleCount: recurringCountByGroup.get(g.id) ?? 0,
         isFullySettled: metrics.isFullySettled,
+        isCurrentCycleClosed,
         members,
         currentUserRole: currentMember?.role ?? null,
         auditLogs: auditLogsByGroup.get(g.id),

@@ -217,6 +217,32 @@ export function getNextGroupSettlementDate(
   return { isoDate, label };
 }
 
+export function getBillingCycleDateRange(
+  cycleSlug: string,
+  anchorDay = 1,
+): { periodStart: string; periodEnd: string } {
+  const safeCycle = parseCycleParam(cycleSlug);
+  const [yearStr, monthStr] = safeCycle.split("-");
+  const year = Number.parseInt(yearStr, 10);
+  const monthIdx = Number.parseInt(monthStr, 10) - 1;
+  const clampedAnchor = Math.min(Math.max(Math.trunc(anchorDay), 1), 28);
+
+  const startMs = Date.UTC(year, monthIdx, clampedAnchor, 0, 0, 0, 0);
+  const endInclusiveMs = Date.UTC(
+    year,
+    monthIdx + 1,
+    clampedAnchor - 1,
+    0,
+    0,
+    0,
+    0,
+  );
+  return {
+    periodStart: new Date(startMs).toISOString().slice(0, 10),
+    periodEnd: new Date(endInclusiveMs).toISOString().slice(0, 10),
+  };
+}
+
 export function isExpenseInCycleWindow(
   expenseDateIso: string,
   cycleSlug: string,

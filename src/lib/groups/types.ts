@@ -55,6 +55,7 @@ export interface SplitGroupDetail {
   userNetLedgerCents: number;
   recurringRuleCount: number;
   isFullySettled: boolean;
+  isCurrentCycleClosed?: boolean;
   members: SplitGroupMemberDetail[];
   currentUserRole: MemberRole | null;
   auditLogs?: GroupAuditLogEntry[];
