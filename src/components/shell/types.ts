@@ -1,4 +1,9 @@
-import type { GroupStatus, GroupType, SplitMode } from "@/types/database";
+import type {
+  GroupStatus,
+  GroupType,
+  MemberStatus,
+  SplitMode,
+} from "@/types/database";
 
 export interface ShellGroupMember {
   id: string;
@@ -16,6 +21,7 @@ export interface ShellGroupSummary {
   groupType: GroupType;
   baseCurrency: string;
   defaultSplitMode?: SplitMode;
+  currentUserStatus?: MemberStatus | null;
   activeSplitCount: number;
   members: ShellGroupMember[];
 }

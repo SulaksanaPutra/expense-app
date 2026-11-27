@@ -102,7 +102,6 @@ async function loadShellContext(): Promise<{
         .from("group_members")
         .select("group_id, user_id, status, share_percentage, joined_at")
         .in("group_id", groupIds)
-        .eq("status", "ACTIVE")
         .order("joined_at", { ascending: true }),
       supabase
         .from("expenses")
@@ -111,8 +110,18 @@ async function loadShellContext(): Promise<{
         .is("deleted_at", null),
     ]);
 
+    const activeMemberRows = (memberRows ?? []).filter(
+      (m) => m.status === "ACTIVE",
+    );
+    const currentUserStatusByGroup = new Map<string, "ACTIVE" | "FORMER_MEMBER">();
+    for (const row of memberRows ?? []) {
+      if (row.user_id === authUser.id) {
+        currentUserStatusByGroup.set(row.group_id, row.status);
+      }
+    }
+
     const userIds = Array.from(
-      new Set((memberRows ?? []).map((m) => m.user_id)),
+      new Set(activeMemberRows.map((m) => m.user_id)),
     );
 
     const usersById = new Map<string, { id: string; full_name: string }>();
@@ -127,7 +136,7 @@ async function loadShellContext(): Promise<{
     }
 
     const membersByGroup = new Map<string, ShellGroupMember[]>();
-    for (const row of memberRows ?? []) {
+    for (const row of activeMemberRows) {
       const memberProfile = usersById.get(row.user_id);
       const list = membersByGroup.get(row.group_id) ?? [];
       list.push({
@@ -154,6 +163,7 @@ async function loadShellContext(): Promise<{
       status: g.status,
       baseCurrency: g.base_currency,
       defaultSplitMode: g.default_split_mode,
+      currentUserStatus: currentUserStatusByGroup.get(g.id) ?? null,
       activeSplitCount: splitCountByGroup.get(g.id) ?? 0,
       members: membersByGroup.get(g.id) ?? [],
     }));

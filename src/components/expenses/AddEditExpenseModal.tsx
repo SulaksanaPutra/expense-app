@@ -364,6 +364,9 @@ function AddEditExpenseModalInner({
     [nonArchivedGroups, selectedGroupId],
   );
 
+  const isFormerMemberInSelectedGroup =
+    selectedGroup?.currentUserStatus === "FORMER_MEMBER";
+
   const initialGroup = React.useMemo(
     () => nonArchivedGroups.find((g) => g.id === initialGroupId) ?? null,
     [initialGroupId, nonArchivedGroups],
@@ -1006,6 +1009,7 @@ function AddEditExpenseModalInner({
 
   const isFormValid =
     !isLockedExpense &&
+    !isFormerMemberInSelectedGroup &&
     selectedGroup !== null &&
     selectedGroup.status !== "ARCHIVED" &&
     isDescriptionValid &&
@@ -1373,6 +1377,14 @@ function AddEditExpenseModalInner({
             tone="warning"
             title="Expense is locked"
             description="This expense is covered by a closed billing cycle or pairwise settlement watermark and cannot be edited."
+          />
+        )}
+
+        {isFormerMemberInSelectedGroup && (
+          <AlertBanner
+            tone="warning"
+            title="Former members cannot log expenses"
+            description="You have FORMER_MEMBER status in this group and are excluded from new splits. You can still record settlements on the Expenses page."
           />
         )}
 

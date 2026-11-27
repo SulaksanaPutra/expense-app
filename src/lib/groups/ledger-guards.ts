@@ -1215,6 +1215,13 @@ export async function softDeleteGroupExpense(
   };
 }
 
+const VALID_PAYMENT_RAILS: readonly PaymentRail[] = [
+  "VENMO",
+  "APPLE_CARD",
+  "CASH",
+  "OTHER",
+];
+
 export async function createGroupSettlement(
   supabase: SupabaseClient<Database>,
   params: {
@@ -1236,8 +1243,11 @@ export async function createGroupSettlement(
   });
   if (!guard.ok) return guard;
 
-  const amountCents = Math.trunc(params.amountCents);
-  if (!Number.isSafeInteger(amountCents) || amountCents <= 0) {
+  if (
+    typeof params.amountCents !== "number" ||
+    !Number.isSafeInteger(params.amountCents) ||
+    params.amountCents <= 0
+  ) {
     return {
       ok: false,
       status: 400,
@@ -1245,8 +1255,20 @@ export async function createGroupSettlement(
       message: "Settlement amount_cents must be a positive integer.",
     };
   }
+  const amountCents = params.amountCents;
 
-  if (params.payerId === params.recipientId) {
+  const payerId = params.payerId.trim();
+  const recipientId = params.recipientId.trim();
+  if (!payerId || !recipientId) {
+    return {
+      ok: false,
+      status: 400,
+      code: "INVALID_PARTIES",
+      message: "Settlement payer_id and recipient_id are required.",
+    };
+  }
+
+  if (payerId === recipientId) {
     return {
       ok: false,
       status: 400,
@@ -1255,10 +1277,20 @@ export async function createGroupSettlement(
     };
   }
 
+  const paymentRail = params.paymentRail ?? "OTHER";
+  if (!VALID_PAYMENT_RAILS.includes(paymentRail)) {
+    return {
+      ok: false,
+      status: 400,
+      code: "INVALID_PAYMENT_RAIL",
+      message: "Payment rail must be VENMO, APPLE_CARD, CASH, or OTHER.",
+    };
+  }
+
   if (
     guard.member.status === "FORMER_MEMBER" &&
-    params.payerId !== params.userId &&
-    params.recipientId !== params.userId
+    payerId !== params.userId &&
+    recipientId !== params.userId
   ) {
     return {
       ok: false,
@@ -1269,15 +1301,55 @@ export async function createGroupSettlement(
     };
   }
 
+  if (
+    guard.member.role !== "ADMIN" &&
+    payerId !== params.userId &&
+    recipientId !== params.userId
+  ) {
+    return {
+      ok: false,
+      status: 403,
+      code: "FORBIDDEN",
+      message:
+        "Members can only record settlements in which they are payer or recipient.",
+    };
+  }
+
+  const { data: partyMembers, error: partyError } = await supabase
+    .from("group_members")
+    .select("user_id, status")
+    .eq("group_id", params.groupId)
+    .in("user_id", [payerId, recipientId]);
+
+  if (partyError) {
+    return {
+      ok: false,
+      status: 500,
+      code: "SERVER_ERROR",
+      message: partyError.message || "Unable to verify settlement participants.",
+    };
+  }
+
+  const memberIds = new Set((partyMembers ?? []).map((m) => m.user_id));
+  if (!memberIds.has(payerId) || !memberIds.has(recipientId)) {
+    return {
+      ok: false,
+      status: 400,
+      code: "INVALID_PARTIES",
+      message:
+        "Both settlement payer and recipient must belong to this split group.",
+    };
+  }
+
   const { data: inserted, error: insertError } = await supabase
     .from("settlements")
     .insert({
       group_id: params.groupId,
-      payer_id: params.payerId,
-      recipient_id: params.recipientId,
+      payer_id: payerId,
+      recipient_id: recipientId,
       amount_cents: amountCents,
       currency: guard.group.base_currency,
-      payment_rail: params.paymentRail ?? "OTHER",
+      payment_rail: paymentRail,
     })
     .select("*")
     .maybeSingle();

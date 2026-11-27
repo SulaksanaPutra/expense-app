@@ -26,6 +26,7 @@ export interface RecordSettlementModalProps {
   onClose: () => void;
   debts: SimplifiedDebtEdge[];
   currentUserId: string;
+  initialDebtKey?: string | null;
   onSettled?: (settlement: Database["public"]["Tables"]["settlements"]["Row"]) => void;
 }
 
@@ -39,6 +40,16 @@ const PAYMENT_RAIL_OPTIONS: SelectOption[] = [
 function formatMinorPlain(minorUnits: number, currency: string): string {
   const digits = getCurrencyMinorDigits(currency);
   return (minorUnits / 10 ** digits).toFixed(digits);
+}
+
+function formatSettlementTag(tag: string | null | undefined): string | null {
+  const trimmed = tag?.trim() ?? "";
+  if (!trimmed) return null;
+  return trimmed.startsWith("@") ? trimmed : `@${trimmed}`;
+}
+
+export function getSettlementDebtKey(d: Pick<SimplifiedDebtEdge, "groupId" | "payerId" | "recipientId">): string {
+  return `${d.groupId}::${d.payerId}::${d.recipientId}`;
 }
 
 export function RecordSettlementModal(props: RecordSettlementModalProps) {
@@ -57,21 +68,25 @@ function RecordSettlementModalInner({
   onClose,
   debts,
   currentUserId,
+  initialDebtKey,
   onSettled,
 }: RecordSettlementModalProps) {
   const formId = React.useId();
-
-  const debtKey = (d: SimplifiedDebtEdge) =>
-    `${d.groupId}::${d.payerId}::${d.recipientId}`;
+  const amountHintId = React.useId();
 
   const defaultDebt =
-    debts.find((d) => d.payerId === currentUserId) ?? debts[0] ?? null;
+    (initialDebtKey
+      ? debts.find((d) => getSettlementDebtKey(d) === initialDebtKey)
+      : null) ??
+    debts.find((d) => d.payerId === currentUserId) ??
+    debts[0] ??
+    null;
 
   const [selectedKey, setSelectedKey] = React.useState<string>(
-    defaultDebt ? debtKey(defaultDebt) : "",
+    defaultDebt ? getSettlementDebtKey(defaultDebt) : "",
   );
   const selectedDebt = React.useMemo(
-    () => debts.find((d) => debtKey(d) === selectedKey) ?? defaultDebt,
+    () => debts.find((d) => getSettlementDebtKey(d) === selectedKey) ?? defaultDebt,
     [debts, defaultDebt, selectedKey],
   );
 
@@ -86,7 +101,7 @@ function RecordSettlementModalInner({
 
   const handleDebtChange = (nextKey: string) => {
     setSelectedKey(nextKey);
-    const match = debts.find((d) => debtKey(d) === nextKey);
+    const match = debts.find((d) => getSettlementDebtKey(d) === nextKey);
     if (match) {
       setAmountInput(formatMinorPlain(match.amountCents, match.currency));
     }
@@ -96,11 +111,14 @@ function RecordSettlementModalInner({
   const currency = selectedDebt?.currency ?? "USD";
   const parsedAmountCents = parseCurrencyInputToMinorUnits(amountInput, currency);
   const isAmountValid = parsedAmountCents !== null && parsedAmountCents > 0;
+  const recipientDisplayTag = formatSettlementTag(
+    selectedDebt?.recipientInstantTag,
+  );
 
   const venmoDeepLink = React.useMemo(() => {
     if (!selectedDebt || !isAmountValid || parsedAmountCents === null) return null;
     const recipientHandle = selectedDebt.recipientInstantTag
-      ? selectedDebt.recipientInstantTag.replace(/^@/, "")
+      ? selectedDebt.recipientInstantTag.trim().replace(/^@+/, "")
       : "";
     const majorAmount = formatMinorPlain(parsedAmountCents, currency);
     const note = encodeURIComponent(
@@ -149,6 +167,7 @@ function RecordSettlementModalInner({
         return;
       }
 
+      setIsSubmitting(false);
       onSettled?.(payload.settlement);
       onClose();
     } catch {
@@ -158,10 +177,25 @@ function RecordSettlementModalInner({
   };
 
   const debtOptions: SelectOption[] = debts.map((d) => ({
-    value: debtKey(d),
+    value: getSettlementDebtKey(d),
     label: `${d.payerId === currentUserId ? "You" : d.payerName} → ${d.recipientId === currentUserId ? "You" : d.recipientName} (${formatMinorUnits(d.amountCents, d.currency)})`,
     description: d.groupName,
   }));
+
+  const settlementProgressHint = React.useMemo(() => {
+    if (!selectedDebt || !isAmountValid || parsedAmountCents === null) {
+      return null;
+    }
+    if (parsedAmountCents < selectedDebt.amountCents) {
+      const remaining = selectedDebt.amountCents - parsedAmountCents;
+      return `Partial payment: ${formatMinorUnits(remaining, currency)} will remain unsettled.`;
+    }
+    if (parsedAmountCents === selectedDebt.amountCents) {
+      return `Full settlement: clears this balance to ${formatMinorUnits(0, currency)}.`;
+    }
+    const excess = parsedAmountCents - selectedDebt.amountCents;
+    return `Exceeds owed balance of ${formatMinorUnits(selectedDebt.amountCents, currency)} by ${formatMinorUnits(excess, currency)}.`;
+  }, [currency, isAmountValid, parsedAmountCents, selectedDebt]);
 
   return (
     <Dialog
@@ -197,7 +231,12 @@ function RecordSettlementModalInner({
         </>
       }
     >
-      <form id={formId} onSubmit={handleSubmit} className="flex flex-col gap-4">
+      <form
+        id={formId}
+        noValidate
+        onSubmit={handleSubmit}
+        className="flex flex-col gap-4"
+      >
         {errorMessage && (
           <AlertBanner
             tone="error"
@@ -218,7 +257,7 @@ function RecordSettlementModalInner({
               label="Settlement Pair"
               aria-label="Settlement Pair"
               options={debtOptions}
-              value={selectedDebt ? debtKey(selectedDebt) : ""}
+              value={selectedDebt ? getSettlementDebtKey(selectedDebt) : ""}
               onChange={handleDebtChange}
             />
 
@@ -245,35 +284,67 @@ function RecordSettlementModalInner({
                     {selectedDebt.groupName}
                   </Badge>
                 </div>
-                <p className="text-[12px] text-ink-muted-48 tabular-nums">
-                  Full unsettled balance:{" "}
-                  <strong className="text-ink">
-                    {formatMinorUnits(selectedDebt.amountCents, currency)}
-                  </strong>
-                </p>
+                <div className="flex flex-wrap items-center justify-between gap-2 text-[12px] text-ink-muted-48">
+                  <p className="tabular-nums">
+                    Full unsettled balance:{" "}
+                    <strong className="text-ink">
+                      {formatMinorUnits(selectedDebt.amountCents, currency)}
+                    </strong>
+                  </p>
+                  {parsedAmountCents !== selectedDebt.amountCents && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setAmountInput(
+                          formatMinorPlain(selectedDebt.amountCents, currency),
+                        );
+                        setErrorMessage(null);
+                      }}
+                      className="h-6 px-2 text-[11px] font-medium text-[#0066cc]"
+                    >
+                      Use full balance
+                    </Button>
+                  )}
+                </div>
               </Card>
             )}
 
-            <Input
-              label={`Settlement Amount (${currency})`}
-              name="settlement_amount"
-              type="text"
-              inputMode="decimal"
-              required
-              autoFocus
-              prefix={getCurrencySymbol(currency)}
-              value={amountInput}
-              onChange={(e) => {
-                setAmountInput(e.target.value);
-                setErrorMessage(null);
-              }}
-              error={
-                amountInput.trim() !== "" && !isAmountValid
-                  ? "Enter a valid positive amount."
-                  : undefined
-              }
-              className="text-[18px] font-semibold tabular-nums"
-            />
+            <div className="flex flex-col gap-1.5">
+              <Input
+                label={`Settlement Amount (${currency})`}
+                name="settlement_amount"
+                type="text"
+                inputMode="decimal"
+                required
+                autoFocus
+                prefix={getCurrencySymbol(currency)}
+                value={amountInput}
+                onChange={(e) => {
+                  setAmountInput(e.target.value);
+                  setErrorMessage(null);
+                }}
+                error={
+                  amountInput.trim() !== "" && !isAmountValid
+                    ? "Enter a valid positive amount."
+                    : undefined
+                }
+                aria-describedby={
+                  settlementProgressHint ? amountHintId : undefined
+                }
+                className="text-[18px] font-semibold tabular-nums"
+              />
+              {settlementProgressHint && (
+                <p
+                  id={amountHintId}
+                  data-testid="settlement-progress-hint"
+                  className="text-[12px] text-ink-muted-48 tabular-nums"
+                >
+                  {settlementProgressHint}
+                </p>
+              )}
+            </div>
 
             <Select
               label="Payment Rail (Log & Link)"
@@ -284,21 +355,28 @@ function RecordSettlementModalInner({
             />
 
             {selectedDebt && paymentRail === "VENMO" && (
-              <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-hairline bg-surface-pearl px-3.5 py-2.5 text-[12px]">
+              <div
+                data-testid="venmo-log-and-link"
+                className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-hairline bg-surface-pearl px-3.5 py-2.5 text-[12px]"
+              >
                 <div className="min-w-0">
                   <span className="block font-medium text-ink">
                     Venmo Log &amp; Link
                   </span>
-                  <span className="block truncate text-ink-muted-48">
-                    {selectedDebt.recipientInstantTag
-                      ? `Recipient handle: ${selectedDebt.recipientInstantTag}`
+                  <span
+                    data-testid="recipient-settlement-tag"
+                    className="block truncate text-ink-muted-48"
+                  >
+                    {recipientDisplayTag
+                      ? `Recipient handle: ${recipientDisplayTag}`
                       : "No @instant_settlement_tag saved — records ledger settlement only."}
                   </span>
                 </div>
                 {venmoDeepLink && (
                   <a
                     href={venmoDeepLink}
-                    className="inline-flex items-center gap-1 rounded-pill border border-hairline bg-canvas px-3 py-1.5 text-[12px] font-medium text-[#0066cc] hover:bg-canvas-parchment"
+                    rel="noopener noreferrer"
+                    className="inline-flex min-h-[28px] items-center gap-1 rounded-pill border border-hairline bg-canvas px-3 py-1.5 text-[12px] font-medium text-[#0066cc] hover:bg-canvas-parchment focus-visible:outline-2 focus-visible:outline-primary-focus focus-visible:outline-offset-2"
                   >
                     <span>Open Venmo</span>
                     <ExternalLink className="h-3 w-3" aria-hidden="true" />
@@ -306,6 +384,27 @@ function RecordSettlementModalInner({
                 )}
               </div>
             )}
+
+            {selectedDebt && paymentRail === "APPLE_CARD" && (
+              <div className="rounded-md border border-hairline bg-surface-pearl px-3.5 py-2.5 text-[12px]">
+                <span className="block font-medium text-ink">
+                  Apple Card / Apple Cash Log &amp; Link
+                </span>
+                <span className="block text-ink-muted-48">
+                  {recipientDisplayTag
+                    ? `Recipient handle: ${recipientDisplayTag} — complete transfer externally, then click Mark as Settled.`
+                    : "Complete your Apple Cash transfer externally, then click Mark as Settled to log the immutable event."}
+                </span>
+              </div>
+            )}
+
+            {selectedDebt &&
+              (paymentRail === "CASH" || paymentRail === "OTHER") && (
+                <p className="text-[12px] text-ink-muted-48">
+                  Records an immutable settlement event in {currency}. No funds
+                  move through LedgerSplit servers.
+                </p>
+              )}
           </>
         )}
       </form>
