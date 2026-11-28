@@ -313,7 +313,6 @@ describe("Settings (/settings) v2 Core Cards UI", () => {
                 initialExpenses={SAMPLE_EXPENSES}
                 initialSettlements={[]}
                 initialBillingCycles={[]}
-                initialRecurringRules={[]}
               />
             ) : (
               <SettingsClient

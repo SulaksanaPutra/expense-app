@@ -10,7 +10,6 @@ import {
   type ExpenseGroupInfo,
   type ExpenseLedgerRecord,
   type ExpenseSettlementRecord,
-  type RecurringRuleRecord,
 } from "./ledger";
 
 export interface ExpensesPageData {
@@ -21,7 +20,6 @@ export interface ExpensesPageData {
   expenses: ExpenseLedgerRecord[];
   settlements: ExpenseSettlementRecord[];
   billingCycles: ExpenseBillingCycleRecord[];
-  recurringRules: RecurringRuleRecord[];
   reminderCooldowns: ReminderCooldownInfo[];
   loadError: string | null;
 }
@@ -38,7 +36,6 @@ export async function getExpensesPageData(
     expenses: [],
     settlements: [],
     billingCycles: [],
-    recurringRules: [],
     reminderCooldowns: [],
     loadError: null,
   };
@@ -48,7 +45,7 @@ export async function getExpensesPageData(
       await Promise.all([
         supabase
           .from("users")
-          .select("id, base_currency, personal_share_cap_cents")
+          .select("id, display_currency, base_currency, personal_share_cap_cents")
           .eq("id", currentUserId)
           .maybeSingle(),
         supabase
@@ -60,7 +57,7 @@ export async function getExpensesPageData(
           .order("created_at", { ascending: true }),
       ]);
 
-    const userBaseCurrency = userProfile?.base_currency ?? "USD";
+    const userBaseCurrency = userProfile?.display_currency ?? userProfile?.base_currency ?? "USD";
     const personalShareCapCents =
       userProfile?.personal_share_cap_cents !== null &&
       userProfile?.personal_share_cap_cents !== undefined
@@ -290,8 +287,6 @@ export async function getExpensesPageData(
       };
     });
 
-    const recurringRules: RecurringRuleRecord[] = [];
-
     return {
       currentUserId,
       userBaseCurrency,
@@ -300,7 +295,6 @@ export async function getExpensesPageData(
       expenses,
       settlements,
       billingCycles,
-      recurringRules,
       reminderCooldowns,
       loadError: null,
     };

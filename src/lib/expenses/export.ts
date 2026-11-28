@@ -3,11 +3,14 @@ import { parseCycleParam } from "@/components/shell/url-state";
 import {
   buildExpensesCsv,
   evaluateExpenseLockAndSettlement,
+  filterAndSortExpenses,
   getUserShareCents,
-  isExpenseInCycleWindow,
   type ExpenseBillingCycleRecord,
   type ExpenseLedgerRecord,
+  type ExpenseOwnershipFilter,
   type ExpenseSettlementRecord,
+  type ExpenseSortOption,
+  type ExpenseStatusFilter,
 } from "@/lib/expenses/ledger";
 import { formatMinorUnits, formatMinorUnitsDecimal } from "@/lib/money";
 import type { Database, SplitBreakdownItem } from "@/types/database";
@@ -17,6 +20,11 @@ export type ExportFormat = "csv" | "json";
 export interface ScopedExportParams {
   groupId?: string | null;
   cycleSlug?: string | null;
+  category?: string | null;
+  ownership?: ExpenseOwnershipFilter | null;
+  status?: ExpenseStatusFilter | null;
+  searchQuery?: string | null;
+  sortBy?: ExpenseSortOption | null;
 }
 
 export type ScopedExportResult =
@@ -322,18 +330,23 @@ export async function buildScopedLedgerExport(
         isSettledForUser: lockEval.isSettledForUser,
       };
     })
-    .filter((exp) =>
-      isExpenseInCycleWindow(exp.expenseDate, cycleSlug, exp.groupBillingAnchorDay),
-    )
-    .sort(
-      (a, b) =>
-        Date.parse(b.expenseDate) - Date.parse(a.expenseDate) ||
-        b.id.localeCompare(a.id),
-    );
+;
 
-  const csv = buildExpensesCsv(ledgerRecords, userId);
+  const filteredRecords = filterAndSortExpenses({
+    expenses: ledgerRecords,
+    activeGroupId: rawGroup,
+    cycleSlug,
+    currentUserId: userId,
+    ownership: params.ownership ?? "all",
+    status: params.status ?? "all",
+    searchQuery: params.searchQuery ?? "",
+    category: params.category ?? "all",
+    sortBy: params.sortBy ?? "date-desc",
+  });
 
-  const jsonExpenses = ledgerRecords.map((exp) => {
+  const csv = buildExpensesCsv(filteredRecords, userId);
+
+  const jsonExpenses = filteredRecords.map((exp) => {
     const shareCents = getUserShareCents(exp, userId);
     const status = exp.isLocked
       ? "LOCKED"

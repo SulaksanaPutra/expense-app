@@ -229,7 +229,6 @@ describe("Itemized Transactions Edit Mode (ExpenseRevision), Soft-Delete & Role 
             initialExpenses={SAMPLE_EXPENSES}
             initialSettlements={[]}
             initialBillingCycles={[]}
-            initialRecurringRules={[]}
           />
         </AppShell>,
       );
@@ -347,7 +346,6 @@ describe("Itemized Transactions Edit Mode (ExpenseRevision), Soft-Delete & Role 
             initialExpenses={SAMPLE_EXPENSES}
             initialSettlements={[]}
             initialBillingCycles={[]}
-            initialRecurringRules={[]}
           />
         </AppShell>,
       );

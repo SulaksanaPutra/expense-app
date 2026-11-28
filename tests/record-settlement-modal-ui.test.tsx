@@ -331,7 +331,6 @@ describe("RecordSettlementModal & ExpensesClient FORMER_MEMBER settlement UI", (
             initialExpenses={expenses}
             initialSettlements={[]}
             initialBillingCycles={[]}
-            initialRecurringRules={[]}
           />
         </AppShell>,
       );

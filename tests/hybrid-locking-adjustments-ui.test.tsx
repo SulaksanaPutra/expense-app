@@ -238,7 +238,6 @@ describe("Issue #85 — Hybrid Locking & Offsetting Adjustment UI", () => {
         initialExpenses={[lockedExpense]}
         initialSettlements={[]}
         initialBillingCycles={[]}
-        initialRecurringRules={[]}
       />,
     );
 
