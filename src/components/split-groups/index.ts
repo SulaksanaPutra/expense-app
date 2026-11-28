@@ -1,8 +1,5 @@
-export { ArchiveRulesModal } from "./ArchiveRulesModal";
-export type {
-  ArchiveRulesModalProps,
-  ArchiveRulesSavedPayload,
-} from "./ArchiveRulesModal";
+export { ArchivedGroupCard } from "./ArchivedGroupCard";
+export type { ArchivedGroupCardProps } from "./ArchivedGroupCard";
 export { AuditLogDrawer } from "./AuditLogDrawer";
 export type { AuditLogDrawerProps } from "./AuditLogDrawer";
 export { CreateEditGroupModal, CreateGroupModal } from "./CreateGroupModal";

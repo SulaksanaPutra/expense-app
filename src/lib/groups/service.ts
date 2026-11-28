@@ -487,6 +487,7 @@ export function computeGroupLedgerMetrics(params: {
 }): {
   cycleTurnoverCents: number;
   cycleTransactionCount: number;
+  totalSettledCents: number;
   paidThisPeriodByUser: Map<string, number>;
   netBalanceByUser: Map<string, number>;
   userNetLedgerCents: number;
@@ -512,6 +513,7 @@ export function computeGroupLedgerMetrics(params: {
 
   let cycleTurnoverCents = 0;
   let cycleTransactionCount = 0;
+  let totalSettledCents = 0;
 
   for (const expense of expenses) {
     if (expense.deleted_at) continue;
@@ -550,6 +552,7 @@ export function computeGroupLedgerMetrics(params: {
 
   for (const settlement of settlements) {
     const amountCents = Math.trunc(settlement.amount_cents);
+    totalSettledCents += amountCents;
     netBalanceByUser.set(
       settlement.payer_id,
       (netBalanceByUser.get(settlement.payer_id) ?? 0) + amountCents,
@@ -568,6 +571,7 @@ export function computeGroupLedgerMetrics(params: {
   return {
     cycleTurnoverCents,
     cycleTransactionCount,
+    totalSettledCents,
     paidThisPeriodByUser,
     netBalanceByUser,
     userNetLedgerCents,
@@ -1502,6 +1506,7 @@ export async function getSplitGroupsPageData(
         inviteToken: g.invite_token,
         inviteTokenVersion: g.invite_token_version ?? 1,
         cycleTurnoverCents: metrics.cycleTurnoverCents,
+        totalSettledCents: metrics.totalSettledCents,
         cycleTransactionCount: metrics.cycleTransactionCount,
         userNetLedgerCents: metrics.userNetLedgerCents,
         recurringRuleCount: recurringCountByGroup.get(g.id) ?? 0,

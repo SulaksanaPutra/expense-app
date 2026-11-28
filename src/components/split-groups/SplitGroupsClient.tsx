@@ -21,12 +21,19 @@ import {
 import {
   AlertBanner,
   Avatar,
+  AvatarStack,
   Badge,
   Button,
   Card,
   ConfirmDialog,
   Input,
   SegmentedControl,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
   ToastContainer,
 } from "@/components/ui";
 import type { SegmentedOption, ToastItem } from "@/components/ui";
@@ -46,7 +53,7 @@ import {
   REMINDER_COOLDOWN_MS,
   type ReminderCooldownInfo,
 } from "@/lib/groups/reminders";
-import { resolveGroupCategory } from "@/lib/groups/service";
+import { toShellGroupSummary } from "@/lib/groups/service";
 import type {
   SplitGroupDetail,
   SplitGroupMemberDetail,
@@ -54,12 +61,12 @@ import type {
 } from "@/lib/groups/types";
 import { formatMinorUnits } from "@/lib/money";
 import type { GroupStatus, MemberStatus, SplitMode } from "@/types/database";
+import { ArchivedGroupCard, formatArchivedDate } from "./ArchivedGroupCard";
 import { AuditLogDrawer } from "./AuditLogDrawer";
 import { CreateGroupModal } from "./CreateGroupModal";
 import { EditRatiosModal } from "./EditRatiosModal";
 import {
   formatSplitRuleLabel,
-  GROUP_CATEGORY_LABELS,
   SplitGroupCard,
 } from "./SplitGroupCard";
 
@@ -164,6 +171,11 @@ export function SplitGroupsClient({
     React.useState<SplitGroupDetail | null>(null);
   const [archiveTargetGroup, setArchiveTargetGroup] =
     React.useState<SplitGroupDetail | null>(null);
+  const [deleteTargetGroup, setDeleteTargetGroup] =
+    React.useState<SplitGroupDetail | null>(null);
+  const [restoringGroupId, setRestoringGroupId] = React.useState<string | null>(
+    null,
+  );
   const [removeTarget, setRemoveTarget] = React.useState<{
     group: SplitGroupDetail;
     member: SplitGroupMemberDetail;
@@ -562,12 +574,11 @@ export function SplitGroupsClient({
     setActionLoading(true);
     try {
       const response = await fetch(
-        `/api/groups/${encodeURIComponent(archiveTargetGroup.id)}/archive-rules`,
+        `/api/groups/${encodeURIComponent(archiveTargetGroup.id)}/archive`,
         {
-          method: "PATCH",
+          method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            action: "ARCHIVE",
             reason: "Archived by group admin.",
           }),
         },
@@ -575,6 +586,7 @@ export function SplitGroupsClient({
       const payload = (await response.json().catch(() => ({}))) as {
         error?: string;
         archivedAt?: string | null;
+        auditEntry?: GroupAuditLogEntry;
       };
 
       if (!response.ok) {
@@ -589,14 +601,29 @@ export function SplitGroupsClient({
 
       const archivedId = archiveTargetGroup.id;
       const archivedName = archiveTargetGroup.name;
-      setGroupOverrides((prev) => ({
-        ...prev,
-        [archivedId]: {
-          ...prev[archivedId],
-          status: "ARCHIVED",
-          archivedAt: payload.archivedAt ?? new Date().toISOString(),
-        },
-      }));
+      const archivedAt = payload.archivedAt ?? new Date().toISOString();
+      setGroupOverrides((prev) => {
+        const existingLogs =
+          prev[archivedId]?.auditLogs ?? archiveTargetGroup.auditLogs ?? [];
+        return {
+          ...prev,
+          [archivedId]: {
+            ...prev[archivedId],
+            status: "ARCHIVED",
+            archivedAt,
+            auditLogs: payload.auditEntry
+              ? [payload.auditEntry, ...existingLogs]
+              : existingLogs,
+          },
+        };
+      });
+      upsertGroup({
+        ...toShellGroupSummary(archiveTargetGroup),
+        status: "ARCHIVED",
+      });
+      if (inspectedArchivedId === archivedId) {
+        setInspectedArchivedId(null);
+      }
       setArchiveTargetGroup(null);
       setActionLoading(false);
       pushToast({
@@ -613,7 +640,123 @@ export function SplitGroupsClient({
       });
       setActionLoading(false);
     }
-  }, [archiveTargetGroup, pushToast, router]);
+  }, [archiveTargetGroup, inspectedArchivedId, pushToast, router, upsertGroup]);
+
+  const handleRestoreGroup = React.useCallback(
+    async (group: SplitGroupDetail) => {
+      setRestoringGroupId(group.id);
+      try {
+        const response = await fetch(
+          `/api/groups/${encodeURIComponent(group.id)}/restore`,
+          { method: "POST" },
+        );
+        const payload = (await response.json().catch(() => ({}))) as {
+          error?: string;
+          status?: GroupStatus;
+          auditEntry?: GroupAuditLogEntry;
+        };
+
+        if (!response.ok) {
+          pushToast({
+            tone: "error",
+            title: "Could not restore group",
+            description: payload.error || "Failed to restore group.",
+          });
+          setRestoringGroupId(null);
+          return;
+        }
+
+        const nextStatus: GroupStatus = payload.status ?? "ACTIVE";
+        setGroupOverrides((prev) => {
+          const existingLogs =
+            prev[group.id]?.auditLogs ?? group.auditLogs ?? [];
+          return {
+            ...prev,
+            [group.id]: {
+              ...prev[group.id],
+              status: nextStatus,
+              archivedAt: null,
+              auditLogs: payload.auditEntry
+                ? [payload.auditEntry, ...existingLogs]
+                : existingLogs,
+            },
+          };
+        });
+        upsertGroup(
+          {
+            ...toShellGroupSummary(group),
+            status: nextStatus,
+          },
+          { activate: true },
+        );
+        setInspectedArchivedId(null);
+        setViewTab("active");
+        setRestoringGroupId(null);
+        pushToast({
+          tone: "success",
+          title: "Group restored",
+          description: `${group.name} is active again.`,
+        });
+        router.refresh();
+      } catch {
+        pushToast({
+          tone: "error",
+          title: "Network error",
+          description: "Unable to restore group. Please try again.",
+        });
+        setRestoringGroupId(null);
+      }
+    },
+    [pushToast, router, upsertGroup],
+  );
+
+  const handleDeleteGroupConfirm = React.useCallback(async () => {
+    if (!deleteTargetGroup) return;
+    setActionLoading(true);
+    try {
+      const response = await fetch(
+        `/api/groups/${encodeURIComponent(deleteTargetGroup.id)}`,
+        { method: "DELETE" },
+      );
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+
+      if (!response.ok) {
+        pushToast({
+          tone: "error",
+          title: "Could not delete group",
+          description: payload.error || "Failed to permanently delete group.",
+        });
+        setActionLoading(false);
+        return;
+      }
+
+      const deletedId = deleteTargetGroup.id;
+      const deletedName = deleteTargetGroup.name;
+      setDepartedGroupIds((prev) =>
+        prev.includes(deletedId) ? prev : [...prev, deletedId],
+      );
+      if (inspectedArchivedId === deletedId) {
+        setInspectedArchivedId(null);
+      }
+      setDeleteTargetGroup(null);
+      setActionLoading(false);
+      pushToast({
+        tone: "success",
+        title: "Group deleted",
+        description: `${deletedName} has been permanently deleted.`,
+      });
+      router.refresh();
+    } catch {
+      pushToast({
+        tone: "error",
+        title: "Network error",
+        description: "Unable to delete group. Please try again.",
+      });
+      setActionLoading(false);
+    }
+  }, [deleteTargetGroup, inspectedArchivedId, pushToast, router]);
 
   const handleLeaveGroupConfirm = React.useCallback(async () => {
     if (!leaveTargetGroup) return;
@@ -1119,11 +1262,10 @@ export function SplitGroupsClient({
 
       {/* Archived View */}
       {viewTab === "archived" && (
-        <section aria-label="Archived ledgers" className="flex flex-col gap-4">
+        <section aria-label="Archived ledgers" className="flex flex-col gap-5">
           <AlertBanner
             tone="info"
-            title="Archived Groups — Read-Only"
-            description="Archived groups are frozen for historical reference. Inspect any archived ledger below."
+            description="Archived groups are read-only. Restore any group to resume adding expenses or editing split rules."
           />
           {archivedGroups.length === 0 ? (
             <Card
@@ -1140,62 +1282,167 @@ export function SplitGroupsClient({
               </p>
             </Card>
           ) : (
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-              {archivedGroups.map((archived) => {
-                const cat = resolveGroupCategory(archived);
-                return (
-                  <Card
+            <>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 tabular-nums">
+                {archivedGroups.map((archived) => (
+                  <ArchivedGroupCard
                     key={archived.id}
-                    variant="section"
-                    padding="md"
-                    data-testid={`archived-group-card-${archived.id}`}
-                    className="flex flex-col justify-between gap-4"
-                  >
-                    <div className="flex flex-col gap-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <Badge tone="neutral" size="sm">
-                          {GROUP_CATEGORY_LABELS[cat]}
-                        </Badge>
-                        <Badge tone="neutral" size="sm">
-                          Archived
-                        </Badge>
-                      </div>
-                      <h3 className="truncate text-[16px] font-semibold text-on-surface">
-                        {archived.name}
-                      </h3>
-                      <p className="text-[12px] text-outline tabular-nums">
-                        {archived.baseCurrency} · {archived.members.length}{" "}
-                        members · Net{" "}
-                        {formatMinorUnits(
-                          archived.userNetLedgerCents,
-                          archived.baseCurrency,
-                          { showPlus: true },
-                        )}
-                      </p>
-                    </div>
-                    <div className="flex items-center justify-between border-t border-outline-variant/40 pt-3">
-                      <span className="text-[11px] font-medium text-outline">
-                        Read-only
-                      </span>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => setInspectedArchivedId(archived.id)}
-                      >
-                        Inspect Ledger
-                      </Button>
-                    </div>
-                  </Card>
-                );
-              })}
-            </div>
+                    group={archived}
+                    isRestoring={restoringGroupId === archived.id}
+                    disableRestore={
+                      restoringGroupId !== null &&
+                      restoringGroupId !== archived.id
+                    }
+                    onViewFinalLedger={(g) => setInspectedArchivedId(g.id)}
+                    onOpenAuditLog={(g) => {
+                      setInspectedArchivedId(g.id);
+                      setAuditDrawerOpen(true);
+                    }}
+                    onRestoreGroup={(g) => void handleRestoreGroup(g)}
+                    onDeleteGroup={(g) => setDeleteTargetGroup(g)}
+                  />
+                ))}
+              </div>
+
+              {/* Final Settlement History Table */}
+              <Card
+                variant="section"
+                padding="lg"
+                data-testid="final-settlement-history"
+                className="flex flex-col gap-4 tabular-nums"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="font-display text-[17px] font-semibold text-on-surface">
+                      Final Settlement History
+                    </h3>
+                    <p className="text-[12px] text-outline">
+                      Historical ledger closures and reconciled group totals.
+                    </p>
+                  </div>
+                  <span className="text-[12px] font-medium text-outline">
+                    {archivedGroups.length}{" "}
+                    {archivedGroups.length === 1 ? "record" : "records"}
+                  </span>
+                </div>
+
+                <Table>
+                  <TableHeader>
+                    <tr>
+                      <TableHead>GROUP</TableHead>
+                      <TableHead>ARCHIVED ON</TableHead>
+                      <TableHead>MEMBERS</TableHead>
+                      <TableHead>TOTAL SETTLED</TableHead>
+                      <TableHead>FINAL STATUS</TableHead>
+                      <TableHead className="text-right">ACTION</TableHead>
+                    </tr>
+                  </TableHeader>
+                  <TableBody>
+                    {archivedGroups.map((archived) => {
+                      const archivedDateLabel = formatArchivedDate(
+                        archived.archivedAt,
+                      );
+                      const isArchivedAdmin =
+                        archived.currentUserRole === "ADMIN";
+                      const totalSettledCents = archived.totalSettledCents ?? 0;
+                      const unsettledMembersCount = archived.members.filter(
+                        (m) => m.netBalanceCents !== 0,
+                      ).length;
+                      const isSettled =
+                        archived.isFullySettled && unsettledMembersCount === 0;
+
+                      return (
+                        <TableRow key={archived.id}>
+                          <TableCell>
+                            <div className="flex items-center gap-2.5">
+                              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-hairline bg-surface-container-low text-outline">
+                                <Archive
+                                  className="h-3.5 w-3.5"
+                                  aria-hidden="true"
+                                />
+                              </div>
+                              <div className="min-w-0">
+                                <div className="truncate font-semibold text-on-surface">
+                                  {archived.name}
+                                </div>
+                                <div className="truncate text-[11px] text-outline">
+                                  {formatSplitRuleLabel(archived)} ·{" "}
+                                  {isSettled ? "Event Locked" : "Open Balances"}
+                                </div>
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap text-[13px] text-outline">
+                            {archivedDateLabel ?? "—"}
+                          </TableCell>
+                          <TableCell>
+                            <AvatarStack
+                              members={archived.members.map((m) => ({
+                                id: m.userId,
+                                name: m.name,
+                              }))}
+                              max={4}
+                              size="sm"
+                            />
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap font-semibold text-on-surface">
+                            {formatMinorUnits(
+                              totalSettledCents,
+                              archived.baseCurrency,
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              tone={isSettled ? "success" : "warning"}
+                              size="sm"
+                            >
+                              {isSettled ? "Reconciled" : "Unsettled"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="inline-flex items-center gap-1.5">
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                size="sm"
+                                onClick={() =>
+                                  setInspectedArchivedId(archived.id)
+                                }
+                              >
+                                Ledger
+                              </Button>
+                              {isArchivedAdmin && (
+                                <Button
+                                  type="button"
+                                  variant="primary"
+                                  size="sm"
+                                  loading={restoringGroupId === archived.id}
+                                  disabled={
+                                    restoringGroupId !== null &&
+                                    restoringGroupId !== archived.id
+                                  }
+                                  onClick={() =>
+                                    void handleRestoreGroup(archived)
+                                  }
+                                >
+                                  Restore
+                                </Button>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </Card>
+            </>
           )}
         </section>
       )}
 
       {/* Selected Group Spotlight Panel */}
-      {selectedGroup && (
+      {(viewTab === "active" || inspectedArchivedId !== null) && selectedGroup && (
         <Card
           variant="spotlight"
           padding="lg"
@@ -1815,11 +2062,68 @@ export function SplitGroupsClient({
           variant="danger"
           loading={actionLoading}
           confirmLabel="Archive Group"
-          description={`Current Net Ledger: ${formatMinorUnits(
-            archiveTargetGroup.userNetLedgerCents,
-            archiveTargetGroup.baseCurrency,
-            { showPlus: true },
-          )}. Archiving transitions ${archiveTargetGroup.name} to ARCHIVED (read-only), blocking new expenses, settlements, and split rule edits until restored.`}
+          description="This group will move to Archived (read-only) and stop accepting new expenses. Existing transactions and settlement history remain in your ledger."
+        >
+          {(() => {
+            const unsettledCount = archiveTargetGroup.members.filter(
+              (m) => m.netBalanceCents !== 0,
+            ).length;
+            return (
+              <div className="flex items-center justify-between gap-3 rounded-[14px] border border-hairline bg-surface-container-low p-3.5 text-[13px] tabular-nums">
+                <span className="font-medium text-outline">
+                  Current Net Ledger
+                </span>
+                <span className="font-semibold text-on-surface">
+                  {formatMinorUnits(
+                    archiveTargetGroup.userNetLedgerCents,
+                    archiveTargetGroup.baseCurrency,
+                    { showPlus: true },
+                  )}{" "}
+                  ({unsettledCount}{" "}
+                  {unsettledCount === 1
+                    ? "unsettled balance"
+                    : "unsettled balances"}
+                  )
+                </span>
+              </div>
+            );
+          })()}
+        </ConfirmDialog>
+      )}
+
+      {deleteTargetGroup && (
+        <ConfirmDialog
+          open={Boolean(deleteTargetGroup)}
+          onClose={() => {
+            if (!actionLoading) setDeleteTargetGroup(null);
+          }}
+          onConfirm={handleDeleteGroupConfirm}
+          title={`Delete ${deleteTargetGroup.name}?`}
+          variant="danger"
+          loading={actionLoading}
+          confirmLabel="Delete Group"
+          blockedReason={(() => {
+            const unsettledCount = deleteTargetGroup.members.filter(
+              (m) => m.netBalanceCents !== 0,
+            ).length;
+            if (unsettledCount === 0 && deleteTargetGroup.isFullySettled) {
+              return undefined;
+            }
+            return `Cannot permanently delete ${deleteTargetGroup.name} while ${
+              unsettledCount > 0 ? unsettledCount : "some"
+            } ${
+              unsettledCount === 1 ? "member has" : "members have"
+            } an unsettled balance. Restore the group and settle all balances to ${formatMinorUnits(0, deleteTargetGroup.baseCurrency)} first.`;
+          })()}
+          description={(() => {
+            const unsettledCount = deleteTargetGroup.members.filter(
+              (m) => m.netBalanceCents !== 0,
+            ).length;
+            if (unsettledCount > 0 || !deleteTargetGroup.isFullySettled) {
+              return `All member balances must equal ${formatMinorUnits(0, deleteTargetGroup.baseCurrency)} before ${deleteTargetGroup.name} can be permanently deleted.`;
+            }
+            return `All member balances are ${formatMinorUnits(0, deleteTargetGroup.baseCurrency)}. Permanently deleting ${deleteTargetGroup.name} removes the group, its expenses, settlements, and audit history. This action cannot be undone.`;
+          })()}
         />
       )}
 

@@ -66,6 +66,7 @@ export interface SplitGroupDetail {
   inviteToken: string;
   inviteTokenVersion?: number;
   cycleTurnoverCents: number;
+  totalSettledCents?: number;
   cycleTransactionCount: number;
   userNetLedgerCents: number;
   recurringRuleCount: number;

@@ -134,252 +134,6 @@ export function evaluateResidentialLeasePrompt(
   };
 }
 
-export interface ArchiveCheckEvaluationSummary {
-  autoArchivedGroupIds: string[];
-  leasePromptGroupIds: string[];
-  checkedGroupCount: number;
-}
-
-export async function runArchiveRulesEvaluation(
-  supabase: SupabaseClient<Database>,
-  now = new Date(),
-): Promise<{
-  ok: true;
-  summary: ArchiveCheckEvaluationSummary;
-} | {
-  ok: false;
-  message: string;
-}> {
-  const { data: groupRows, error: groupsError } = await supabase
-    .from("groups")
-    .select(
-      "id, name, group_type, status, billing_cycle_anchor_day, trip_auto_archive_enabled, trip_auto_archive_days, residential_lease_prompt_enabled, zero_balance_since, lease_prompt_snoozed_until",
-    )
-    .neq("status", "ARCHIVED");
-
-  if (groupsError) {
-    return {
-      ok: false,
-      message: groupsError.message || "Unable to load groups for archive check.",
-    };
-  }
-
-  const groups = groupRows ?? [];
-  if (groups.length === 0) {
-    return {
-      ok: true,
-      summary: {
-        autoArchivedGroupIds: [],
-        leasePromptGroupIds: [],
-        checkedGroupCount: 0,
-      },
-    };
-  }
-
-  const tripIds = groups
-    .filter((g) => g.group_type === "TRIP")
-    .map((g) => g.id);
-
-  const expensesByGroup = new Map<string, LedgerExpenseInput[]>();
-  const settlementsByGroup = new Map<string, LedgerSettlementInput[]>();
-  const memberIdsByGroup = new Map<string, string[]>();
-
-  if (tripIds.length > 0) {
-    const [{ data: memberRows }, { data: expenseRows }, { data: settlementRows }] =
-      await Promise.all([
-        supabase
-          .from("group_members")
-          .select("group_id, user_id")
-          .in("group_id", tripIds),
-        supabase
-          .from("expenses")
-          .select(
-            "group_id, paid_by, amount_cents, expense_date, split_breakdown, deleted_at",
-          )
-          .in("group_id", tripIds)
-          .is("deleted_at", null),
-        supabase
-          .from("settlements")
-          .select("group_id, payer_id, recipient_id, amount_cents")
-          .in("group_id", tripIds),
-      ]);
-
-    for (const m of memberRows ?? []) {
-      const list = memberIdsByGroup.get(m.group_id) ?? [];
-      list.push(m.user_id);
-      memberIdsByGroup.set(m.group_id, list);
-    }
-
-    for (const e of expenseRows ?? []) {
-      const list = expensesByGroup.get(e.group_id) ?? [];
-      list.push({
-        group_id: e.group_id,
-        paid_by: e.paid_by,
-        amount_cents: e.amount_cents,
-        expense_date: e.expense_date,
-        split_breakdown: Array.isArray(e.split_breakdown)
-          ? (e.split_breakdown as unknown as SplitBreakdownItem[])
-          : [],
-        deleted_at: e.deleted_at,
-      });
-      expensesByGroup.set(e.group_id, list);
-    }
-
-    for (const s of settlementRows ?? []) {
-      const list = settlementsByGroup.get(s.group_id) ?? [];
-      list.push(s);
-      settlementsByGroup.set(s.group_id, list);
-    }
-  }
-
-  const autoArchivedGroupIds: string[] = [];
-  const leasePromptGroupIds: string[] = [];
-  const nowIso = now.toISOString();
-
-  for (const g of groups) {
-    if (g.group_type === "TRIP") {
-      const metrics = computeGroupLedgerMetrics({
-        expenses: expensesByGroup.get(g.id) ?? [],
-        settlements: settlementsByGroup.get(g.id) ?? [],
-        memberIds: memberIdsByGroup.get(g.id) ?? [],
-        currentUserId: "",
-        cycleSlug: "2026-11",
-        anchorDay: g.billing_cycle_anchor_day ?? 1,
-      });
-
-      const evaluation = evaluateTripAutoArchive(
-        {
-          groupType: g.group_type,
-          status: g.status,
-          tripAutoArchiveEnabled: g.trip_auto_archive_enabled ?? true,
-          tripAutoArchiveDays:
-            g.trip_auto_archive_days ?? DEFAULT_TRIP_AUTO_ARCHIVE_DAYS,
-          isFullySettled: metrics.isFullySettled,
-          zeroBalanceSince: g.zero_balance_since ?? null,
-        },
-        now,
-      );
-
-      if (evaluation.shouldAutoArchive) {
-        const { error: updateErr } = await supabase
-          .from("groups")
-          .update({
-            status: "ARCHIVED",
-            archived_at: nowIso,
-            zero_balance_since: evaluation.nextZeroBalanceSince,
-          })
-          .eq("id", g.id);
-
-        if (!updateErr) {
-          autoArchivedGroupIds.push(g.id);
-          await recordGroupAuditEvent(supabase, {
-            groupId: g.id,
-            actorId: null,
-            actorName: "System",
-            eventType: "GROUP_ARCHIVED",
-            summary: `Auto-archived ${g.name} after ${evaluation.daysAtZeroBalance} days at zero balance`,
-            metadata: {
-              archive_reason: `Trip auto-archive triggered (${evaluation.daysAtZeroBalance} days at $0.00 balance).`,
-            },
-          });
-        }
-      } else if (
-        evaluation.nextZeroBalanceSince !== (g.zero_balance_since ?? null)
-      ) {
-        await supabase
-          .from("groups")
-          .update({ zero_balance_since: evaluation.nextZeroBalanceSince })
-          .eq("id", g.id);
-      }
-    }
-
-    if (g.group_type === "RESIDENTIAL") {
-      const promptEval = evaluateResidentialLeasePrompt(
-        {
-          groupType: g.group_type,
-          status: g.status,
-          residentialLeasePromptEnabled:
-            g.residential_lease_prompt_enabled ?? true,
-          leaseEndDate: null,
-          leasePromptSnoozedUntil: g.lease_prompt_snoozed_until ?? null,
-        },
-        now,
-      );
-      if (promptEval.shouldPromptLeaseArchive) {
-        leasePromptGroupIds.push(g.id);
-
-        try {
-          const notifTable = supabase.from("notifications");
-          if (notifTable && typeof notifTable.insert === "function") {
-            const { data: adminMembers } = await supabase
-              .from("group_members")
-              .select("user_id")
-              .eq("group_id", g.id)
-              .eq("role", "ADMIN")
-              .eq("status", "ACTIVE");
-
-            const adminIds = (adminMembers ?? []).map((m) => m.user_id);
-            if (adminIds.length > 0) {
-              const { data: existingPrompts } = await notifTable
-                .select("user_id")
-                .eq("group_id", g.id)
-                .eq("type", "LEASE_ARCHIVE_PROMPT")
-                .eq("is_read", false)
-                .in("user_id", adminIds);
-
-              const alreadyPrompted = new Set(
-                (existingPrompts ?? []).map((row) => row.user_id),
-              );
-              const targetAdmins = adminIds.filter(
-                (uid) => !alreadyPrompted.has(uid),
-              );
-
-              if (targetAdmins.length > 0) {
-                const payloads: Database["public"]["Tables"]["notifications"]["Insert"][] =
-                  targetAdmins.map((uid) => ({
-                    id: crypto.randomUUID(),
-                    user_id: uid,
-                    group_id: g.id,
-                    actor_id: null,
-                    expense_id: null,
-                    revision_id: null,
-                    type: "LEASE_ARCHIVE_PROMPT",
-                    title: "Lease archive prompt",
-                    description: `Lease prompt triggered for ${g.name}. Review balances and archive or snooze.`,
-                    delta_cents: null,
-                    currency: null,
-                    href: `/split-groups?group=${encodeURIComponent(g.id)}`,
-                    is_read: false,
-                    created_at: nowIso,
-                  }));
-                await notifTable.insert(payloads);
-              }
-            }
-          }
-        } catch {
-          // Non-fatal in minimal unit-test mocks.
-        }
-      }
-    }
-  }
-
-  return {
-    ok: true,
-    summary: {
-      autoArchivedGroupIds,
-      leasePromptGroupIds,
-      checkedGroupCount: groups.length,
-    },
-  };
-}
-
-export interface UpdateArchiveRulesInput {
-  trip_auto_archive_enabled?: boolean;
-  trip_auto_archive_days?: number;
-  residential_lease_prompt_enabled?: boolean;
-  lease_end_date?: string | null;
-}
-
 export type ArchiveMutationResult =
   | {
       ok: true;
@@ -423,7 +177,7 @@ async function requireActiveGroupAdmin(
     return {
       ok: false as const,
       status: 403,
-      message: "Only active group admins can configure archive rules.",
+      message: "Only active group admins can manage group archive status.",
     };
   }
 
@@ -452,107 +206,6 @@ async function requireActiveGroupAdmin(
   }
 
   return { ok: true as const, group };
-}
-
-export async function updateGroupArchiveRules(
-  supabase: SupabaseClient<Database>,
-  userId: string,
-  groupId: string,
-  input: UpdateArchiveRulesInput,
-): Promise<ArchiveMutationResult> {
-  const auth = await requireActiveGroupAdmin(supabase, userId, groupId);
-  if (!auth.ok) return auth;
-
-  const { group } = auth;
-  if (group.status === "ARCHIVED") {
-    return {
-      ok: false,
-      status: 409,
-      message: "Archived groups are read-only. Restore the group first to edit rules.",
-    };
-  }
-
-  const nextTripEnabled =
-    typeof input.trip_auto_archive_enabled === "boolean"
-      ? input.trip_auto_archive_enabled
-      : (group.trip_auto_archive_enabled ?? true);
-
-  let nextTripDays = group.trip_auto_archive_days ?? DEFAULT_TRIP_AUTO_ARCHIVE_DAYS;
-  if (input.trip_auto_archive_days !== undefined) {
-    const parsedDays = Number(input.trip_auto_archive_days);
-    if (!Number.isInteger(parsedDays) || parsedDays < 1 || parsedDays > 365) {
-      return {
-        ok: false,
-        status: 400,
-        message: "Trip auto-archive days must be a whole number between 1 and 365.",
-      };
-    }
-    nextTripDays = parsedDays;
-  }
-
-  const nextResidentialEnabled =
-    typeof input.residential_lease_prompt_enabled === "boolean"
-      ? input.residential_lease_prompt_enabled
-      : (group.residential_lease_prompt_enabled ?? true);
-
-  let nextLeaseEndDate: string | null = null;
-  if (input.lease_end_date !== undefined) {
-    if (input.lease_end_date === null || input.lease_end_date.trim() === "") {
-      nextLeaseEndDate = null;
-    } else {
-      const trimmed = input.lease_end_date.trim();
-      if (!isValidIsoDate(trimmed)) {
-        return {
-          ok: false,
-          status: 400,
-          message: "Lease end date must be a valid YYYY-MM-DD date.",
-        };
-      }
-      nextLeaseEndDate = trimmed;
-    }
-  }
-
-  const { error: updateError } = await supabase
-    .from("groups")
-    .update({
-      trip_auto_archive_enabled: nextTripEnabled,
-      trip_auto_archive_days: nextTripDays,
-      residential_lease_prompt_enabled: nextResidentialEnabled,
-    })
-    .eq("id", group.id);
-
-  if (updateError) {
-    return {
-      ok: false,
-      status: 500,
-      message: updateError.message || "Failed to update archive rules.",
-    };
-  }
-
-  const auditEntry = await recordGroupAuditEvent(supabase, {
-    groupId: group.id,
-    actorId: userId,
-    eventType: "ARCHIVE_RULES_UPDATED",
-    summary: `Updated archive rules for ${group.name}`,
-    metadata: {
-      trip_auto_archive_enabled: nextTripEnabled,
-      trip_auto_archive_days: nextTripDays,
-      residential_lease_prompt_enabled: nextResidentialEnabled,
-    },
-  });
-
-  return {
-    ok: true,
-    groupId: group.id,
-    status: group.status,
-    tripAutoArchiveEnabled: nextTripEnabled,
-    tripAutoArchiveDays: nextTripDays,
-    residentialLeasePromptEnabled: nextResidentialEnabled,
-    leaseEndDate: nextLeaseEndDate,
-    leasePromptSnoozedUntil: group.lease_prompt_snoozed_until ?? null,
-    archivedAt: group.archived_at ?? null,
-    auditEntry,
-  };
 }
 
 export async function archiveGroup(
@@ -710,54 +363,168 @@ export async function unarchiveGroup(
   };
 }
 
-export async function snoozeResidentialLeasePrompt(
+
+export type DeleteArchivedGroupResult =
+  | {
+      ok: true;
+      groupId: string;
+      groupName: string;
+    }
+  | {
+      ok: false;
+      status: number;
+      code?: "GROUP_NOT_ARCHIVED" | "UNSETTLED_BALANCES";
+      unsettledMemberCount?: number;
+      message: string;
+    };
+
+export async function deleteArchivedGroup(
   supabase: SupabaseClient<Database>,
   userId: string,
   groupId: string,
-  snoozeDays = 30,
-  now = new Date(),
-): Promise<ArchiveMutationResult> {
-  const auth = await requireActiveGroupAdmin(supabase, userId, groupId);
-  if (!auth.ok) return auth;
+): Promise<DeleteArchivedGroupResult> {
+  const { data: membership, error: memberError } = await supabase
+    .from("group_members")
+    .select("role, status")
+    .eq("group_id", groupId)
+    .eq("user_id", userId)
+    .maybeSingle();
 
-  const { group } = auth;
-  if (group.status === "ARCHIVED") {
-    return {
-      ok: false,
-      status: 409,
-      message: "Group is already archived.",
-    };
-  }
-
-  const clampedDays = Math.min(Math.max(Math.trunc(snoozeDays), 1), 365);
-  const snoozedUntil = new Date(
-    now.getTime() + clampedDays * MS_PER_DAY,
-  ).toISOString();
-
-  const { error: updateError } = await supabase
-    .from("groups")
-    .update({ lease_prompt_snoozed_until: snoozedUntil })
-    .eq("id", group.id);
-
-  if (updateError) {
+  if (memberError) {
     return {
       ok: false,
       status: 500,
-      message: updateError.message || "Failed to snooze lease archive prompt.",
+      message: memberError.message || "Unable to verify admin permissions.",
+    };
+  }
+
+  if (
+    !membership ||
+    membership.status !== "ACTIVE" ||
+    membership.role !== "ADMIN"
+  ) {
+    return {
+      ok: false,
+      status: 403,
+      message: "Only active group admins can permanently delete an archived group.",
+    };
+  }
+
+  const { data: group, error: groupError } = await supabase
+    .from("groups")
+    .select("id, name, status, base_currency, billing_cycle_anchor_day")
+    .eq("id", groupId)
+    .maybeSingle();
+
+  if (groupError) {
+    return {
+      ok: false,
+      status: 500,
+      message: groupError.message || "Unable to load group details.",
+    };
+  }
+
+  if (!group) {
+    return {
+      ok: false,
+      status: 404,
+      message: "Split group not found.",
+    };
+  }
+
+  if (group.status !== "ARCHIVED") {
+    return {
+      ok: false,
+      status: 409,
+      code: "GROUP_NOT_ARCHIVED",
+      message: "Archive the group before permanently deleting it.",
+    };
+  }
+
+  const [
+    { data: memberRows, error: membersErr },
+    { data: expenseRows, error: expensesErr },
+    { data: settlementRows, error: settlementsErr },
+  ] = await Promise.all([
+    supabase
+      .from("group_members")
+      .select("user_id")
+      .eq("group_id", group.id),
+    supabase
+      .from("expenses")
+      .select(
+        "group_id, paid_by, amount_cents, expense_date, split_breakdown, deleted_at",
+      )
+      .eq("group_id", group.id)
+      .is("deleted_at", null),
+    supabase
+      .from("settlements")
+      .select("group_id, payer_id, recipient_id, amount_cents")
+      .eq("group_id", group.id),
+  ]);
+
+  if (membersErr || expensesErr || settlementsErr) {
+    return {
+      ok: false,
+      status: 500,
+      message:
+        membersErr?.message ||
+        expensesErr?.message ||
+        settlementsErr?.message ||
+        "Unable to verify group balances before deletion.",
+    };
+  }
+
+  const normalizedExpenses: LedgerExpenseInput[] = (expenseRows ?? []).map((e) => ({
+    group_id: e.group_id,
+    paid_by: e.paid_by,
+    amount_cents: e.amount_cents,
+    expense_date: e.expense_date,
+    split_breakdown: Array.isArray(e.split_breakdown)
+      ? (e.split_breakdown as unknown as SplitBreakdownItem[])
+      : [],
+    deleted_at: e.deleted_at,
+  }));
+
+  const metrics = computeGroupLedgerMetrics({
+    expenses: normalizedExpenses,
+    settlements: (settlementRows ?? []) as LedgerSettlementInput[],
+    memberIds: (memberRows ?? []).map((m) => m.user_id),
+    currentUserId: userId,
+    cycleSlug: "2026-11",
+    anchorDay: group.billing_cycle_anchor_day ?? 1,
+  });
+
+  const unsettledMemberCount = Array.from(
+    metrics.netBalanceByUser.values(),
+  ).filter((bal) => Math.trunc(bal) !== 0).length;
+
+  if (unsettledMemberCount > 0) {
+    return {
+      ok: false,
+      status: 409,
+      code: "UNSETTLED_BALANCES",
+      unsettledMemberCount,
+      message: `Cannot permanently delete ${group.name}: ${unsettledMemberCount} ${unsettledMemberCount === 1 ? "member still has" : "members still have"} an unsettled balance. All member balances must be $0.00 before deletion.`,
+    };
+  }
+
+  const { error: deleteError } = await supabase
+    .from("groups")
+    .delete()
+    .eq("id", group.id);
+
+  if (deleteError) {
+    return {
+      ok: false,
+      status: 500,
+      message: deleteError.message || "Failed to permanently delete group.",
     };
   }
 
   return {
     ok: true,
     groupId: group.id,
-    status: group.status,
-    tripAutoArchiveEnabled: group.trip_auto_archive_enabled ?? true,
-    tripAutoArchiveDays:
-      group.trip_auto_archive_days ?? DEFAULT_TRIP_AUTO_ARCHIVE_DAYS,
-    residentialLeasePromptEnabled:
-      group.residential_lease_prompt_enabled ?? true,
-    leaseEndDate: null,
-    leasePromptSnoozedUntil: snoozedUntil,
-    archivedAt: group.archived_at ?? null,
+    groupName: group.name,
   };
 }
