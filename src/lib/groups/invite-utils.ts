@@ -1,6 +1,7 @@
 import {
   computeEqualSplit,
   computePercentageSplit,
+  computeSharesSplit,
 } from "@/lib/expenses/split-engine";
 import type { MemberStatus, SplitBreakdownItem, SplitMode } from "@/types/database";
 
@@ -148,7 +149,11 @@ export function buildDefaultSplitBreakdownFromGroup(params: {
   amountCents: number;
   paidBy: string;
   defaultSplitMode: SplitMode;
-  activeMembers: ReadonlyArray<{ userId: string; sharePercentage: number }>;
+  activeMembers: ReadonlyArray<{
+    userId: string;
+    sharePercentage: number;
+    shareUnits?: number;
+  }>;
 }): SplitBreakdownItem[] {
   const { amountCents, paidBy, defaultSplitMode, activeMembers } = params;
   const safeAmount = Math.trunc(amountCents);
@@ -161,6 +166,23 @@ export function buildDefaultSplitBreakdownFromGroup(params: {
       paidBy,
       participantIds: activeMembers.map((m) => m.userId),
     });
+  }
+
+  if (defaultSplitMode === "SHARES") {
+    const sharesResult = computeSharesSplit({
+      amountCents: safeAmount,
+      paidBy,
+      participants: activeMembers.map((m) => ({
+        userId: m.userId,
+        shares:
+          typeof m.shareUnits === "number" && Number.isFinite(m.shareUnits)
+            ? m.shareUnits
+            : 1,
+      })),
+    });
+    if (sharesResult.ok) {
+      return sharesResult.breakdown;
+    }
   }
 
   const pctResult = computePercentageSplit({
@@ -186,6 +208,7 @@ export interface GroupMemberSplitCandidate {
   userId: string;
   status: MemberStatus;
   sharePercentage: number;
+  shareUnits?: number;
 }
 
 /**
