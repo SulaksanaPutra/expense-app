@@ -44,7 +44,11 @@ import type {
   SplitMode,
 } from "@/types/database";
 
-export type ExpenseLedgerTab = "all" | "paid-by-me" | "split-with-me" | "recurring";
+export type ExpenseOwnershipFilter = "all" | "paid-by-me" | "split-with-me";
+
+export type ExpenseStatusFilter = "all" | "settled" | "pending";
+
+export type ExpenseLedgerTab = ExpenseOwnershipFilter;
 
 export type ExpenseSortOption =
   | "date-desc"
@@ -123,24 +127,6 @@ export interface ExpenseLedgerRecord {
   isSettledForUser: boolean;
 }
 
-export interface RecurringRuleRecord {
-  id: string;
-  groupId: string;
-  groupName: string;
-  createdBy?: string | null;
-  paidBy: string;
-  payerName: string;
-  description: string;
-  category: string;
-  amountCents: number;
-  currency: string;
-  frequency: "MONTHLY";
-  dayOfMonth: number;
-  splitRule: SplitMode;
-  isActive: boolean;
-  nextRunDate: string;
-}
-
 export interface CategoryTotalItem {
   category: string;
   amountCents: number;
@@ -154,9 +140,12 @@ export interface ExpensesKpiSummary {
   transactionCount: number;
   activeMemberCount: number;
   personalShareCents: number;
+  personalShareOfTotalPercent: number;
   personalShareCapCents: number | null;
   personalCapPercent: number | null;
   unsettledTotalCents: number;
+  pendingItemsCount: number;
+  pendingPeerCount: number;
   youOweCount: number;
   youOweCents: number;
   owedToYouCount: number;
@@ -375,12 +364,37 @@ export function getUserShareCents(
   return entry ? Math.trunc(entry.share_cents) : 0;
 }
 
+export function matchesExpenseCategory(
+  expenseCategory: string,
+  selectedCategory: string,
+): boolean {
+  if (!selectedCategory || selectedCategory === "all") return true;
+  const expLower = expenseCategory.trim().toLowerCase();
+  const selLower = selectedCategory.trim().toLowerCase();
+  if (expLower === selLower) return true;
+  if (selLower === "groceries") return expLower.includes("grocer");
+  if (selLower === "utilities") return expLower.includes("utilit");
+  if (selLower === "dining") {
+    return expLower.includes("dining") || expLower.includes("food & drink");
+  }
+  if (selLower === "travel") {
+    return (
+      expLower.includes("travel") ||
+      expLower.includes("transit") ||
+      expLower.includes("transport")
+    );
+  }
+  return false;
+}
+
 export function filterAndSortExpenses(params: {
   expenses: readonly ExpenseLedgerRecord[];
   activeGroupId: string;
   cycleSlug: string;
   currentUserId: string;
-  tab: ExpenseLedgerTab;
+  tab?: ExpenseLedgerTab;
+  ownership?: ExpenseOwnershipFilter;
+  status?: ExpenseStatusFilter;
   searchQuery: string;
   category: string;
   sortBy: ExpenseSortOption;
@@ -391,11 +405,14 @@ export function filterAndSortExpenses(params: {
     cycleSlug,
     currentUserId,
     tab,
+    ownership,
+    status = "all",
     searchQuery,
     category,
     sortBy,
   } = params;
 
+  const effectiveOwnership: ExpenseOwnershipFilter = ownership ?? tab ?? "all";
   const q = searchQuery.trim().toLowerCase();
   const safeCycle = parseCycleParam(cycleSlug);
 
@@ -408,18 +425,26 @@ export function filterAndSortExpenses(params: {
       return false;
     }
 
-    if (tab === "paid-by-me" && exp.paidBy !== currentUserId) {
+    if (effectiveOwnership === "paid-by-me" && exp.paidBy !== currentUserId) {
       return false;
     }
 
-    if (tab === "split-with-me") {
+    if (effectiveOwnership === "split-with-me") {
       const userShare = getUserShareCents(exp, currentUserId);
       if (exp.paidBy === currentUserId || userShare === 0) {
         return false;
       }
     }
 
-    if (category !== "all" && exp.category !== category) {
+    const isSettled = exp.isSettledForUser || exp.isLocked;
+    if (status === "settled" && !isSettled) {
+      return false;
+    }
+    if (status === "pending" && isSettled) {
+      return false;
+    }
+
+    if (!matchesExpenseCategory(exp.category, category)) {
       return false;
     }
 
@@ -519,6 +544,8 @@ export function computeExpensesKpiSummary(params: {
   let previousCycleExpensesCents = 0;
   let transactionCount = 0;
   let personalShareCents = 0;
+  let pendingItemsCount = 0;
+  const pendingExpensePeers = new Set<string>();
 
   const categoryTotalsMap = new Map<string, { amountCents: number; count: number }>();
 
@@ -529,6 +556,18 @@ export function computeExpensesKpiSummary(params: {
       totalGroupExpensesCents += Math.trunc(exp.amountCents);
       transactionCount += 1;
       personalShareCents += getUserShareCents(exp, currentUserId);
+      if (!exp.isSettledForUser && !exp.isLocked) {
+        pendingItemsCount += 1;
+        if (exp.paidBy !== currentUserId) {
+          pendingExpensePeers.add(exp.paidBy);
+        } else {
+          for (const part of exp.splitBreakdown) {
+            if (part.user_id !== currentUserId && part.share_cents !== 0) {
+              pendingExpensePeers.add(part.user_id);
+            }
+          }
+        }
+      }
 
       const catEntry = categoryTotalsMap.get(exp.category) ?? {
         amountCents: 0,
@@ -553,6 +592,11 @@ export function computeExpensesKpiSummary(params: {
         ) / 10
       : null;
 
+  const personalShareOfTotalPercent =
+    totalGroupExpensesCents > 0
+      ? Math.round((personalShareCents / totalGroupExpensesCents) * 1000) / 10
+      : 0;
+
   const personalCapPercent =
     personalShareCapCents !== null && personalShareCapCents > 0
       ? Math.round((personalShareCents / personalShareCapCents) * 1000) / 10
@@ -571,6 +615,7 @@ export function computeExpensesKpiSummary(params: {
   let youOweCount = 0;
   let owedToYouCents = 0;
   let owedToYouCount = 0;
+  const pendingDebtPeers = new Set<string>();
 
   for (const group of scopedGroups) {
     const edges = computePerGroupDebtEdges({
@@ -582,14 +627,20 @@ export function computeExpensesKpiSummary(params: {
       if (edge.payerId === currentUserId) {
         youOweCents += edge.amountCents;
         youOweCount += 1;
+        pendingDebtPeers.add(edge.recipientId);
       } else if (edge.recipientId === currentUserId) {
         owedToYouCents += edge.amountCents;
         owedToYouCount += 1;
+        pendingDebtPeers.add(edge.payerId);
       }
     }
   }
 
   const unsettledTotalCents = youOweCents + owedToYouCents;
+  const resolvedPendingItemsCount =
+    pendingItemsCount > 0 ? pendingItemsCount : youOweCount + owedToYouCount;
+  const pendingPeerCount =
+    pendingDebtPeers.size > 0 ? pendingDebtPeers.size : pendingExpensePeers.size;
   const anchorDay = scopedGroups[0]?.billingCycleAnchorDay ?? 1;
   const nextSettlement = getNextGroupSettlementDate(anchorDay, referenceDate);
 
@@ -608,9 +659,12 @@ export function computeExpensesKpiSummary(params: {
     transactionCount,
     activeMemberCount: uniqueMemberIds.size,
     personalShareCents,
+    personalShareOfTotalPercent,
     personalShareCapCents,
     personalCapPercent,
     unsettledTotalCents,
+    pendingItemsCount: resolvedPendingItemsCount,
+    pendingPeerCount,
     youOweCount,
     youOweCents,
     owedToYouCount,
