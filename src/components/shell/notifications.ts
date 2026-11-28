@@ -1,5 +1,5 @@
 import type { Database, NotificationType } from "@/types/database";
-import type { LiveSyncStatus, ShellNotificationItem } from "./types";
+import type { ShellNotificationItem } from "./types";
 
 export const REALTIME_LEDGER_CHANGE_EVENT = "ledgersplit:realtime-change";
 
@@ -15,22 +15,6 @@ export function formatNotificationTimestamp(isoString: string): string {
   }).format(parsed);
 }
 
-export function mapRealtimeStatusToLiveSync(
-  realtimeStatus: string,
-  isOnline: boolean,
-): LiveSyncStatus {
-  if (!isOnline) {
-    return "offline";
-  }
-  if (realtimeStatus === "SUBSCRIBED") {
-    return "subscribed";
-  }
-  if (realtimeStatus === "CLOSED") {
-    return "offline";
-  }
-  return "syncing";
-}
-
 export function getNotificationTypeLabel(
   type?: NotificationType,
 ): string | null {
@@ -44,7 +28,7 @@ export function getNotificationTypeLabel(
     case "REMINDER_NUDGE":
       return "Reminder";
     case "LEASE_ARCHIVE_PROMPT":
-      return "Lease archive";
+      return "Cycle summary";
     default:
       return null;
   }

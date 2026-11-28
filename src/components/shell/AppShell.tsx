@@ -5,7 +5,6 @@ import { ActiveGroupProvider } from "./ActiveGroupContext";
 import { MobileDrawer, Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import type {
-  LiveSyncStatus,
   ShellGroupSummary,
   ShellNotificationItem,
   ShellUserSummary,
@@ -16,7 +15,6 @@ export interface AppShellProps {
   user?: ShellUserSummary | null;
   initialGroupId?: string;
   initialCycle?: string;
-  liveSyncStatus?: LiveSyncStatus;
   initialNotifications?: ShellNotificationItem[];
   onAddExpense?: () => void;
   children: React.ReactNode;
@@ -27,7 +25,6 @@ export function AppShell({
   user = null,
   initialGroupId,
   initialCycle,
-  liveSyncStatus,
   initialNotifications,
   onAddExpense,
   children,
@@ -40,11 +37,10 @@ export function AppShell({
       user={user}
       initialGroupId={initialGroupId}
       initialCycle={initialCycle}
-      liveSyncStatus={liveSyncStatus}
       initialNotifications={initialNotifications}
       onAddExpense={onAddExpense}
     >
-      <div className="flex min-h-screen w-full overflow-x-clip bg-canvas-parchment text-ink">
+      <div className="flex min-h-screen w-full overflow-x-clip bg-surface text-on-surface">
         <Sidebar />
         <MobileDrawer returnFocusRef={mobileMenuButtonRef} />
 

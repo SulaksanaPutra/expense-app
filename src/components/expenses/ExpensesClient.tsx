@@ -60,7 +60,6 @@ import type {
   ToastItem,
 } from "@/components/ui";
 import {
-  LiveSyncPill,
   REALTIME_LEDGER_CHANGE_EVENT,
   useActiveGroup,
 } from "@/components/shell";
@@ -1482,7 +1481,6 @@ export function ExpensesClient({
             <h1 className="font-display text-2xl font-semibold tracking-tight text-ink sm:text-3xl">
               Expenses Ledger
             </h1>
-            <LiveSyncPill />
             <Badge tone={isCycleClosed ? "warning" : "info"} size="sm">
               {isCycleClosed ? "Closed Period" : "Open Cycle"}
             </Badge>
