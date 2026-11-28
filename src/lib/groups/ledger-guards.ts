@@ -4,25 +4,16 @@ import {
   getBillingCycleDateRange,
   getCycleSlugForDate,
 } from "@/lib/expenses/ledger";
-import {
-  computeInitialNextRunDate,
-  isValidIsoDateString,
-} from "@/lib/expenses/recurring";
-import {
-  convertForeignAmountToBaseMinorUnits,
-  validateSplitBreakdown,
-} from "@/lib/expenses/split-engine";
-import { formatMinorUnits, isValidCurrencyCode } from "@/lib/money";
+import { validateSplitBreakdown } from "@/lib/expenses/split-engine";
+import { formatMinorUnits } from "@/lib/money";
 import type {
   Database,
-  ExchangeRateSource,
   ExpenseSplitMethod,
   GroupStatus,
   Json,
   MemberRole,
   MemberStatus,
   PaymentRail,
-  RecurringFrequency,
   SplitBreakdownItem,
   SplitMode,
 } from "@/types/database";
@@ -35,10 +26,7 @@ export type LedgerWriteOperation =
   | "EXPENSE_UPDATE"
   | "EXPENSE_DELETE"
   | "SETTLEMENT_CREATE"
-  | "BILLING_CYCLE_CLOSE"
-  | "RECURRING_RULE_CREATE"
-  | "RECURRING_RULE_UPDATE"
-  | "RECURRING_RULE_DELETE";
+  | "BILLING_CYCLE_CLOSE";
 
 export type LedgerWriteGuardResult =
   | {
@@ -152,19 +140,6 @@ export async function assertGroupWritableForLedger(
     }
   }
 
-  if (
-    (operation === "RECURRING_RULE_CREATE" ||
-      operation === "RECURRING_RULE_UPDATE" ||
-      operation === "RECURRING_RULE_DELETE") &&
-    member.status !== "ACTIVE"
-  ) {
-    return {
-      ok: false,
-      status: 403,
-      code: "FORBIDDEN",
-      message: "Only active group members can manage recurring rules.",
-    };
-  }
 
   return {
     ok: true,
@@ -189,10 +164,6 @@ interface NormalizedExpenseInput {
   category: string;
   expenseDateIso: string;
   amountCents: number;
-  originalAmountCents: number | null;
-  originalCurrency: string | null;
-  exchangeRate: number | null;
-  exchangeRateSource: ExchangeRateSource | null;
   splitMethod: ExpenseSplitMethod;
   splitBreakdown: SplitBreakdownItem[];
   receiptUrl: string | null;
@@ -213,10 +184,6 @@ async function validateAndNormalizeExpensePayload(
     expenseDate?: string;
     splitMethod?: ExpenseSplitMethod;
     splitBreakdown?: SplitBreakdownItem[];
-    originalAmountCents?: number | null;
-    originalCurrency?: string | null;
-    exchangeRate?: number | null;
-    exchangeRateSource?: ExchangeRateSource | null;
     receiptUrl?: string | null;
     allowNegative?: boolean;
   },
@@ -272,103 +239,6 @@ async function validateAndNormalizeExpensePayload(
       code: "INVALID_SPLIT_METHOD",
       message: "Split method must be EQUAL, PERCENTAGE, or EXACT.",
     };
-  }
-
-  const hasAnyFxField =
-    params.originalAmountCents != null ||
-    (params.originalCurrency != null && params.originalCurrency.trim() !== "") ||
-    params.exchangeRate != null ||
-    params.exchangeRateSource != null;
-
-  let originalAmountCents: number | null = null;
-  let originalCurrency: string | null = null;
-  let exchangeRate: number | null = null;
-  let exchangeRateSource: ExchangeRateSource | null = null;
-
-  if (hasAnyFxField) {
-    const rawOrigCur =
-      typeof params.originalCurrency === "string"
-        ? params.originalCurrency.trim().toUpperCase()
-        : "";
-    if (rawOrigCur && rawOrigCur === guard.group.base_currency) {
-      if (
-        params.originalAmountCents != null &&
-        params.originalAmountCents !== amountCents
-      ) {
-        return {
-          ok: false,
-          status: 400,
-          code: "FX_CONVERSION_MISMATCH",
-          message: `Expense amount_cents (${amountCents}) must match original_amount_cents (${params.originalAmountCents}) when currency equals ${guard.group.base_currency}.`,
-        };
-      }
-      originalAmountCents = null;
-      originalCurrency = null;
-      exchangeRate = null;
-      exchangeRateSource = null;
-    } else {
-      if (
-        !isValidCurrencyCode(rawOrigCur) ||
-        typeof params.originalAmountCents !== "number" ||
-        !Number.isSafeInteger(params.originalAmountCents) ||
-        params.originalAmountCents <= 0 ||
-        typeof params.exchangeRate !== "number" ||
-        !Number.isFinite(params.exchangeRate) ||
-        params.exchangeRate <= 0 ||
-        params.exchangeRate >= 1_000_000 ||
-        (params.exchangeRateSource !== "API" &&
-          params.exchangeRateSource !== "MANUAL_OVERRIDE")
-      ) {
-        return {
-          ok: false,
-          status: 400,
-          code: "INVALID_FX_AUDIT",
-          message:
-            "Foreign-currency expenses require original_amount_cents, original_currency, positive exchange_rate (< 1,000,000), and exchange_rate_source.",
-        };
-      }
-
-      const normalizedRate = Number(params.exchangeRate.toFixed(6));
-      if (!Number.isFinite(normalizedRate) || normalizedRate <= 0) {
-        return {
-          ok: false,
-          status: 400,
-          code: "INVALID_FX_AUDIT",
-          message: "Exchange rate must remain positive at 6 decimal places.",
-        };
-      }
-
-      const expectedAmountCents = convertForeignAmountToBaseMinorUnits({
-        originalAmountCents: params.originalAmountCents,
-        originalCurrency: rawOrigCur,
-        exchangeRate: normalizedRate,
-        baseCurrency: guard.group.base_currency,
-      });
-
-      if (expectedAmountCents === null) {
-        return {
-          ok: false,
-          status: 400,
-          code: "INVALID_FX_AUDIT",
-          message:
-            "Unable to convert original_amount_cents to group base_currency with the supplied exchange_rate.",
-        };
-      }
-
-      if (expectedAmountCents !== amountCents) {
-        return {
-          ok: false,
-          status: 400,
-          code: "FX_CONVERSION_MISMATCH",
-          message: `Converted amount_cents (${amountCents}) does not match ${params.originalAmountCents} ${rawOrigCur} at rate ${normalizedRate} (${expectedAmountCents} ${guard.group.base_currency}).`,
-        };
-      }
-
-      originalAmountCents = params.originalAmountCents;
-      originalCurrency = rawOrigCur;
-      exchangeRate = normalizedRate;
-      exchangeRateSource = params.exchangeRateSource;
-    }
   }
 
   const paidBy = params.paidBy ?? params.defaultPaidBy;
@@ -483,10 +353,6 @@ async function validateAndNormalizeExpensePayload(
       category: params.category.trim() || "General",
       expenseDateIso,
       amountCents,
-      originalAmountCents,
-      originalCurrency,
-      exchangeRate,
-      exchangeRateSource,
       splitMethod,
       splitBreakdown,
       receiptUrl,
@@ -506,10 +372,6 @@ export async function createGroupExpense(
     expenseDate?: string;
     splitMethod?: ExpenseSplitMethod;
     splitBreakdown?: SplitBreakdownItem[];
-    originalAmountCents?: number | null;
-    originalCurrency?: string | null;
-    exchangeRate?: number | null;
-    exchangeRateSource?: ExchangeRateSource | null;
     receiptUrl?: string | null;
     adjustmentForExpenseId?: string | null;
   },
@@ -599,10 +461,6 @@ export async function createGroupExpense(
     expenseDate: params.expenseDate,
     splitMethod: params.splitMethod,
     splitBreakdown: params.splitBreakdown,
-    originalAmountCents: params.originalAmountCents,
-    originalCurrency: params.originalCurrency,
-    exchangeRate: params.exchangeRate,
-    exchangeRateSource: params.exchangeRateSource,
     receiptUrl: params.receiptUrl,
     allowNegative: Boolean(adjustmentForExpenseId),
   });
@@ -621,10 +479,6 @@ export async function createGroupExpense(
       expense_date: normalized.expenseDateIso,
       amount_cents: normalized.amountCents,
       currency: guard.group.base_currency,
-      original_amount_cents: normalized.originalAmountCents,
-      original_currency: normalized.originalCurrency,
-      exchange_rate: normalized.exchangeRate,
-      exchange_rate_source: normalized.exchangeRateSource,
       split_method: normalized.splitMethod,
       split_breakdown: normalized.splitBreakdown,
       receipt_url: normalized.receiptUrl,
@@ -809,10 +663,6 @@ function buildExpenseRevisionSnapshot(
     paid_by: string;
     amount_cents: number;
     currency: string;
-    original_amount_cents: number | null;
-    original_currency: string | null;
-    exchange_rate: number | null;
-    exchange_rate_source: ExchangeRateSource | null;
     split_method: ExpenseSplitMethod;
     split_breakdown: SplitBreakdownItem[];
     receipt_url: string | null;
@@ -838,14 +688,6 @@ function buildExpenseRevisionSnapshot(
     paid_by: row.paid_by,
     amount_cents: Number(row.amount_cents),
     currency: row.currency,
-    original_amount_cents:
-      row.original_amount_cents !== null
-        ? Number(row.original_amount_cents)
-        : null,
-    original_currency: row.original_currency,
-    exchange_rate:
-      row.exchange_rate !== null ? Number(row.exchange_rate) : null,
-    exchange_rate_source: row.exchange_rate_source,
     split_method: row.split_method,
     split_breakdown: row.split_breakdown.map((b) => ({
       user_id: b.user_id,
@@ -1170,10 +1012,6 @@ export async function updateGroupExpense(
     expenseDate?: string;
     splitMethod?: ExpenseSplitMethod;
     splitBreakdown?: SplitBreakdownItem[];
-    originalAmountCents?: number | null;
-    originalCurrency?: string | null;
-    exchangeRate?: number | null;
-    exchangeRateSource?: ExchangeRateSource | null;
     receiptUrl?: string | null;
   },
 ): Promise<
@@ -1207,10 +1045,6 @@ export async function updateGroupExpense(
     expenseDate: params.expenseDate,
     splitMethod: params.splitMethod ?? existing.split_method,
     splitBreakdown: params.splitBreakdown,
-    originalAmountCents: params.originalAmountCents,
-    originalCurrency: params.originalCurrency,
-    exchangeRate: params.exchangeRate,
-    exchangeRateSource: params.exchangeRateSource,
     receiptUrl: params.receiptUrl,
   });
   if (!validated.ok) return validated;
@@ -1242,10 +1076,6 @@ export async function updateGroupExpense(
       paid_by: existing.paid_by,
       amount_cents: Number(existing.amount_cents),
       currency: existing.currency,
-      original_amount_cents: existing.original_amount_cents,
-      original_currency: existing.original_currency,
-      exchange_rate: existing.exchange_rate,
-      exchange_rate_source: existing.exchange_rate_source,
       split_method: existing.split_method,
       split_breakdown: oldBreakdown,
       receipt_url: existing.receipt_url,
@@ -1261,10 +1091,6 @@ export async function updateGroupExpense(
       category: normalized.category,
       expense_date: normalized.expenseDateIso,
       amount_cents: normalized.amountCents,
-      original_amount_cents: normalized.originalAmountCents,
-      original_currency: normalized.originalCurrency,
-      exchange_rate: normalized.exchangeRate,
-      exchange_rate_source: normalized.exchangeRateSource,
       split_method: normalized.splitMethod,
       split_breakdown: normalized.splitBreakdown,
       receipt_url: normalized.receiptUrl,
@@ -1295,10 +1121,6 @@ export async function updateGroupExpense(
       paid_by: updated.paid_by,
       amount_cents: Number(updated.amount_cents),
       currency: updated.currency,
-      original_amount_cents: updated.original_amount_cents,
-      original_currency: updated.original_currency,
-      exchange_rate: updated.exchange_rate,
-      exchange_rate_source: updated.exchange_rate_source,
       split_method: updated.split_method,
       split_breakdown: normalized.splitBreakdown,
       receipt_url: updated.receipt_url,
@@ -1783,407 +1605,15 @@ export async function createGroupSettlement(
   return { ok: true, settlement: inserted };
 }
 
-export async function createGroupRecurringRule(
-  supabase: SupabaseClient<Database>,
-  params: {
-    groupId: string;
-    userId: string;
-    paidBy?: string;
-    description: string;
-    category: string;
-    amountCents: number;
-    frequency?: RecurringFrequency;
-    dayOfMonth: number;
-    splitRule?: SplitMode;
-    nextRunDate?: string;
-  },
-): Promise<
-  | {
-      ok: true;
-      rule: Database["public"]["Tables"]["recurring_rules"]["Row"];
-    }
-  | { ok: false; status: number; code: string; message: string }
-> {
-  const guard = await assertGroupWritableForLedger(supabase, {
-    groupId: params.groupId,
-    userId: params.userId,
-    operation: "RECURRING_RULE_CREATE",
-  });
-  if (!guard.ok) return guard;
-
-  const trimmedDescription = params.description.trim();
-  if (!trimmedDescription) {
-    return {
-      ok: false,
-      status: 400,
-      code: "INVALID_DESCRIPTION",
-      message: "Recurring rule description is required.",
-    };
-  }
-  if (trimmedDescription.length > 200) {
-    return {
-      ok: false,
-      status: 400,
-      code: "INVALID_DESCRIPTION",
-      message: "Recurring rule description must be 200 characters or fewer.",
-    };
-  }
-
-  const amountCents = Math.trunc(params.amountCents);
-  if (
-    !Number.isSafeInteger(params.amountCents) ||
-    !Number.isSafeInteger(amountCents) ||
-    amountCents <= 0
-  ) {
-    return {
-      ok: false,
-      status: 400,
-      code: "INVALID_AMOUNT",
-      message: "Recurring rule amount_cents must be a positive integer.",
-    };
-  }
-
-  const frequency = params.frequency ?? "MONTHLY";
-  if (frequency !== "MONTHLY") {
-    return {
-      ok: false,
-      status: 400,
-      code: "INVALID_FREQUENCY",
-      message: "Recurring rule frequency must be MONTHLY.",
-    };
-  }
-
-  const dayOfMonth = Math.trunc(params.dayOfMonth);
-  if (
-    !Number.isInteger(params.dayOfMonth) ||
-    dayOfMonth < 1 ||
-    dayOfMonth > 28
-  ) {
-    return {
-      ok: false,
-      status: 400,
-      code: "INVALID_DAY_OF_MONTH",
-      message: "Recurring rule day_of_month must be an integer between 1 and 28.",
-    };
-  }
-
-  const splitRule = params.splitRule ?? guard.group.default_split_mode;
-  if (splitRule !== "EQUAL" && splitRule !== "CUSTOM_RATIOS") {
-    return {
-      ok: false,
-      status: 400,
-      code: "INVALID_SPLIT_RULE",
-      message: "Recurring rule split_rule must be EQUAL or CUSTOM_RATIOS.",
-    };
-  }
-
-  const nextRunDate = params.nextRunDate?.trim()
-    ? params.nextRunDate.trim()
-    : computeInitialNextRunDate(dayOfMonth);
-  if (!isValidIsoDateString(nextRunDate)) {
-    return {
-      ok: false,
-      status: 400,
-      code: "INVALID_DATE",
-      message: "Recurring rule next_run_date must be a valid YYYY-MM-DD date.",
-    };
-  }
-
-  const paidBy = params.paidBy ?? params.userId;
-  const { data: payerMember } = await supabase
-    .from("group_members")
-    .select("status")
-    .eq("group_id", params.groupId)
-    .eq("user_id", paidBy)
-    .maybeSingle();
-
-  if (!payerMember || payerMember.status !== "ACTIVE") {
-    return {
-      ok: false,
-      status: 400,
-      code: "INVALID_PAYER",
-      message: "Recurring rule payer must be an active group member.",
-    };
-  }
-
-  const { data: inserted, error: insertError } = await supabase
-    .from("recurring_rules")
-    .insert({
-      group_id: params.groupId,
-      created_by: params.userId,
-      paid_by: paidBy,
-      description: trimmedDescription,
-      category: params.category.trim() || "General",
-      amount_cents: amountCents,
-      currency: guard.group.base_currency,
-      frequency,
-      day_of_month: dayOfMonth,
-      split_rule: splitRule,
-      is_active: true,
-      next_run_date: nextRunDate,
-    })
-    .select("*")
-    .maybeSingle();
-
-  if (insertError || !inserted) {
-    return {
-      ok: false,
-      status: 500,
-      code: "SERVER_ERROR",
-      message: insertError?.message || "Failed to create recurring rule.",
-    };
-  }
-
-  return { ok: true, rule: inserted };
-}
-
-export async function updateGroupRecurringRule(
-  supabase: SupabaseClient<Database>,
-  params: {
-    groupId: string;
-    userId: string;
-    ruleId: string;
-    isActive?: boolean;
-    amountCents?: number;
-    description?: string;
-    category?: string;
-    frequency?: RecurringFrequency;
-    dayOfMonth?: number;
-    splitRule?: SplitMode;
-    paidBy?: string;
-    nextRunDate?: string;
-  },
-): Promise<
-  | {
-      ok: true;
-      rule: Database["public"]["Tables"]["recurring_rules"]["Row"];
-    }
-  | { ok: false; status: number; code: string; message: string }
-> {
-  const guard = await assertGroupWritableForLedger(supabase, {
-    groupId: params.groupId,
-    userId: params.userId,
-    operation: "RECURRING_RULE_UPDATE",
-  });
-  if (!guard.ok) return guard;
-
-  const { data: existingRule, error: fetchError } = await supabase
-    .from("recurring_rules")
-    .select("id, group_id, created_by, paid_by")
-    .eq("id", params.ruleId)
-    .eq("group_id", params.groupId)
-    .maybeSingle();
-
-  if (fetchError) {
-    return {
-      ok: false,
-      status: 500,
-      code: "SERVER_ERROR",
-      message: fetchError.message || "Unable to load recurring rule.",
-    };
-  }
-
-  if (!existingRule) {
-    return {
-      ok: false,
-      status: 404,
-      code: "NOT_FOUND",
-      message: "Recurring rule not found.",
-    };
-  }
-
-  const ruleOwnerId = existingRule.created_by ?? existingRule.paid_by;
-  if (guard.member.role !== "ADMIN" && ruleOwnerId !== params.userId) {
-    return {
-      ok: false,
-      status: 403,
-      code: "FORBIDDEN",
-      message: "Only group admins or the rule creator can update this recurring rule.",
-    };
-  }
-
-  const patch: Database["public"]["Tables"]["recurring_rules"]["Update"] = {};
-  if (typeof params.isActive === "boolean") patch.is_active = params.isActive;
-  if (typeof params.amountCents === "number") {
-    const amt = Math.trunc(params.amountCents);
-    if (!Number.isSafeInteger(params.amountCents) || !Number.isSafeInteger(amt) || amt <= 0) {
-      return {
-        ok: false,
-        status: 400,
-        code: "INVALID_AMOUNT",
-        message: "Recurring rule amount_cents must be positive.",
-      };
-    }
-    patch.amount_cents = amt;
-  }
-  if (typeof params.description === "string") {
-    const trimmed = params.description.trim();
-    if (!trimmed || trimmed.length > 200) {
-      return {
-        ok: false,
-        status: 400,
-        code: "INVALID_DESCRIPTION",
-        message: "Recurring rule description must be 1 to 200 characters.",
-      };
-    }
-    patch.description = trimmed;
-  }
-  if (typeof params.category === "string" && params.category.trim()) {
-    patch.category = params.category.trim();
-  }
-  if (params.frequency !== undefined) {
-    if (params.frequency !== "MONTHLY") {
-      return {
-        ok: false,
-        status: 400,
-        code: "INVALID_FREQUENCY",
-        message: "Recurring rule frequency must be MONTHLY.",
-      };
-    }
-    patch.frequency = params.frequency;
-  }
-  if (params.dayOfMonth !== undefined) {
-    const day = Math.trunc(params.dayOfMonth);
-    if (!Number.isInteger(params.dayOfMonth) || day < 1 || day > 28) {
-      return {
-        ok: false,
-        status: 400,
-        code: "INVALID_DAY_OF_MONTH",
-        message: "Recurring rule day_of_month must be between 1 and 28.",
-      };
-    }
-    patch.day_of_month = day;
-  }
-  if (params.splitRule !== undefined) {
-    if (params.splitRule !== "EQUAL" && params.splitRule !== "CUSTOM_RATIOS") {
-      return {
-        ok: false,
-        status: 400,
-        code: "INVALID_SPLIT_RULE",
-        message: "Recurring rule split_rule must be EQUAL or CUSTOM_RATIOS.",
-      };
-    }
-    patch.split_rule = params.splitRule;
-  }
-  if (typeof params.paidBy === "string" && params.paidBy.trim()) {
-    const { data: payerMember } = await supabase
-      .from("group_members")
-      .select("status")
-      .eq("group_id", params.groupId)
-      .eq("user_id", params.paidBy.trim())
-      .maybeSingle();
-    if (!payerMember || payerMember.status !== "ACTIVE") {
-      return {
-        ok: false,
-        status: 400,
-        code: "INVALID_PAYER",
-        message: "Recurring rule payer must be an active group member.",
-      };
-    }
-    patch.paid_by = params.paidBy.trim();
-  }
-  if (typeof params.nextRunDate === "string") {
-    const trimmedDate = params.nextRunDate.trim();
-    if (!isValidIsoDateString(trimmedDate)) {
-      return {
-        ok: false,
-        status: 400,
-        code: "INVALID_DATE",
-        message: "Recurring rule next_run_date must be a valid YYYY-MM-DD date.",
-      };
-    }
-    patch.next_run_date = trimmedDate;
-  }
-
-  const { data: updated, error: updateError } = await supabase
-    .from("recurring_rules")
-    .update(patch)
-    .eq("id", params.ruleId)
-    .eq("group_id", params.groupId)
-    .select("*")
-    .maybeSingle();
-
-  if (updateError || !updated) {
-    return {
-      ok: false,
-      status: updateError ? 500 : 404,
-      code: updateError ? "SERVER_ERROR" : "NOT_FOUND",
-      message: updateError?.message || "Recurring rule not found.",
-    };
-  }
-
-  return { ok: true, rule: updated };
-}
-
-export async function deleteGroupRecurringRule(
-  supabase: SupabaseClient<Database>,
-  params: {
-    groupId: string;
-    userId: string;
-    ruleId: string;
-  },
-): Promise<
-  | { ok: true; ruleId: string }
-  | { ok: false; status: number; code: string; message: string }
-> {
-  const guard = await assertGroupWritableForLedger(supabase, {
-    groupId: params.groupId,
-    userId: params.userId,
-    operation: "RECURRING_RULE_DELETE",
-  });
-  if (!guard.ok) return guard;
-
-  const { data: existingRule, error: fetchError } = await supabase
-    .from("recurring_rules")
-    .select("id, group_id, created_by, paid_by")
-    .eq("id", params.ruleId)
-    .eq("group_id", params.groupId)
-    .maybeSingle();
-
-  if (fetchError) {
-    return {
-      ok: false,
-      status: 500,
-      code: "SERVER_ERROR",
-      message: fetchError.message || "Unable to load recurring rule.",
-    };
-  }
-
-  if (!existingRule) {
-    return {
-      ok: false,
-      status: 404,
-      code: "NOT_FOUND",
-      message: "Recurring rule not found.",
-    };
-  }
-
-  const ruleOwnerId = existingRule.created_by ?? existingRule.paid_by;
-  if (guard.member.role !== "ADMIN" && ruleOwnerId !== params.userId) {
-    return {
-      ok: false,
-      status: 403,
-      code: "FORBIDDEN",
-      message: "Only group admins or the rule creator can delete this recurring rule.",
-    };
-  }
-
-  const { error: deleteError } = await supabase
-    .from("recurring_rules")
-    .delete()
-    .eq("id", params.ruleId)
-    .eq("group_id", params.groupId);
-
-  if (deleteError) {
-    return {
-      ok: false,
-      status: 500,
-      code: "SERVER_ERROR",
-      message: deleteError.message || "Failed to delete recurring rule.",
-    };
-  }
-
-  return { ok: true, ruleId: params.ruleId };
+function isValidIsoDateString(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [y, m, d] = value.split("-").map((v) => Number.parseInt(v, 10));
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return (
+    dt.getUTCFullYear() === y &&
+    dt.getUTCMonth() === m - 1 &&
+    dt.getUTCDate() === d
+  );
 }
 
 export async function closeGroupBillingCycle(

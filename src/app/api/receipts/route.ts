@@ -1,15 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { hasSupabaseEnv } from "@/lib/auth/guards";
-import {
-  RECEIPT_STORAGE_QUOTA_BYTES,
-  checkReceiptStorageQuota,
-} from "@/lib/expenses/split-engine";
 import { assertGroupWritableForLedger } from "@/lib/groups/ledger-guards";
 import { createClient } from "@/lib/supabase/server";
 
 const MAX_SINGLE_RECEIPT_BYTES = 25 * 1024 * 1024; // 25 MB per file
-const QUOTA_FULL_MESSAGE =
-  "Receipt storage full (500 MB). Expense will be logged without receipt.";
 
 const ALLOWED_RECEIPT_MIME_TYPES = new Set([
   "image/jpeg",
@@ -184,6 +178,13 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  if (file.size > MAX_SINGLE_RECEIPT_BYTES) {
+    return NextResponse.json(
+      { error: "Receipt file must be 25 MB or smaller." },
+      { status: 400 },
+    );
+  }
+
   if (groupId) {
     const guard = await assertGroupWritableForLedger(supabase, {
       groupId,
@@ -201,164 +202,6 @@ export async function POST(request: NextRequest) {
   const sanitizedName =
     file.name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-80) || "receipt";
   const storagePath = `${user.id}/${groupId || "general"}/${Date.now()}-${sanitizedName}`;
-  const hasRpc =
-    typeof (supabase as unknown as { rpc?: unknown }).rpc === "function";
-
-  if (hasRpc) {
-    // Check current quota before single-file limit so quota-full users get 413 cleanly.
-    const { data: profile, error: profileError } = await supabase
-      .from("users")
-      .select("receipt_storage_used_bytes")
-      .eq("id", user.id)
-      .maybeSingle();
-
-    if (profileError) {
-      return NextResponse.json(
-        {
-          error:
-            profileError.message || "Unable to verify receipt storage quota.",
-        },
-        { status: 500 },
-      );
-    }
-
-    const usedBytes = Number(profile?.receipt_storage_used_bytes ?? 0);
-    const preCheck = checkReceiptStorageQuota(
-      usedBytes,
-      file.size,
-      RECEIPT_STORAGE_QUOTA_BYTES,
-    );
-
-    if (!preCheck.allowed) {
-      return NextResponse.json(
-        {
-          ok: false,
-          code: "RECEIPT_QUOTA_EXCEEDED",
-          error: QUOTA_FULL_MESSAGE,
-          usedBytes,
-          quotaBytes: RECEIPT_STORAGE_QUOTA_BYTES,
-        },
-        { status: 413 },
-      );
-    }
-
-    if (file.size > MAX_SINGLE_RECEIPT_BYTES) {
-      return NextResponse.json(
-        { error: "Receipt file must be 25 MB or smaller." },
-        { status: 400 },
-      );
-    }
-
-    const { data: reserveRows, error: reserveError } = await supabase.rpc(
-      "reserve_receipt_storage_bytes",
-      {
-        p_file_bytes: file.size,
-        p_quota_bytes: RECEIPT_STORAGE_QUOTA_BYTES,
-      },
-    );
-
-    if (reserveError) {
-      return NextResponse.json(
-        {
-          error:
-            reserveError.message || "Unable to reserve receipt storage quota.",
-        },
-        { status: 500 },
-      );
-    }
-
-    const reserveRow = Array.isArray(reserveRows) ? reserveRows[0] : null;
-    if (!reserveRow?.allowed) {
-      return NextResponse.json(
-        {
-          ok: false,
-          code: "RECEIPT_QUOTA_EXCEEDED",
-          error: QUOTA_FULL_MESSAGE,
-          usedBytes: Number(reserveRow?.used_bytes ?? usedBytes),
-          quotaBytes: RECEIPT_STORAGE_QUOTA_BYTES,
-        },
-        { status: 413 },
-      );
-    }
-
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const { error: uploadError } = await supabase.storage
-      .from("receipts")
-      .upload(storagePath, buffer, {
-        contentType: file.type || "application/octet-stream",
-        upsert: false,
-      });
-
-    if (uploadError) {
-      await supabase.rpc("release_receipt_storage_bytes", {
-        p_file_bytes: file.size,
-      });
-
-      return NextResponse.json(
-        {
-          ok: false,
-          code: "RECEIPT_UPLOAD_UNAVAILABLE",
-          error:
-            "Receipt file storage is unavailable right now. Expense will be logged without receipt.",
-        },
-        { status: 503 },
-      );
-    }
-
-    return NextResponse.json(
-      {
-        ok: true,
-        receiptUrl: `receipts://${storagePath}`,
-        sizeBytes: file.size,
-        usedBytes: Number(reserveRow.used_bytes),
-      },
-      { status: 201 },
-    );
-  }
-
-  // Fallback path for mocked Supabase clients without .rpc()
-  const { data: profile, error: profileError } = await supabase
-    .from("users")
-    .select("receipt_storage_used_bytes")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  if (profileError) {
-    return NextResponse.json(
-      {
-        error:
-          profileError.message || "Unable to verify receipt storage quota.",
-      },
-      { status: 500 },
-    );
-  }
-
-  const usedBytes = Number(profile?.receipt_storage_used_bytes ?? 0);
-  const quotaCheck = checkReceiptStorageQuota(
-    usedBytes,
-    file.size,
-    RECEIPT_STORAGE_QUOTA_BYTES,
-  );
-
-  if (!quotaCheck.allowed) {
-    return NextResponse.json(
-      {
-        ok: false,
-        code: "RECEIPT_QUOTA_EXCEEDED",
-        error: QUOTA_FULL_MESSAGE,
-        usedBytes,
-        quotaBytes: RECEIPT_STORAGE_QUOTA_BYTES,
-      },
-      { status: 413 },
-    );
-  }
-
-  if (file.size > MAX_SINGLE_RECEIPT_BYTES) {
-    return NextResponse.json(
-      { error: "Receipt file must be 25 MB or smaller." },
-      { status: 400 },
-    );
-  }
 
   const buffer = Buffer.from(await file.arrayBuffer());
   const { error: uploadError } = await supabase.storage
@@ -380,25 +223,11 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { error: updateError } = await supabase
-    .from("users")
-    .update({ receipt_storage_used_bytes: quotaCheck.projectedBytes })
-    .eq("id", user.id);
-
-  if (updateError) {
-    await supabase.storage.from("receipts").remove([storagePath]);
-    return NextResponse.json(
-      { error: updateError.message || "Unable to update receipt storage quota." },
-      { status: 500 },
-    );
-  }
-
   return NextResponse.json(
     {
       ok: true,
       receiptUrl: `receipts://${storagePath}`,
       sizeBytes: file.size,
-      usedBytes: quotaCheck.projectedBytes,
     },
     { status: 201 },
   );

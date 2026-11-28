@@ -54,7 +54,7 @@ export async function getExpensesPageData(
         supabase
           .from("groups")
           .select(
-            "id, name, slug, status, base_currency, default_split_mode, simplify_debts, operational_budget_cents, billing_cycle_anchor_day, created_at",
+            "id, name, slug, status, base_currency, default_split_mode, operational_budget_cents, billing_cycle_anchor_day, created_at",
           )
           .neq("status", "ARCHIVED")
           .order("created_at", { ascending: true }),
@@ -91,7 +91,6 @@ export async function getExpensesPageData(
       { data: expenseRows, error: expensesError },
       { data: settlementRows, error: settlementsError },
       { data: billingCycleRows, error: billingCyclesError },
-      { data: recurringRows, error: recurringError },
       reminderCooldowns,
     ] = await Promise.all([
       supabase
@@ -102,7 +101,7 @@ export async function getExpensesPageData(
       supabase
         .from("expenses")
         .select(
-          "id, group_id, created_by, paid_by, description, category, expense_date, amount_cents, currency, original_amount_cents, original_currency, exchange_rate, exchange_rate_source, split_method, split_breakdown, receipt_url, is_recurring_generated, recurring_rule_id, adjustment_for_expense_id, is_locked",
+          "id, group_id, created_by, paid_by, description, category, expense_date, amount_cents, currency, split_method, split_breakdown, receipt_url, adjustment_for_expense_id, is_locked",
         )
         .in("group_id", groupIds)
         .is("deleted_at", null)
@@ -118,13 +117,6 @@ export async function getExpensesPageData(
         .from("billing_cycles")
         .select("id, group_id, period_start, period_end, status")
         .in("group_id", groupIds),
-      supabase
-        .from("recurring_rules")
-        .select(
-          "id, group_id, created_by, paid_by, description, category, amount_cents, currency, frequency, day_of_month, split_rule, is_active, next_run_date",
-        )
-        .in("group_id", groupIds)
-        .order("day_of_month", { ascending: true }),
       getActiveReminderCooldowns(supabase, currentUserId, groupIds),
     ]);
 
@@ -132,15 +124,13 @@ export async function getExpensesPageData(
       membersError ||
       expensesError ||
       settlementsError ||
-      billingCyclesError ||
-      recurringError
+      billingCyclesError
     ) {
       const firstErr =
         membersError ||
         expensesError ||
         settlementsError ||
-        billingCyclesError ||
-        recurringError;
+        billingCyclesError;
       return {
         ...empty,
         userBaseCurrency,
@@ -153,7 +143,6 @@ export async function getExpensesPageData(
       new Set([
         ...(memberRows ?? []).map((m) => m.user_id),
         ...(expenseRows ?? []).map((e) => e.paid_by),
-        ...(recurringRows ?? []).map((r) => r.paid_by),
       ]),
     );
 
@@ -162,15 +151,29 @@ export async function getExpensesPageData(
       { id: string; full_name: string; instant_settlement_tag: string | null }
     >();
     if (userIds.length > 0) {
-      const { data: userRows } = await supabase
-        .from("users")
-        .select("id, full_name, instant_settlement_tag")
-        .in("id", userIds);
+      const [{ data: userRows }, handleResult] = await Promise.all([
+        supabase.from("users").select("id, full_name").in("id", userIds),
+        Promise.resolve()
+          .then(() =>
+            supabase
+              .from("settlement_handles")
+              .select("user_id, handle, is_default")
+              .in("user_id", userIds),
+          )
+          .catch(() => ({ data: [] as Array<{ user_id: string; handle: string; is_default: boolean }> })),
+      ]);
+      const handleRows = handleResult?.data ?? [];
+      const defaultHandleByUser = new Map<string, string>();
+      for (const h of handleRows ?? []) {
+        if (h.is_default || !defaultHandleByUser.has(h.user_id)) {
+          defaultHandleByUser.set(h.user_id, h.handle);
+        }
+      }
       for (const u of userRows ?? []) {
         usersById.set(u.id, {
           id: u.id,
           full_name: u.full_name || "Member",
-          instant_settlement_tag: u.instant_settlement_tag ?? null,
+          instant_settlement_tag: defaultHandleByUser.get(u.id) ?? null,
         });
       }
     }
@@ -192,7 +195,7 @@ export async function getExpensesPageData(
         status: g.status,
         baseCurrency: g.base_currency,
         defaultSplitMode: g.default_split_mode,
-        simplifyDebts: g.simplify_debts,
+        simplifyDebts: true,
         operationalBudgetCents:
           g.operational_budget_cents !== null &&
           g.operational_budget_cents !== undefined
@@ -270,22 +273,15 @@ export async function getExpensesPageData(
         expenseDate: row.expense_date,
         amountCents: Number(row.amount_cents),
         currency: row.currency,
-        originalAmountCents:
-          row.original_amount_cents !== null &&
-          row.original_amount_cents !== undefined
-            ? Number(row.original_amount_cents)
-            : null,
-        originalCurrency: row.original_currency ?? null,
-        exchangeRate:
-          row.exchange_rate !== null && row.exchange_rate !== undefined
-            ? Number(row.exchange_rate)
-            : null,
-        exchangeRateSource: row.exchange_rate_source ?? null,
+        originalAmountCents: null,
+        originalCurrency: null,
+        exchangeRate: null,
+        exchangeRateSource: null,
         splitMethod: row.split_method,
         splitBreakdown: breakdown,
         receiptUrl: row.receipt_url ?? null,
-        isRecurringGenerated: Boolean(row.is_recurring_generated),
-        recurringRuleId: row.recurring_rule_id ?? null,
+        isRecurringGenerated: false,
+        recurringRuleId: null,
         adjustmentForExpenseId: row.adjustment_for_expense_id ?? null,
         isLocked: lockEval.isLocked,
         isCycleClosed: lockEval.isCycleClosed,
@@ -294,25 +290,7 @@ export async function getExpensesPageData(
       };
     });
 
-    const recurringRules: RecurringRuleRecord[] = (recurringRows ?? []).map(
-      (r) => ({
-        id: r.id,
-        groupId: r.group_id,
-        groupName: groupMap.get(r.group_id)?.name ?? "Split Group",
-        createdBy: r.created_by ?? null,
-        paidBy: r.paid_by,
-        payerName: usersById.get(r.paid_by)?.full_name ?? "Member",
-        description: r.description,
-        category: r.category,
-        amountCents: Number(r.amount_cents),
-        currency: r.currency,
-        frequency: r.frequency,
-        dayOfMonth: r.day_of_month,
-        splitRule: r.split_rule,
-        isActive: Boolean(r.is_active),
-        nextRunDate: r.next_run_date,
-      }),
-    );
+    const recurringRules: RecurringRuleRecord[] = [];
 
     return {
       currentUserId,

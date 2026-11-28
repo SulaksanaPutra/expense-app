@@ -1,13 +1,27 @@
 export type GroupType = "RESIDENTIAL" | "TRIP" | "RECURRING";
+export type GroupCategory = "HOME" | "TRIP" | "DINING" | "UTILITIES" | "OTHER";
 export type GroupStatus = "ACTIVE" | "NEEDS_RATIO_UPDATE" | "ARCHIVED";
-export type SplitMode = "EQUAL" | "CUSTOM_RATIOS";
+export type SplitMode =
+  | "EQUAL"
+  | "PERCENTAGE"
+  | "SHARES"
+  | "CUSTOM"
+  | "CUSTOM_RATIOS";
 export type MemberRole = "ADMIN" | "MEMBER";
 export type MemberStatus = "ACTIVE" | "FORMER_MEMBER";
-export type ExpenseSplitMethod = "EQUAL" | "PERCENTAGE" | "EXACT";
-export type ExchangeRateSource = "API" | "MANUAL_OVERRIDE";
-export type PaymentRail = "VENMO" | "APPLE_CARD" | "CASH" | "OTHER";
+export type ExpenseSplitMethod = "EQUAL" | "PERCENTAGE" | "EXACT" | "SHARES";
+export type SettlementHandleProvider = "VENMO" | "ZELLE" | "CASH_APP";
+export type GroupInviteStatus = "PENDING" | "ACCEPTED" | "EXPIRED" | "REVOKED";
+export type PaymentRail =
+  | "VENMO"
+  | "ZELLE"
+  | "CASH_APP"
+  | "CASH"
+  | "BANK_SETTLEMENT"
+  | "AUTO_SETTLED"
+  | "APPLE_CARD"
+  | "OTHER";
 export type BillingCycleStatus = "OPEN" | "CLOSED";
-export type RecurringFrequency = "MONTHLY";
 export type ReminderChannel = "PUSH" | "EMAIL" | "SMS";
 export type NotificationType =
   | "EXPENSE_REVISION"
@@ -55,6 +69,7 @@ export interface SplitBreakdownItem {
   user_id: string;
   share_cents: number;
   percentage?: number;
+  shares?: number;
 }
 
 export type Json =
@@ -75,10 +90,11 @@ export interface Database {
           email: string;
           phone_number: string | null;
           phone_verified: boolean;
-          instant_settlement_tag: string | null;
+          timezone: string;
           base_currency: string;
+          display_currency: string;
           personal_share_cap_cents: number | null;
-          receipt_storage_used_bytes: number;
+          auto_include_in_expenses: boolean;
           notification_prefs: NotificationPrefs;
           created_at: string;
           updated_at: string;
@@ -89,10 +105,11 @@ export interface Database {
           email: string;
           phone_number?: string | null;
           phone_verified?: boolean;
-          instant_settlement_tag?: string | null;
+          timezone?: string;
           base_currency?: string;
+          display_currency?: string;
           personal_share_cap_cents?: number | null;
-          receipt_storage_used_bytes?: number;
+          auto_include_in_expenses?: boolean;
           notification_prefs?: NotificationPrefs;
           created_at?: string;
           updated_at?: string;
@@ -103,15 +120,57 @@ export interface Database {
           email?: string;
           phone_number?: string | null;
           phone_verified?: boolean;
-          instant_settlement_tag?: string | null;
+          timezone?: string;
           base_currency?: string;
+          display_currency?: string;
           personal_share_cap_cents?: number | null;
-          receipt_storage_used_bytes?: number;
+          auto_include_in_expenses?: boolean;
           notification_prefs?: NotificationPrefs;
           created_at?: string;
           updated_at?: string;
         };
         Relationships: [];
+      };
+      settlement_handles: {
+        Row: {
+          id: string;
+          user_id: string;
+          provider: SettlementHandleProvider;
+          handle: string;
+          display_note: string | null;
+          is_default: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          provider: SettlementHandleProvider;
+          handle: string;
+          display_note?: string | null;
+          is_default?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          provider?: SettlementHandleProvider;
+          handle?: string;
+          display_note?: string | null;
+          is_default?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "settlement_handles_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       groups: {
         Row: {
@@ -119,13 +178,17 @@ export interface Database {
           name: string;
           slug: string;
           group_type: GroupType;
+          category: GroupCategory;
           status: GroupStatus;
           base_currency: string;
           default_split_mode: SplitMode;
-          simplify_debts: boolean;
           operational_budget_cents: number | null;
           billing_cycle_anchor_day: number;
-          lease_end_date: string | null;
+          cycle_reset_day: number;
+          auto_settle_on_reset: boolean;
+          allow_any_member_add_expense: boolean;
+          require_receipt_over_100: boolean;
+          send_cycle_close_reminders: boolean;
           trip_auto_archive_enabled: boolean;
           trip_auto_archive_days: number;
           residential_lease_prompt_enabled: boolean;
@@ -144,13 +207,17 @@ export interface Database {
           name: string;
           slug: string;
           group_type: GroupType;
+          category?: GroupCategory;
           status?: GroupStatus;
           base_currency?: string;
           default_split_mode?: SplitMode;
-          simplify_debts?: boolean;
           operational_budget_cents?: number | null;
           billing_cycle_anchor_day?: number;
-          lease_end_date?: string | null;
+          cycle_reset_day?: number;
+          auto_settle_on_reset?: boolean;
+          allow_any_member_add_expense?: boolean;
+          require_receipt_over_100?: boolean;
+          send_cycle_close_reminders?: boolean;
           trip_auto_archive_enabled?: boolean;
           trip_auto_archive_days?: number;
           residential_lease_prompt_enabled?: boolean;
@@ -169,13 +236,17 @@ export interface Database {
           name?: string;
           slug?: string;
           group_type?: GroupType;
+          category?: GroupCategory;
           status?: GroupStatus;
           base_currency?: string;
           default_split_mode?: SplitMode;
-          simplify_debts?: boolean;
           operational_budget_cents?: number | null;
           billing_cycle_anchor_day?: number;
-          lease_end_date?: string | null;
+          cycle_reset_day?: number;
+          auto_settle_on_reset?: boolean;
+          allow_any_member_add_expense?: boolean;
+          require_receipt_over_100?: boolean;
+          send_cycle_close_reminders?: boolean;
           trip_auto_archive_enabled?: boolean;
           trip_auto_archive_days?: number;
           residential_lease_prompt_enabled?: boolean;
@@ -206,6 +277,7 @@ export interface Database {
           role: MemberRole;
           status: MemberStatus;
           share_percentage: number;
+          share_units: number;
           joined_at: string;
         };
         Insert: {
@@ -214,6 +286,7 @@ export interface Database {
           role?: MemberRole;
           status?: MemberStatus;
           share_percentage?: number;
+          share_units?: number;
           joined_at?: string;
         };
         Update: {
@@ -222,6 +295,7 @@ export interface Database {
           role?: MemberRole;
           status?: MemberStatus;
           share_percentage?: number;
+          share_units?: number;
           joined_at?: string;
         };
         Relationships: [
@@ -235,6 +309,54 @@ export interface Database {
           {
             foreignKeyName: "group_members_user_id_fkey";
             columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      group_invites: {
+        Row: {
+          id: string;
+          group_id: string;
+          invited_email: string;
+          invited_by: string;
+          token: string;
+          status: GroupInviteStatus;
+          expires_at: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          group_id: string;
+          invited_email: string;
+          invited_by: string;
+          token: string;
+          status?: GroupInviteStatus;
+          expires_at?: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          group_id?: string;
+          invited_email?: string;
+          invited_by?: string;
+          token?: string;
+          status?: GroupInviteStatus;
+          expires_at?: string;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "group_invites_group_id_fkey";
+            columns: ["group_id"];
+            isOneToOne: false;
+            referencedRelation: "groups";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "group_invites_invited_by_fkey";
+            columns: ["invited_by"];
             isOneToOne: false;
             referencedRelation: "users";
             referencedColumns: ["id"];
@@ -289,75 +411,6 @@ export interface Database {
           },
         ];
       };
-      recurring_rules: {
-        Row: {
-          id: string;
-          group_id: string;
-          created_by?: string | null;
-          paid_by: string;
-          description: string;
-          category: string;
-          amount_cents: number;
-          currency: string;
-          frequency: RecurringFrequency;
-          day_of_month: number;
-          split_rule: SplitMode;
-          is_active: boolean;
-          next_run_date: string;
-          created_at: string;
-          updated_at: string;
-        };
-        Insert: {
-          id?: string;
-          group_id: string;
-          created_by?: string | null;
-          paid_by: string;
-          description: string;
-          category: string;
-          amount_cents: number;
-          currency: string;
-          frequency?: RecurringFrequency;
-          day_of_month: number;
-          split_rule?: SplitMode;
-          is_active?: boolean;
-          next_run_date: string;
-          created_at?: string;
-          updated_at?: string;
-        };
-        Update: {
-          id?: string;
-          group_id?: string;
-          created_by?: string | null;
-          paid_by?: string;
-          description?: string;
-          category?: string;
-          amount_cents?: number;
-          currency?: string;
-          frequency?: RecurringFrequency;
-          day_of_month?: number;
-          split_rule?: SplitMode;
-          is_active?: boolean;
-          next_run_date?: string;
-          created_at?: string;
-          updated_at?: string;
-        };
-        Relationships: [
-          {
-            foreignKeyName: "recurring_rules_group_id_fkey";
-            columns: ["group_id"];
-            isOneToOne: false;
-            referencedRelation: "groups";
-            referencedColumns: ["id"];
-          },
-          {
-            foreignKeyName: "recurring_rules_paid_by_fkey";
-            columns: ["paid_by"];
-            isOneToOne: false;
-            referencedRelation: "users";
-            referencedColumns: ["id"];
-          },
-        ];
-      };
       expenses: {
         Row: {
           id: string;
@@ -369,16 +422,9 @@ export interface Database {
           expense_date: string;
           amount_cents: number;
           currency: string;
-          original_amount_cents: number | null;
-          original_currency: string | null;
-          exchange_rate: number | null;
-          exchange_rate_source: ExchangeRateSource | null;
           split_method: ExpenseSplitMethod;
           split_breakdown: SplitBreakdownItem[];
           receipt_url: string | null;
-          is_recurring_generated: boolean;
-          recurring_rule_id: string | null;
-          recurring_occurrence_date?: string | null;
           adjustment_for_expense_id: string | null;
           is_locked: boolean;
           deleted_at: string | null;
@@ -395,16 +441,9 @@ export interface Database {
           expense_date?: string;
           amount_cents: number;
           currency: string;
-          original_amount_cents?: number | null;
-          original_currency?: string | null;
-          exchange_rate?: number | null;
-          exchange_rate_source?: ExchangeRateSource | null;
           split_method: ExpenseSplitMethod;
           split_breakdown: SplitBreakdownItem[];
           receipt_url?: string | null;
-          is_recurring_generated?: boolean;
-          recurring_rule_id?: string | null;
-          recurring_occurrence_date?: string | null;
           adjustment_for_expense_id?: string | null;
           is_locked?: boolean;
           deleted_at?: string | null;
@@ -421,16 +460,9 @@ export interface Database {
           expense_date?: string;
           amount_cents?: number;
           currency?: string;
-          original_amount_cents?: number | null;
-          original_currency?: string | null;
-          exchange_rate?: number | null;
-          exchange_rate_source?: ExchangeRateSource | null;
           split_method?: ExpenseSplitMethod;
           split_breakdown?: SplitBreakdownItem[];
           receipt_url?: string | null;
-          is_recurring_generated?: boolean;
-          recurring_rule_id?: string | null;
-          recurring_occurrence_date?: string | null;
           adjustment_for_expense_id?: string | null;
           is_locked?: boolean;
           deleted_at?: string | null;
@@ -457,13 +489,6 @@ export interface Database {
             columns: ["paid_by"];
             isOneToOne: false;
             referencedRelation: "users";
-            referencedColumns: ["id"];
-          },
-          {
-            foreignKeyName: "expenses_recurring_rule_id_fkey";
-            columns: ["recurring_rule_id"];
-            isOneToOne: false;
-            referencedRelation: "recurring_rules";
             referencedColumns: ["id"];
           },
           {
@@ -526,6 +551,7 @@ export interface Database {
           amount_cents: number;
           currency: string;
           payment_rail: PaymentRail;
+          settlement_handle_id: string | null;
           settled_at: string;
         };
         Insert: {
@@ -536,6 +562,7 @@ export interface Database {
           amount_cents: number;
           currency: string;
           payment_rail: PaymentRail;
+          settlement_handle_id?: string | null;
           settled_at?: string;
         };
         Update: {
@@ -546,6 +573,7 @@ export interface Database {
           amount_cents?: number;
           currency?: string;
           payment_rail?: PaymentRail;
+          settlement_handle_id?: string | null;
           settled_at?: string;
         };
         Relationships: [
@@ -568,6 +596,13 @@ export interface Database {
             columns: ["recipient_id"];
             isOneToOne: false;
             referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "settlements_settlement_handle_id_fkey";
+            columns: ["settlement_handle_id"];
+            isOneToOne: false;
+            referencedRelation: "settlement_handles";
             referencedColumns: ["id"];
           },
         ];
@@ -779,18 +814,6 @@ export interface Database {
       user_has_unsettled_group_balance: {
         Args: { p_user_id?: string };
         Returns: boolean;
-      };
-      reserve_receipt_storage_bytes: {
-        Args: { p_file_bytes: number; p_quota_bytes?: number };
-        Returns: Array<{ allowed: boolean; used_bytes: number }>;
-      };
-      release_receipt_storage_bytes: {
-        Args: { p_file_bytes: number };
-        Returns: number;
-      };
-      materialize_due_recurring_rules: {
-        Args: { p_run_date?: string };
-        Returns: number;
       };
     };
     Enums: Record<string, never>;

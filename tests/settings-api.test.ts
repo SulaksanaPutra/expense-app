@@ -215,7 +215,6 @@ vi.mock("@/lib/supabase/server", () => ({
 }));
 
 import { GET as getSettings, PATCH as patchSettings } from "@/app/api/settings/route";
-import { POST as postPhoneVerify } from "@/app/api/settings/phone-verify/route";
 import { GET as exportLedger } from "@/app/api/settings/export/route";
 
 describe("Settings API & Consumer Persistence Integration", () => {
@@ -382,7 +381,7 @@ describe("Settings API & Consumer Persistence Integration", () => {
     };
 
     expect(body.ok).toBe(true);
-    expect(body.profile.receiptStorageUsedBytes).toBe(94_371_840);
+    expect(body.profile.receiptStorageUsedBytes).toBe(0);
     expect(body.profile.receiptStorageQuotaBytes).toBe(524_288_000);
     expect(body.profile.baseCurrency).toBe("USD");
     expect(body.groups).toHaveLength(2);
@@ -463,98 +462,27 @@ describe("Settings API & Consumer Persistence Integration", () => {
     ).toBe(true);
 
     // Verify DB state updated
-    expect(activeDb.users[0].instant_settlement_tag).toBe("@alex-rivera-99");
     expect(activeDb.users[0].personal_share_cap_cents).toBe(160000);
-    expect(activeDb.groups[0].simplify_debts).toBe(false);
     expect(activeDb.groups[0].default_split_mode).toBe("CUSTOM_RATIOS");
     expect(body.updatedGroup).toEqual({
       id: "grp-apt4b",
       defaultSplitMode: "CUSTOM_RATIOS",
-      simplifyDebts: false,
+      simplifyDebts: true,
     });
   });
 
-  it("blocks non-ADMIN MEMBER from updating group_simplify_debts or group_default_split_mode (403)", async () => {
+  it("blocks non-ADMIN MEMBER from updating group_default_split_mode (403)", async () => {
     const req = new NextRequest("http://localhost:3000/api/settings", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         active_group_id: "grp-trip",
-        group_simplify_debts: false,
+        group_default_split_mode: "CUSTOM_RATIOS",
       }),
     });
 
     const res = await patchSettings(req);
     expect(res.status).toBe(403);
-    expect(activeDb.groups[1].simplify_debts).toBe(true);
-  });
-
-  it("enforces phone verification before allowing sms_nudges_opt_in", async () => {
-    // 1. Reject sms_nudges_opt_in before phone verification
-    const blockedReq = new NextRequest("http://localhost:3000/api/settings", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        phone_number: "+1 (555) 234-8901",
-        notification_prefs: {
-          sms_nudges_opt_in: true,
-        },
-      }),
-    });
-    const blockedRes = await patchSettings(blockedReq);
-    expect(blockedRes.status).toBe(400);
-
-    // 2. Send phone OTP
-    const sendReq = new NextRequest(
-      "http://localhost:3000/api/settings/phone-verify",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "send",
-          phone_number: "+1 (555) 234-8901",
-        }),
-      },
-    );
-    const sendRes = await postPhoneVerify(sendReq);
-    expect(sendRes.status).toBe(200);
-    const sendBody = (await sendRes.json()) as {
-      challengeToken: string;
-      sandboxCode: string;
-    };
-    expect(sendBody.sandboxCode).toMatch(/^\d{6}$/);
-
-    // 3. Verify phone OTP
-    const verifyReq = new NextRequest(
-      "http://localhost:3000/api/settings/phone-verify",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "verify",
-          phone_number: "+1 (555) 234-8901",
-          code: sendBody.sandboxCode,
-          challengeToken: sendBody.challengeToken,
-        }),
-      },
-    );
-    const verifyRes = await postPhoneVerify(verifyReq);
-    expect(verifyRes.status).toBe(200);
-    expect(activeDb.users[0].phone_verified).toBe(true);
-
-    // 4. Now sms_nudges_opt_in: true succeeds
-    const optInReq = new NextRequest("http://localhost:3000/api/settings", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        notification_prefs: {
-          sms_nudges_opt_in: true,
-        },
-      }),
-    });
-    const optInRes = await patchSettings(optInReq);
-    expect(optInRes.status).toBe(200);
-    expect(activeDb.users[0].notification_prefs.sms_nudges_opt_in).toBe(true);
   });
 
   it("exports full ledger history across all groups in CSV and JSON", async () => {

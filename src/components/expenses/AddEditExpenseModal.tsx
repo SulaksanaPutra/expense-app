@@ -44,9 +44,9 @@ import {
   parseSignedCurrencyInputToMinorUnits,
 } from "@/lib/money";
 import type { ExpenseLedgerRecord } from "@/lib/expenses/ledger";
+type ExchangeRateSource = "API" | "MANUAL_OVERRIDE";
 import type {
   Database,
-  ExchangeRateSource,
   ExpenseSplitMethod,
   SplitBreakdownItem,
 } from "@/types/database";

@@ -3,7 +3,6 @@ import { hasSupabaseEnv } from "@/lib/auth/guards";
 import { createGroupExpense } from "@/lib/groups/ledger-guards";
 import { createClient } from "@/lib/supabase/server";
 import type {
-  ExchangeRateSource,
   ExpenseSplitMethod,
   SplitBreakdownItem,
 } from "@/types/database";
@@ -137,23 +136,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
     splitBreakdown: Array.isArray(record.split_breakdown)
       ? (record.split_breakdown as SplitBreakdownItem[])
       : undefined,
-    originalAmountCents:
-      record.original_amount_cents === null ||
-      record.original_amount_cents === undefined
-        ? null
-        : Number(record.original_amount_cents),
-    originalCurrency:
-      typeof record.original_currency === "string"
-        ? record.original_currency
-        : null,
-    exchangeRate:
-      record.exchange_rate === null || record.exchange_rate === undefined
-        ? null
-        : Number(record.exchange_rate),
-    exchangeRateSource:
-      typeof record.exchange_rate_source === "string"
-        ? (record.exchange_rate_source as ExchangeRateSource)
-        : null,
     receiptUrl:
       typeof record.receipt_url === "string" ? record.receipt_url : null,
     adjustmentForExpenseId:

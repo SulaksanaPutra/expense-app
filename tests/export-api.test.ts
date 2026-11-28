@@ -579,9 +579,6 @@ describe("Issue #89 — CSV & JSON Ledger Export APIs, Scoping & Integer Minor-U
     expect(tokyoRows[1]).toContain("¥14,200");
     expect(tokyoRows[1]).toContain("¥28,400");
     expect(tokyoRows[1]).toContain("JPY");
-    expect(tokyoRows[1]).toContain("$190.00");
-    expect(tokyoRows[1]).toContain("USD");
-    expect(tokyoRows[1]).toContain("API");
     expect(tokyoRows[1]).toContain("28400");
 
     // 3. Closed historical cycle 2026-10 on grp-usd -> LOCKED status & negative adjustment
@@ -660,7 +657,6 @@ describe("Issue #89 — CSV & JSON Ledger Export APIs, Scoping & Integer Minor-U
     expect(csvText).toContain("Paris Hotel");
     expect(csvText).toContain("€450.75");
     expect(csvText).toContain("SETTLEMENT");
-    expect(csvText).toContain("MANUAL_OVERRIDE");
     expect(csvText).not.toContain("Secret Expense");
 
     const jsonRes = await exportSettingsHistory(
@@ -702,12 +698,7 @@ describe("Issue #89 — CSV & JSON Ledger Export APIs, Scoping & Integer Minor-U
       amount_cents: 18250,
       amount_formatted: "$182.50",
       amount_decimal: "182.50",
-      fx_audit: {
-        original_amount_cents: 16820,
-        original_currency: "EUR",
-        exchange_rate: 1.085018,
-        exchange_rate_source: "MANUAL_OVERRIDE",
-      },
+      fx_audit: null,
     });
     expect(jsonBody.settlements).toHaveLength(1);
     expect(jsonBody.settlements[0]).toMatchObject({

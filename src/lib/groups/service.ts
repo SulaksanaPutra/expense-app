@@ -347,10 +347,8 @@ export async function createSplitGroup(
     status: "ACTIVE",
     base_currency: input.base_currency,
     default_split_mode: "EQUAL",
-    simplify_debts: true,
     operational_budget_cents: input.operational_budget_cents,
     billing_cycle_anchor_day: input.billing_cycle_anchor_day,
-    lease_end_date: input.lease_end_date,
     invite_token: inviteToken,
     invite_token_version: inviteTokenVersion,
     created_by: authUser.id,
@@ -511,7 +509,7 @@ export async function getSplitGroupsPageData(
     const { data: groupRows, error: groupsError } = await supabase
       .from("groups")
       .select(
-        "id, name, slug, group_type, status, base_currency, default_split_mode, simplify_debts, operational_budget_cents, billing_cycle_anchor_day, lease_end_date, trip_auto_archive_enabled, trip_auto_archive_days, residential_lease_prompt_enabled, zero_balance_since, lease_prompt_snoozed_until, archived_at, invite_token, invite_token_version, created_at",
+        "id, name, slug, group_type, status, base_currency, default_split_mode, operational_budget_cents, billing_cycle_anchor_day, trip_auto_archive_enabled, trip_auto_archive_days, residential_lease_prompt_enabled, zero_balance_since, lease_prompt_snoozed_until, archived_at, invite_token, invite_token_version, created_at",
       )
       .order("created_at", { ascending: true });
 
@@ -539,7 +537,6 @@ export async function getSplitGroupsPageData(
       { data: memberRows, error: membersError },
       { data: expenseRows, error: expensesError },
       { data: settlementRows, error: settlementsError },
-      { data: recurringRows, error: recurringError },
       { data: billingCycleRows },
       reminderCooldowns,
     ] = await Promise.all([
@@ -559,11 +556,6 @@ export async function getSplitGroupsPageData(
         .from("settlements")
         .select("group_id, payer_id, recipient_id, amount_cents")
         .in("group_id", groupIds),
-      supabase
-        .from("recurring_rules")
-        .select("group_id, is_active")
-        .in("group_id", groupIds)
-        .eq("is_active", true),
       Promise.resolve()
         .then(() =>
           supabase
@@ -575,9 +567,8 @@ export async function getSplitGroupsPageData(
       getActiveReminderCooldowns(supabase, currentUserId, groupIds),
     ]);
 
-    if (membersError || expensesError || settlementsError || recurringError) {
-      const firstErr =
-        membersError || expensesError || settlementsError || recurringError;
+    if (membersError || expensesError || settlementsError) {
+      const firstErr = membersError || expensesError || settlementsError;
       return {
         activeGroups: [],
         archivedGroups: [],
@@ -636,12 +627,6 @@ export async function getSplitGroupsPageData(
     }
 
     const recurringCountByGroup = new Map<string, number>();
-    for (const row of recurringRows ?? []) {
-      recurringCountByGroup.set(
-        row.group_id,
-        (recurringCountByGroup.get(row.group_id) ?? 0) + 1,
-      );
-    }
 
     const auditLogsByGroup = new Map<string, GroupAuditLogEntry[]>();
     try {
@@ -808,7 +793,7 @@ export async function getSplitGroupsPageData(
           groupType: g.group_type,
           status: effectiveStatus,
           residentialLeasePromptEnabled,
-          leaseEndDate: g.lease_end_date,
+          leaseEndDate: null,
           leasePromptSnoozedUntil,
         },
         now,
@@ -858,10 +843,10 @@ export async function getSplitGroupsPageData(
         status: effectiveStatus,
         baseCurrency: g.base_currency,
         defaultSplitMode: g.default_split_mode,
-        simplifyDebts: g.simplify_debts,
+        simplifyDebts: true,
         operationalBudgetCents: g.operational_budget_cents,
         billingCycleAnchorDay: g.billing_cycle_anchor_day,
-        leaseEndDate: g.lease_end_date,
+        leaseEndDate: null,
         tripAutoArchiveEnabled,
         tripAutoArchiveDays,
         residentialLeasePromptEnabled,
@@ -906,119 +891,4 @@ export async function getSplitGroupsPageData(
         err instanceof Error ? err.message : "Unable to load split groups.",
     };
   }
-}
-
-export type UpdateSimplifyDebtsResult =
-  | {
-      ok: true;
-      groupId: string;
-      simplifyDebts: boolean;
-    }
-  | {
-      ok: false;
-      status: number;
-      code:
-        | "NOT_FOUND"
-        | "NOT_MEMBER"
-        | "FORBIDDEN"
-        | "GROUP_ARCHIVED"
-        | "SERVER_ERROR";
-      message: string;
-    };
-
-export async function updateGroupSimplifyDebts(
-  supabase: SupabaseClient<Database>,
-  userId: string,
-  groupId: string,
-  simplifyDebts: boolean,
-): Promise<UpdateSimplifyDebtsResult> {
-  const { data: group, error: groupError } = await supabase
-    .from("groups")
-    .select("id, status, simplify_debts")
-    .eq("id", groupId)
-    .maybeSingle();
-
-  if (groupError) {
-    return {
-      ok: false,
-      status: 500,
-      code: "SERVER_ERROR",
-      message: groupError.message || "Unable to load split group.",
-    };
-  }
-
-  if (!group) {
-    return {
-      ok: false,
-      status: 404,
-      code: "NOT_FOUND",
-      message: "Split group not found.",
-    };
-  }
-
-  const { data: membership, error: memberError } = await supabase
-    .from("group_members")
-    .select("role, status")
-    .eq("group_id", groupId)
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if (memberError) {
-    return {
-      ok: false,
-      status: 500,
-      code: "SERVER_ERROR",
-      message: memberError.message || "Unable to verify group membership.",
-    };
-  }
-
-  if (!membership) {
-    return {
-      ok: false,
-      status: 403,
-      code: "NOT_MEMBER",
-      message: "You are not a member of this split group.",
-    };
-  }
-
-  if (group.status === "ARCHIVED") {
-    return {
-      ok: false,
-      status: 409,
-      code: "GROUP_ARCHIVED",
-      message: "Archived groups are strictly read-only.",
-    };
-  }
-
-  if (membership.status !== "ACTIVE" || membership.role !== "ADMIN") {
-    return {
-      ok: false,
-      status: 403,
-      code: "FORBIDDEN",
-      message: "Only active group admins can update debt simplification settings.",
-    };
-  }
-
-  const { data: updated, error: updateError } = await supabase
-    .from("groups")
-    .update({ simplify_debts: simplifyDebts })
-    .eq("id", groupId)
-    .select("id, simplify_debts")
-    .maybeSingle();
-
-  if (updateError || !updated) {
-    return {
-      ok: false,
-      status: 500,
-      code: "SERVER_ERROR",
-      message:
-        updateError?.message || "Failed to update group debt simplification setting.",
-    };
-  }
-
-  return {
-    ok: true,
-    groupId: updated.id,
-    simplifyDebts: Boolean(updated.simplify_debts),
-  };
 }

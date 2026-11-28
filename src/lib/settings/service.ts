@@ -11,7 +11,6 @@ import {
 } from "@/lib/expenses/ledger";
 import { RECEIPT_STORAGE_QUOTA_BYTES } from "@/lib/expenses/split-engine";
 import { computeEqualSharePercentages } from "@/lib/groups/invite-utils";
-import { updateGroupSimplifyDebts } from "@/lib/groups/service";
 import { getInviteSigningSecret } from "@/lib/groups/invite-token";
 import {
   formatMinorUnits,
@@ -368,7 +367,7 @@ export async function getSettingsPageData(
         supabase
           .from("users")
           .select(
-            "id, full_name, email, phone_number, phone_verified, instant_settlement_tag, base_currency, personal_share_cap_cents, receipt_storage_used_bytes, notification_prefs, created_at",
+            "id, full_name, email, phone_number, phone_verified, base_currency, display_currency, personal_share_cap_cents, auto_include_in_expenses, notification_prefs, created_at",
           )
           .eq("id", authUser.id)
           .maybeSingle(),
@@ -395,7 +394,7 @@ export async function getSettingsPageData(
           avatarUrl: authUser.avatarUrl ?? null,
           phoneNumber: userRow.phone_number ?? null,
           phoneVerified: Boolean(userRow.phone_verified),
-          instantSettlementTag: userRow.instant_settlement_tag ?? null,
+          instantSettlementTag: null,
           baseCurrency: userRow.base_currency || "USD",
           personalShareCapCents:
             userRow.personal_share_cap_cents !== null &&
@@ -403,12 +402,12 @@ export async function getSettingsPageData(
               ? Number(userRow.personal_share_cap_cents)
               : null,
           receiptStorageUsedBytes: Number(
-            userRow.receipt_storage_used_bytes ?? 0,
+            0,
           ),
           receiptStorageQuotaBytes: RECEIPT_STORAGE_QUOTA_BYTES,
           notificationPrefs: normalizeNotificationPrefs(
             userRow.notification_prefs,
-            userRow.instant_settlement_tag ?? null,
+            null,
           ),
           createdAt: userRow.created_at || fallbackProfile.createdAt,
         }
@@ -430,7 +429,7 @@ export async function getSettingsPageData(
     const { data: groupRows, error: groupErr } = await supabase
       .from("groups")
       .select(
-        "id, name, slug, status, base_currency, default_split_mode, simplify_debts, created_at",
+        "id, name, slug, status, base_currency, default_split_mode, created_at",
       )
       .in("id", groupIds)
       .neq("status", "ARCHIVED")
@@ -451,7 +450,7 @@ export async function getSettingsPageData(
       status: g.status,
       baseCurrency: g.base_currency,
       defaultSplitMode: g.default_split_mode,
-      simplifyDebts: Boolean(g.simplify_debts),
+      simplifyDebts: true,
       currentUserRole: roleByGroup.get(g.id) ?? "MEMBER",
     }));
 
@@ -519,7 +518,7 @@ export async function updateUserSettings(
   const { data: existingRow, error: existingErr } = await supabase
     .from("users")
     .select(
-      "id, full_name, email, phone_number, phone_verified, instant_settlement_tag, base_currency, personal_share_cap_cents, receipt_storage_used_bytes, notification_prefs, created_at",
+      "id, full_name, email, phone_number, phone_verified, base_currency, display_currency, personal_share_cap_cents, auto_include_in_expenses, notification_prefs, created_at",
     )
     .eq("id", authUser.id)
     .maybeSingle();
@@ -587,7 +586,7 @@ export async function updateUserSettings(
   }
 
   // Validate instant_settlement_tag
-  let nextTag = existingRow.instant_settlement_tag;
+  let nextTag: string | null = null;
   if (input.instant_settlement_tag !== undefined) {
     const tagCheck = normalizeInstantSettlementTag(
       input.instant_settlement_tag === null
@@ -838,7 +837,6 @@ export async function updateUserSettings(
       ? input.active_group_id.trim()
       : null;
 
-  const wantsGroupSimplify = typeof input.group_simplify_debts === "boolean";
   const wantsGroupSplitMode =
     input.group_default_split_mode === "EQUAL" ||
     input.group_default_split_mode === "CUSTOM_RATIOS";
@@ -855,34 +853,12 @@ export async function updateUserSettings(
     };
   }
 
-  if (activeGroupId && (wantsGroupSimplify || wantsGroupSplitMode)) {
-    if (wantsGroupSimplify) {
-      const simplifyRes = await updateGroupSimplifyDebts(
-        supabase,
-        authUser.id,
-        activeGroupId,
-        input.group_simplify_debts as boolean,
-      );
-      if (!simplifyRes.ok) {
-        return {
-          ok: false,
-          status: simplifyRes.status,
-          code: simplifyRes.code,
-          message: simplifyRes.message,
-        };
-      }
-      updatedGroup = {
-        id: activeGroupId,
-        defaultSplitMode: "EQUAL",
-        simplifyDebts: simplifyRes.simplifyDebts,
-      };
-    }
-
+  if (activeGroupId && wantsGroupSplitMode) {
     if (wantsGroupSplitMode) {
       const targetMode = input.group_default_split_mode as SplitMode;
       const { data: groupRow, error: groupErr } = await supabase
         .from("groups")
-        .select("id, status, default_split_mode, simplify_debts")
+        .select("id, status, default_split_mode")
         .eq("id", activeGroupId)
         .maybeSingle();
 
@@ -984,8 +960,7 @@ export async function updateUserSettings(
       updatedGroup = {
         id: activeGroupId,
         defaultSplitMode: targetMode,
-        simplifyDebts:
-          updatedGroup?.simplifyDebts ?? Boolean(groupRow.simplify_debts),
+        simplifyDebts: true,
       };
     } else if (updatedGroup) {
       const { data: refreshedGroup } = await supabase
@@ -1005,14 +980,14 @@ export async function updateUserSettings(
       full_name: nextFullName,
       phone_number: nextPhoneNumber,
       phone_verified: nextPhoneVerified,
-      instant_settlement_tag: nextTag,
       base_currency: nextBaseCurrency,
+      display_currency: nextBaseCurrency,
       personal_share_cap_cents: nextCapCents,
       notification_prefs: nextPrefs as NotificationPrefs,
     })
     .eq("id", authUser.id)
     .select(
-      "id, full_name, email, phone_number, phone_verified, instant_settlement_tag, base_currency, personal_share_cap_cents, receipt_storage_used_bytes, notification_prefs, created_at",
+      "id, full_name, email, phone_number, phone_verified, base_currency, display_currency, personal_share_cap_cents, auto_include_in_expenses, notification_prefs, created_at",
     )
     .maybeSingle();
 
@@ -1053,7 +1028,7 @@ export async function updateUserSettings(
       avatarUrl: nextAvatarUrl,
       phoneNumber: updatedUser.phone_number ?? null,
       phoneVerified: Boolean(updatedUser.phone_verified),
-      instantSettlementTag: updatedUser.instant_settlement_tag ?? null,
+      instantSettlementTag: nextTag,
       baseCurrency: updatedUser.base_currency || "USD",
       personalShareCapCents:
         updatedUser.personal_share_cap_cents !== null &&
@@ -1061,12 +1036,12 @@ export async function updateUserSettings(
           ? Number(updatedUser.personal_share_cap_cents)
           : null,
       receiptStorageUsedBytes: Number(
-        updatedUser.receipt_storage_used_bytes ?? 0,
+        0,
       ),
       receiptStorageQuotaBytes: RECEIPT_STORAGE_QUOTA_BYTES,
       notificationPrefs: normalizeNotificationPrefs(
         updatedUser.notification_prefs,
-        updatedUser.instant_settlement_tag ?? null,
+        nextTag,
       ),
       createdAt: updatedUser.created_at,
     },
@@ -1363,22 +1338,15 @@ export async function buildFullLedgerExport(
       expenseDate: row.expense_date,
       amountCents: Math.trunc(Number(row.amount_cents)),
       currency: baseCurrency,
-      originalAmountCents:
-        row.original_amount_cents !== null &&
-        row.original_amount_cents !== undefined
-          ? Math.trunc(Number(row.original_amount_cents))
-          : null,
-      originalCurrency: row.original_currency ?? null,
-      exchangeRate:
-        row.exchange_rate !== null && row.exchange_rate !== undefined
-          ? Number(row.exchange_rate)
-          : null,
-      exchangeRateSource: row.exchange_rate_source ?? null,
+      originalAmountCents: null,
+      originalCurrency: null,
+      exchangeRate: null,
+      exchangeRateSource: null,
       splitMethod: row.split_method,
       splitBreakdown: breakdown,
       receiptUrl: row.receipt_url ?? null,
-      isRecurringGenerated: Boolean(row.is_recurring_generated),
-      recurringRuleId: row.recurring_rule_id ?? null,
+      isRecurringGenerated: false,
+      recurringRuleId: null,
       adjustmentForExpenseId: row.adjustment_for_expense_id ?? null,
       isLocked: lockEval.isLocked,
       isCycleClosed: lockEval.isCycleClosed,
@@ -1425,14 +1393,8 @@ export async function buildFullLedgerExport(
       : ledger?.isSettledForUser
         ? "Settled"
         : "Pending";
-    const origMinor =
-      row.original_amount_cents !== null &&
-      row.original_amount_cents !== undefined
-        ? Math.trunc(Number(row.original_amount_cents))
-        : null;
-    const origCurrency = row.original_currency
-      ? row.original_currency.toUpperCase()
-      : null;
+    const origMinor: number | null = null;
+    const origCurrency: string | null = null;
 
     return {
       ...row,
@@ -1457,11 +1419,8 @@ export async function buildFullLedgerExport(
                 origCurrency,
               ),
               original_currency: origCurrency,
-              exchange_rate:
-                row.exchange_rate !== null && row.exchange_rate !== undefined
-                  ? Number(row.exchange_rate)
-                  : null,
-              exchange_rate_source: row.exchange_rate_source ?? null,
+              exchange_rate: null,
+              exchange_rate_source: null,
             }
           : null,
     };

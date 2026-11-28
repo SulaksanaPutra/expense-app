@@ -36,12 +36,10 @@ function getBillingCycleWindowLocal(
 }
 import type {
   BillingCycleStatus,
-  ExchangeRateSource,
   ExpenseSplitMethod,
   GroupStatus,
   MemberRole,
   MemberStatus,
-  RecurringFrequency,
   SplitBreakdownItem,
   SplitMode,
 } from "@/types/database";
@@ -112,7 +110,7 @@ export interface ExpenseLedgerRecord {
   originalAmountCents: number | null;
   originalCurrency: string | null;
   exchangeRate: number | null;
-  exchangeRateSource: ExchangeRateSource | null;
+  exchangeRateSource: "API" | "MANUAL_OVERRIDE" | null;
   splitMethod: ExpenseSplitMethod;
   splitBreakdown: SplitBreakdownItem[];
   receiptUrl: string | null;
@@ -136,7 +134,7 @@ export interface RecurringRuleRecord {
   category: string;
   amountCents: number;
   currency: string;
-  frequency: RecurringFrequency;
+  frequency: "MONTHLY";
   dayOfMonth: number;
   splitRule: SplitMode;
   isActive: boolean;

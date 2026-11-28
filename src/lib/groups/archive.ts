@@ -153,7 +153,7 @@ export async function runArchiveRulesEvaluation(
   const { data: groupRows, error: groupsError } = await supabase
     .from("groups")
     .select(
-      "id, name, group_type, status, billing_cycle_anchor_day, lease_end_date, trip_auto_archive_enabled, trip_auto_archive_days, residential_lease_prompt_enabled, zero_balance_since, lease_prompt_snoozed_until",
+      "id, name, group_type, status, billing_cycle_anchor_day, trip_auto_archive_enabled, trip_auto_archive_days, residential_lease_prompt_enabled, zero_balance_since, lease_prompt_snoozed_until",
     )
     .neq("status", "ARCHIVED");
 
@@ -300,7 +300,7 @@ export async function runArchiveRulesEvaluation(
           status: g.status,
           residentialLeasePromptEnabled:
             g.residential_lease_prompt_enabled ?? true,
-          leaseEndDate: g.lease_end_date ?? null,
+          leaseEndDate: null,
           leasePromptSnoozedUntil: g.lease_prompt_snoozed_until ?? null,
         },
         now,
@@ -345,7 +345,7 @@ export async function runArchiveRulesEvaluation(
                     revision_id: null,
                     type: "LEASE_ARCHIVE_PROMPT",
                     title: "Lease archive prompt",
-                    description: `Lease ended on ${g.lease_end_date} for ${g.name}. Review balances and archive or snooze.`,
+                    description: `Lease prompt triggered for ${g.name}. Review balances and archive or snooze.`,
                     delta_cents: null,
                     currency: null,
                     href: `/split-groups?group=${encodeURIComponent(g.id)}`,
@@ -430,7 +430,7 @@ async function requireActiveGroupAdmin(
   const { data: group, error: groupError } = await supabase
     .from("groups")
     .select(
-      "id, name, group_type, status, default_split_mode, lease_end_date, trip_auto_archive_enabled, trip_auto_archive_days, residential_lease_prompt_enabled, lease_prompt_snoozed_until, archived_at",
+      "id, name, group_type, status, default_split_mode, trip_auto_archive_enabled, trip_auto_archive_days, residential_lease_prompt_enabled, lease_prompt_snoozed_until, archived_at",
     )
     .eq("id", groupId)
     .maybeSingle();
@@ -495,7 +495,7 @@ export async function updateGroupArchiveRules(
       ? input.residential_lease_prompt_enabled
       : (group.residential_lease_prompt_enabled ?? true);
 
-  let nextLeaseEndDate = group.lease_end_date ?? null;
+  let nextLeaseEndDate: string | null = null;
   if (input.lease_end_date !== undefined) {
     if (input.lease_end_date === null || input.lease_end_date.trim() === "") {
       nextLeaseEndDate = null;
@@ -518,7 +518,6 @@ export async function updateGroupArchiveRules(
       trip_auto_archive_enabled: nextTripEnabled,
       trip_auto_archive_days: nextTripDays,
       residential_lease_prompt_enabled: nextResidentialEnabled,
-      lease_end_date: nextLeaseEndDate,
     })
     .eq("id", group.id);
 
@@ -539,7 +538,6 @@ export async function updateGroupArchiveRules(
       trip_auto_archive_enabled: nextTripEnabled,
       trip_auto_archive_days: nextTripDays,
       residential_lease_prompt_enabled: nextResidentialEnabled,
-      lease_end_date: nextLeaseEndDate,
     },
   });
 
@@ -577,7 +575,7 @@ export async function archiveGroup(
         group.trip_auto_archive_days ?? DEFAULT_TRIP_AUTO_ARCHIVE_DAYS,
       residentialLeasePromptEnabled:
         group.residential_lease_prompt_enabled ?? true,
-      leaseEndDate: group.lease_end_date ?? null,
+      leaseEndDate: null,
       leasePromptSnoozedUntil: group.lease_prompt_snoozed_until ?? null,
       archivedAt: group.archived_at ?? null,
     };
@@ -621,7 +619,7 @@ export async function archiveGroup(
       group.trip_auto_archive_days ?? DEFAULT_TRIP_AUTO_ARCHIVE_DAYS,
     residentialLeasePromptEnabled:
       group.residential_lease_prompt_enabled ?? true,
-    leaseEndDate: group.lease_end_date ?? null,
+    leaseEndDate: null,
     leasePromptSnoozedUntil: group.lease_prompt_snoozed_until ?? null,
     archivedAt: nowIso,
     auditEntry,
@@ -647,7 +645,7 @@ export async function unarchiveGroup(
         group.trip_auto_archive_days ?? DEFAULT_TRIP_AUTO_ARCHIVE_DAYS,
       residentialLeasePromptEnabled:
         group.residential_lease_prompt_enabled ?? true,
-      leaseEndDate: group.lease_end_date ?? null,
+      leaseEndDate: null,
       leasePromptSnoozedUntil: group.lease_prompt_snoozed_until ?? null,
       archivedAt: null,
     };
@@ -705,7 +703,7 @@ export async function unarchiveGroup(
       group.trip_auto_archive_days ?? DEFAULT_TRIP_AUTO_ARCHIVE_DAYS,
     residentialLeasePromptEnabled:
       group.residential_lease_prompt_enabled ?? true,
-    leaseEndDate: group.lease_end_date ?? null,
+    leaseEndDate: null,
     leasePromptSnoozedUntil: group.lease_prompt_snoozed_until ?? null,
     archivedAt: null,
     auditEntry,
@@ -758,7 +756,7 @@ export async function snoozeResidentialLeasePrompt(
       group.trip_auto_archive_days ?? DEFAULT_TRIP_AUTO_ARCHIVE_DAYS,
     residentialLeasePromptEnabled:
       group.residential_lease_prompt_enabled ?? true,
-    leaseEndDate: group.lease_end_date ?? null,
+    leaseEndDate: null,
     leasePromptSnoozedUntil: snoozedUntil,
     archivedAt: group.archived_at ?? null,
   };
