@@ -4,36 +4,31 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import {
   Archive,
+  ArrowRight,
   Check,
-  CheckCircle2,
-  ChevronDown,
-  ChevronRight,
-  Copy,
-  Eye,
-  History,
-  Home,
-  Link2,
-  Lock,
   Plus,
-  ReceiptText,
   RefreshCw,
-  Repeat,
-  Share2,
-  SlidersHorizontal,
   UserMinus,
   Users,
 } from "lucide-react";
 import {
   AlertBanner,
   Avatar,
+  AvatarStack,
   Badge,
   Button,
   Card,
   ConfirmDialog,
-  ProgressBar,
+  SegmentedControl,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
   ToastContainer,
 } from "@/components/ui";
-import type { ToastItem } from "@/components/ui";
+import type { SegmentedOption, ToastItem } from "@/components/ui";
 import { useActiveGroup } from "@/components/shell/ActiveGroupContext";
 import { REALTIME_LEDGER_CHANGE_EVENT } from "@/components/shell/notifications";
 import type {
@@ -50,25 +45,44 @@ import {
   REMINDER_COOLDOWN_MS,
   type ReminderCooldownInfo,
 } from "@/lib/groups/reminders";
+import { toShellGroupSummary } from "@/lib/groups/service";
 import type {
   SplitGroupDetail,
   SplitGroupMemberDetail,
   SplitGroupsPageData,
 } from "@/lib/groups/types";
+import {
+  getSettlementDebtKey,
+  RecordSettlementModal,
+} from "@/components/expenses/RecordSettlementModal";
+import {
+  simplifyBipartiteGroupDebts,
+  type SimplifiedDebtEdge,
+} from "@/lib/expenses/debt-simplification";
 import { formatMinorUnits } from "@/lib/money";
 import type { GroupStatus, MemberStatus, SplitMode } from "@/types/database";
-import {
-  ArchiveRulesModal,
-  type ArchiveRulesSavedPayload,
-} from "./ArchiveRulesModal";
+import { ArchivedGroupCard, formatArchivedDate } from "./ArchivedGroupCard";
 import { AuditLogDrawer } from "./AuditLogDrawer";
 import { CreateGroupModal } from "./CreateGroupModal";
 import { EditRatiosModal } from "./EditRatiosModal";
-import { SplitGroupCard } from "./SplitGroupCard";
+import { SplitRulesInviteTab } from "./SplitRulesInviteTab";
+import {
+  formatSplitRuleLabel,
+  SplitGroupCard,
+} from "./SplitGroupCard";
 
 export interface SplitGroupsClientProps {
   initialData: SplitGroupsPageData;
   defaultCurrency?: string;
+}
+
+type GroupViewTab = "active" | "archived";
+type SpotlightTab = "members" | "rules";
+
+interface SimplifiedTransfer {
+  payer: SplitGroupMemberDetail;
+  recipient: SplitGroupMemberDetail;
+  amountCents: number;
 }
 
 function buildInvitePath(group: SplitGroupDetail): string {
@@ -79,6 +93,40 @@ function buildInvitePath(group: SplitGroupDetail): string {
   return buildInviteJoinUrl(group.slug, group.inviteToken, origin);
 }
 
+function computeSimplifiedTransfers(
+  group: SplitGroupDetail,
+): SimplifiedTransfer[] {
+  const memberById = new Map(group.members.map((m) => [m.userId, m]));
+  const netByUser = new Map<string, number>();
+  for (const m of group.members) {
+    netByUser.set(m.userId, Math.trunc(m.netBalanceCents));
+  }
+  const edges = simplifyBipartiteGroupDebts({
+    group: {
+      id: group.id,
+      name: group.name,
+      baseCurrency: group.baseCurrency,
+      simplifyDebts: true,
+      members: group.members.map((m) => ({
+        userId: m.userId,
+        name: m.name,
+        instantSettlementTag: null,
+      })),
+    },
+    netByUser,
+  });
+
+  const transfers: SimplifiedTransfer[] = [];
+  for (const edge of edges) {
+    const payer = memberById.get(edge.payerId);
+    const recipient = memberById.get(edge.recipientId);
+    if (payer && recipient) {
+      transfers.push({ payer, recipient, amountCents: edge.amountCents });
+    }
+  }
+  return transfers;
+}
+
 export function SplitGroupsClient({
   initialData,
   defaultCurrency = "USD",
@@ -87,10 +135,14 @@ export function SplitGroupsClient({
   const {
     activeGroupId,
     cycle,
+    user: currentUser,
     setActiveGroup,
     upsertGroup,
-    openAddExpense,
   } = useActiveGroup();
+
+  const [viewTab, setViewTab] = React.useState<GroupViewTab>("active");
+  const [spotlightTab, setSpotlightTab] =
+    React.useState<SpotlightTab>("members");
 
   const [createdGroups, setCreatedGroups] = React.useState<SplitGroupDetail[]>(
     [],
@@ -99,11 +151,18 @@ export function SplitGroupsClient({
   const [groupOverrides, setGroupOverrides] = React.useState<
     Record<string, Partial<SplitGroupDetail>>
   >({});
-  const [createModalOpen, setCreateModalOpen] = React.useState(false);
+
+  const [groupModalState, setGroupModalState] = React.useState<{
+    open: boolean;
+    mode: "create" | "edit";
+    group: SplitGroupDetail | null;
+  }>({ open: false, mode: "create", group: null });
+
   const [editRatiosModalOpen, setEditRatiosModalOpen] = React.useState(false);
   const [auditDrawerOpen, setAuditDrawerOpen] = React.useState(false);
-  const [archiveModalOpen, setArchiveModalOpen] = React.useState(false);
-  const [archivedExpanded, setArchivedExpanded] = React.useState(false);
+  const [settlementModalDebtKey, setSettlementModalDebtKey] = React.useState<
+    string | null
+  >(null);
   const [inspectedArchivedId, setInspectedArchivedId] = React.useState<
     string | null
   >(null);
@@ -111,16 +170,20 @@ export function SplitGroupsClient({
     React.useState<SplitGroupDetail | null>(null);
   const [closeCycleTargetGroup, setCloseCycleTargetGroup] =
     React.useState<SplitGroupDetail | null>(null);
+  const [archiveTargetGroup, setArchiveTargetGroup] =
+    React.useState<SplitGroupDetail | null>(null);
+  const [deleteTargetGroup, setDeleteTargetGroup] =
+    React.useState<SplitGroupDetail | null>(null);
+  const [restoringGroupId, setRestoringGroupId] = React.useState<string | null>(
+    null,
+  );
   const [removeTarget, setRemoveTarget] = React.useState<{
     group: SplitGroupDetail;
     member: SplitGroupMemberDetail;
   } | null>(null);
-  const [archivePromptTarget, setArchivePromptTarget] =
-    React.useState<SplitGroupDetail | null>(null);
-  const [dismissedLeasePromptIds, setDismissedLeasePromptIds] = React.useState<
-    string[]
-  >([]);
+
   const [actionLoading, setActionLoading] = React.useState(false);
+  const [savingRules, setSavingRules] = React.useState(false);
   const [copiedGroupId, setCopiedGroupId] = React.useState<string | null>(null);
   const [copyStatusText, setCopyStatusText] = React.useState("");
   const [regeneratingGroupId, setRegeneratingGroupId] = React.useState<
@@ -201,13 +264,6 @@ export function SplitGroupsClient({
     [allGroups],
   );
 
-  const leasePromptGroups = React.useMemo(() => {
-    const dismissedSet = new Set(dismissedLeasePromptIds);
-    return activeGroups.filter(
-      (g) => g.shouldPromptLeaseArchive && !dismissedSet.has(g.id),
-    );
-  }, [activeGroups, dismissedLeasePromptIds]);
-
   const pushToast = React.useCallback((toast: Omit<ToastItem, "id">) => {
     toastCounterRef.current += 1;
     const id = `sg-toast-${toastCounterRef.current}`;
@@ -235,7 +291,7 @@ export function SplitGroupsClient({
     return activeGroups[0];
   }, [activeGroupId, activeGroups, archivedGroups, inspectedArchivedId]);
 
-  const handleManageGroup = React.useCallback(
+  const handleSelectGroup = React.useCallback(
     (groupId: string) => {
       setInspectedArchivedId(null);
       setActiveGroup(groupId);
@@ -243,12 +299,35 @@ export function SplitGroupsClient({
     [setActiveGroup],
   );
 
-  const handleQuickSplit = React.useCallback(
-    (groupId: string) => {
-      setActiveGroup(groupId);
-      openAddExpense();
+  const openCreateModal = React.useCallback(() => {
+    setGroupModalState({ open: true, mode: "create", group: null });
+  }, []);
+
+  const openEditModal = React.useCallback(
+    (group: SplitGroupDetail) => {
+      setInspectedArchivedId(null);
+      setActiveGroup(group.id);
+      setGroupModalState({ open: true, mode: "edit", group });
     },
-    [openAddExpense, setActiveGroup],
+    [setActiveGroup],
+  );
+
+  const handleOpenSplitRules = React.useCallback(
+    (group: SplitGroupDetail) => {
+      setInspectedArchivedId(null);
+      setActiveGroup(group.id);
+      setSpotlightTab("rules");
+    },
+    [setActiveGroup],
+  );
+
+  const handleOpenAuditLog = React.useCallback(
+    (group: SplitGroupDetail) => {
+      setInspectedArchivedId(null);
+      setActiveGroup(group.id);
+      setAuditDrawerOpen(true);
+    },
+    [setActiveGroup],
   );
 
   const handleCopyInviteLink = React.useCallback(
@@ -298,9 +377,7 @@ export function SplitGroupsClient({
       try {
         const response = await fetch(
           `/api/groups/${encodeURIComponent(group.id)}/invite/regenerate`,
-          {
-            method: "POST",
-          },
+          { method: "POST" },
         );
         const payload = (await response.json()) as {
           error?: string;
@@ -417,6 +494,56 @@ export function SplitGroupsClient({
     [activeGroups, pushToast, router],
   );
 
+  const handleRulesSaved = React.useCallback(
+    (updatedGroup: SplitGroupDetail, shellGroup: ShellGroupSummary) => {
+      setGroupOverrides((prev) => {
+        const existing = allGroups.find((g) => g.id === updatedGroup.id);
+        const existingMemberMap = new Map(
+          (existing?.members ?? []).map((m) => [m.userId, m]),
+        );
+        const mergedMembers =
+          updatedGroup.members.length > 0
+            ? updatedGroup.members.map((m) => {
+                const prevMember = existingMemberMap.get(m.userId);
+                return {
+                  ...m,
+                  paidThisPeriodCents:
+                    prevMember?.paidThisPeriodCents ?? m.paidThisPeriodCents,
+                  netBalanceCents:
+                    prevMember?.netBalanceCents ?? m.netBalanceCents,
+                };
+              })
+            : (existing?.members ?? []);
+
+        return {
+          ...prev,
+          [updatedGroup.id]: {
+            ...prev[updatedGroup.id],
+            status: updatedGroup.status,
+            baseCurrency: updatedGroup.baseCurrency,
+            defaultSplitMode: updatedGroup.defaultSplitMode,
+            billingCycleAnchorDay: updatedGroup.billingCycleAnchorDay,
+            cycleResetDay: updatedGroup.cycleResetDay,
+            autoSettleOnReset: updatedGroup.autoSettleOnReset,
+            allowAnyMemberAddExpense: updatedGroup.allowAnyMemberAddExpense,
+            requireReceiptOver100: updatedGroup.requireReceiptOver100,
+            sendCycleCloseReminders: updatedGroup.sendCycleCloseReminders,
+            members: mergedMembers,
+          },
+        };
+      });
+
+      upsertGroup(shellGroup);
+      pushToast({
+        tone: "success",
+        title: "Split rules saved",
+        description: `Updated split rules and policies for ${updatedGroup.name}.`,
+      });
+      router.refresh();
+    },
+    [allGroups, pushToast, router, upsertGroup],
+  );
+
   const handleGroupCreated = React.useCallback(
     ({
       group,
@@ -431,6 +558,8 @@ export function SplitGroupsClient({
         }
         return [...prev, group];
       });
+      setViewTab("active");
+      setInspectedArchivedId(null);
       upsertGroup(shellGroup, { activate: true });
       pushToast({
         tone: "success",
@@ -441,6 +570,245 @@ export function SplitGroupsClient({
     },
     [pushToast, router, upsertGroup],
   );
+
+  const handleGroupUpdated = React.useCallback(
+    ({
+      group,
+      shellGroup,
+      invitedEmails,
+      removedMemberIds,
+    }: {
+      group: SplitGroupDetail;
+      shellGroup: ShellGroupSummary;
+      invitedEmails: string[];
+      removedMemberIds: string[];
+    }) => {
+      const removedSet = new Set(removedMemberIds);
+      setGroupOverrides((prev) => {
+        const existing = allGroups.find((g) => g.id === group.id);
+        const mergedMembers =
+          group.members.length > 0
+            ? group.members
+            : (existing?.members ?? []).filter(
+                (m) => !removedSet.has(m.userId),
+              );
+
+        return {
+          ...prev,
+          [group.id]: {
+            ...prev[group.id],
+            name: group.name,
+            category: group.category,
+            groupType: group.groupType,
+            baseCurrency: group.baseCurrency,
+            defaultSplitMode: group.defaultSplitMode,
+            members: mergedMembers,
+          },
+        };
+      });
+
+      upsertGroup(shellGroup);
+      pushToast({
+        tone: "success",
+        title: "Group updated",
+        description:
+          invitedEmails.length > 0
+            ? `Saved changes to ${group.name} and invited ${invitedEmails.length} ${invitedEmails.length === 1 ? "member" : "members"}.`
+            : `Saved changes to ${group.name}.`,
+      });
+      router.refresh();
+    },
+    [allGroups, pushToast, router, upsertGroup],
+  );
+
+  const handleArchiveGroupConfirm = React.useCallback(async () => {
+    if (!archiveTargetGroup) return;
+    setActionLoading(true);
+    try {
+      const response = await fetch(
+        `/api/groups/${encodeURIComponent(archiveTargetGroup.id)}/archive`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            reason: "Archived by group admin.",
+          }),
+        },
+      );
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        archivedAt?: string | null;
+        auditEntry?: GroupAuditLogEntry;
+      };
+
+      if (!response.ok) {
+        pushToast({
+          tone: "error",
+          title: "Could not archive group",
+          description: payload.error || "Failed to archive group.",
+        });
+        setActionLoading(false);
+        return;
+      }
+
+      const archivedId = archiveTargetGroup.id;
+      const archivedName = archiveTargetGroup.name;
+      const archivedAt = payload.archivedAt ?? new Date().toISOString();
+      setGroupOverrides((prev) => {
+        const existingLogs =
+          prev[archivedId]?.auditLogs ?? archiveTargetGroup.auditLogs ?? [];
+        return {
+          ...prev,
+          [archivedId]: {
+            ...prev[archivedId],
+            status: "ARCHIVED",
+            archivedAt,
+            auditLogs: payload.auditEntry
+              ? [payload.auditEntry, ...existingLogs]
+              : existingLogs,
+          },
+        };
+      });
+      upsertGroup({
+        ...toShellGroupSummary(archiveTargetGroup),
+        status: "ARCHIVED",
+      });
+      if (inspectedArchivedId === archivedId) {
+        setInspectedArchivedId(null);
+      }
+      setArchiveTargetGroup(null);
+      setActionLoading(false);
+      pushToast({
+        tone: "success",
+        title: "Group archived",
+        description: `${archivedName} is now read-only under Archived.`,
+      });
+      router.refresh();
+    } catch {
+      pushToast({
+        tone: "error",
+        title: "Network error",
+        description: "Unable to archive group. Please try again.",
+      });
+      setActionLoading(false);
+    }
+  }, [archiveTargetGroup, inspectedArchivedId, pushToast, router, upsertGroup]);
+
+  const handleRestoreGroup = React.useCallback(
+    async (group: SplitGroupDetail) => {
+      setRestoringGroupId(group.id);
+      try {
+        const response = await fetch(
+          `/api/groups/${encodeURIComponent(group.id)}/restore`,
+          { method: "POST" },
+        );
+        const payload = (await response.json().catch(() => ({}))) as {
+          error?: string;
+          status?: GroupStatus;
+          auditEntry?: GroupAuditLogEntry;
+        };
+
+        if (!response.ok) {
+          pushToast({
+            tone: "error",
+            title: "Could not restore group",
+            description: payload.error || "Failed to restore group.",
+          });
+          setRestoringGroupId(null);
+          return;
+        }
+
+        const nextStatus: GroupStatus = payload.status ?? "ACTIVE";
+        setGroupOverrides((prev) => {
+          const existingLogs =
+            prev[group.id]?.auditLogs ?? group.auditLogs ?? [];
+          return {
+            ...prev,
+            [group.id]: {
+              ...prev[group.id],
+              status: nextStatus,
+              archivedAt: null,
+              auditLogs: payload.auditEntry
+                ? [payload.auditEntry, ...existingLogs]
+                : existingLogs,
+            },
+          };
+        });
+        upsertGroup(
+          {
+            ...toShellGroupSummary(group),
+            status: nextStatus,
+          },
+          { activate: true },
+        );
+        setInspectedArchivedId(null);
+        setViewTab("active");
+        setRestoringGroupId(null);
+        pushToast({
+          tone: "success",
+          title: "Group restored",
+          description: `${group.name} is active again.`,
+        });
+        router.refresh();
+      } catch {
+        pushToast({
+          tone: "error",
+          title: "Network error",
+          description: "Unable to restore group. Please try again.",
+        });
+        setRestoringGroupId(null);
+      }
+    },
+    [pushToast, router, upsertGroup],
+  );
+
+  const handleDeleteGroupConfirm = React.useCallback(async () => {
+    if (!deleteTargetGroup) return;
+    setActionLoading(true);
+    try {
+      const response = await fetch(
+        `/api/groups/${encodeURIComponent(deleteTargetGroup.id)}`,
+        { method: "DELETE" },
+      );
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+
+      if (!response.ok) {
+        pushToast({
+          tone: "error",
+          title: "Could not delete group",
+          description: payload.error || "Failed to permanently delete group.",
+        });
+        setActionLoading(false);
+        return;
+      }
+
+      const deletedId = deleteTargetGroup.id;
+      const deletedName = deleteTargetGroup.name;
+      setDepartedGroupIds((prev) =>
+        prev.includes(deletedId) ? prev : [...prev, deletedId],
+      );
+      if (inspectedArchivedId === deletedId) {
+        setInspectedArchivedId(null);
+      }
+      setDeleteTargetGroup(null);
+      setActionLoading(false);
+      pushToast({
+        tone: "success",
+        title: "Group deleted",
+        description: `${deletedName} has been permanently deleted.`,
+      });
+      router.refresh();
+    } catch {
+      pushToast({
+        tone: "error",
+        title: "Network error",
+        description: "Unable to delete group. Please try again.",
+      });
+      setActionLoading(false);
+    }
+  }, [deleteTargetGroup, inspectedArchivedId, pushToast, router]);
 
   const handleLeaveGroupConfirm = React.useCallback(async () => {
     if (!leaveTargetGroup) return;
@@ -595,123 +963,6 @@ export function SplitGroupsClient({
     }
   }, [allGroups, pushToast, removeTarget, router]);
 
-  const handleArchiveRulesSaved = React.useCallback(
-    (payload: ArchiveRulesSavedPayload) => {
-      setGroupOverrides((prev) => {
-        const current = allGroups.find((g) => g.id === payload.groupId);
-        if (!current) return prev;
-        const existingLogs =
-          prev[payload.groupId]?.auditLogs ?? current.auditLogs ?? [];
-        const nextAuditLogs = payload.auditEntry
-          ? [payload.auditEntry, ...existingLogs]
-          : existingLogs;
-
-        return {
-          ...prev,
-          [payload.groupId]: {
-            ...prev[payload.groupId],
-            status: payload.status,
-            tripAutoArchiveEnabled: payload.tripAutoArchiveEnabled,
-            tripAutoArchiveDays: payload.tripAutoArchiveDays,
-            residentialLeasePromptEnabled:
-              payload.residentialLeasePromptEnabled,
-            leaseEndDate: payload.leaseEndDate,
-            leasePromptSnoozedUntil: payload.leasePromptSnoozedUntil,
-            archivedAt: payload.archivedAt,
-            shouldPromptLeaseArchive:
-              payload.status === "ARCHIVED"
-                ? false
-                : current.shouldPromptLeaseArchive,
-            auditLogs: nextAuditLogs,
-          },
-        };
-      });
-
-      if (payload.status === "ARCHIVED") {
-        setInspectedArchivedId(payload.groupId);
-        setArchivedExpanded(true);
-      } else if (inspectedArchivedId === payload.groupId) {
-        setInspectedArchivedId(null);
-      }
-
-      pushToast({
-        tone: "success",
-        title:
-          payload.status === "ARCHIVED"
-            ? "Group archived"
-            : "Archive rules updated",
-        description:
-          payload.status === "ARCHIVED"
-            ? "This ledger is now read-only under Archived Ledgers."
-            : "Archive rule settings saved.",
-      });
-      router.refresh();
-    },
-    [allGroups, inspectedArchivedId, pushToast, router],
-  );
-
-  const handleArchiveFromPrompt = React.useCallback(async () => {
-    if (!archivePromptTarget) return;
-    setActionLoading(true);
-    try {
-      const response = await fetch(
-        `/api/groups/${encodeURIComponent(archivePromptTarget.id)}/archive-rules`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "ARCHIVE",
-            reason: `Archived following residential lease end (${archivePromptTarget.leaseEndDate ?? "post-lease prompt"}).`,
-          }),
-        },
-      );
-      const payload = (await response.json()) as {
-        error?: string;
-      } & Partial<ArchiveRulesSavedPayload>;
-
-      if (!response.ok || !payload.groupId || !payload.status) {
-        pushToast({
-          tone: "error",
-          title: "Could not archive group",
-          description: payload.error || "Failed to archive group.",
-        });
-        setActionLoading(false);
-        return;
-      }
-
-      handleArchiveRulesSaved({
-        groupId: payload.groupId,
-        status: payload.status,
-        tripAutoArchiveEnabled:
-          payload.tripAutoArchiveEnabled ??
-          archivePromptTarget.tripAutoArchiveEnabled ??
-          true,
-        tripAutoArchiveDays:
-          payload.tripAutoArchiveDays ??
-          archivePromptTarget.tripAutoArchiveDays ??
-          14,
-        residentialLeasePromptEnabled:
-          payload.residentialLeasePromptEnabled ??
-          archivePromptTarget.residentialLeasePromptEnabled ??
-          true,
-        leaseEndDate:
-          payload.leaseEndDate ?? archivePromptTarget.leaseEndDate,
-        leasePromptSnoozedUntil: payload.leasePromptSnoozedUntil ?? null,
-        archivedAt: payload.archivedAt ?? null,
-        auditEntry: payload.auditEntry,
-      });
-      setArchivePromptTarget(null);
-      setActionLoading(false);
-    } catch {
-      pushToast({
-        tone: "error",
-        title: "Network error",
-        description: "Unable to archive group. Please try again.",
-      });
-      setActionLoading(false);
-    }
-  }, [archivePromptTarget, handleArchiveRulesSaved, pushToast]);
-
   const handleCloseCycleConfirm = React.useCallback(async () => {
     if (!closeCycleTargetGroup) return;
     setActionLoading(true);
@@ -764,59 +1015,6 @@ export function SplitGroupsClient({
       setActionLoading(false);
     }
   }, [closeCycleTargetGroup, cycle, pushToast, router]);
-
-  const handleSnoozeLeasePrompt = React.useCallback(
-    async (group: SplitGroupDetail) => {
-      if (group.currentUserRole !== "ADMIN") {
-        setDismissedLeasePromptIds((prev) =>
-          prev.includes(group.id) ? prev : [...prev, group.id],
-        );
-        return;
-      }
-
-      try {
-        const response = await fetch(
-          `/api/groups/${encodeURIComponent(group.id)}/archive-rules`,
-          {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              action: "SNOOZE_LEASE_PROMPT",
-              snooze_days: 30,
-            }),
-          },
-        );
-        if (response.ok) {
-          const payload = (await response.json()) as {
-            leasePromptSnoozedUntil?: string | null;
-          };
-          setGroupOverrides((prev) => ({
-            ...prev,
-            [group.id]: {
-              ...prev[group.id],
-              shouldPromptLeaseArchive: false,
-              leasePromptSnoozedUntil:
-                payload.leasePromptSnoozedUntil ?? null,
-            },
-          }));
-          pushToast({
-            tone: "info",
-            title: "Lease prompt snoozed",
-            description: `Archive prompt for ${group.name} snoozed for 30 days.`,
-          });
-          router.refresh();
-          return;
-        }
-      } catch {
-        // Fallback to local dismissal when offline
-      }
-
-      setDismissedLeasePromptIds((prev) =>
-        prev.includes(group.id) ? prev : [...prev, group.id],
-      );
-    },
-    [pushToast, router],
-  );
 
   React.useEffect(() => {
     const timer = window.setInterval(() => {
@@ -967,66 +1165,161 @@ export function SplitGroupsClient({
     [pushToast, router, sendingReminderKeys],
   );
 
-  const handleArchiveCheckCompleted = React.useCallback(
-    (summary: { autoArchivedGroupIds: string[] }) => {
-      if (summary.autoArchivedGroupIds.length > 0) {
-        setGroupOverrides((prev) => {
-          const next = { ...prev };
-          for (const id of summary.autoArchivedGroupIds) {
-            next[id] = {
-              ...next[id],
-              status: "ARCHIVED",
-              shouldPromptLeaseArchive: false,
+  const viewOptions = React.useMemo<Array<SegmentedOption<GroupViewTab>>>(
+    () => [
+      { value: "active", label: `Active (${activeGroups.length})` },
+      { value: "archived", label: `Archived (${archivedGroups.length})` },
+    ],
+    [activeGroups.length, archivedGroups.length],
+  );
+
+  const spotlightTabOptions = React.useMemo<
+    Array<SegmentedOption<SpotlightTab>>
+  >(
+    () => [
+      { value: "members", label: "Members & Balances" },
+      { value: "rules", label: "Split Rules & Invite" },
+    ],
+    [],
+  );
+
+  const simplifiedTransfers = React.useMemo(
+    () => (selectedGroup ? computeSimplifiedTransfers(selectedGroup) : []),
+    [selectedGroup],
+  );
+
+  const settlementDebts = React.useMemo<SimplifiedDebtEdge[]>(() => {
+    if (!selectedGroup) return [];
+    return simplifiedTransfers.map((t) => ({
+      groupId: selectedGroup.id,
+      groupName: selectedGroup.name,
+      currency: selectedGroup.baseCurrency,
+      payerId: t.payer.userId,
+      payerName: t.payer.name,
+      recipientId: t.recipient.userId,
+      recipientName: t.recipient.name,
+      recipientInstantTag: null,
+      amountCents: t.amountCents,
+    }));
+  }, [selectedGroup, simplifiedTransfers]);
+
+  const handleSettlementRecorded = React.useCallback(
+    (settlement: {
+      id: string;
+      group_id: string;
+      payer_id: string;
+      recipient_id: string;
+      amount_cents: number;
+      currency: string;
+      payment_rail: string;
+      settled_at: string;
+    }) => {
+      setGroupOverrides((prev) => {
+        const target = allGroups.find((g) => g.id === settlement.group_id);
+        if (!target) return prev;
+        const currentMembers = prev[target.id]?.members ?? target.members;
+        const updatedMembers = currentMembers.map((m) => {
+          if (m.userId === settlement.payer_id) {
+            return {
+              ...m,
+              netBalanceCents: m.netBalanceCents + settlement.amount_cents,
             };
           }
-          return next;
+          if (m.userId === settlement.recipient_id) {
+            return {
+              ...m,
+              netBalanceCents: m.netBalanceCents - settlement.amount_cents,
+            };
+          }
+          return m;
         });
-        setArchivedExpanded(true);
-      }
+        const payer = updatedMembers.find(
+          (m) => m.userId === settlement.payer_id,
+        );
+        const recipient = updatedMembers.find(
+          (m) => m.userId === settlement.recipient_id,
+        );
+        const selfMember = updatedMembers.find((m) => m.isCurrentUser);
+        const existingLogs = prev[target.id]?.auditLogs ?? target.auditLogs ?? [];
+        const newAuditEntry: GroupAuditLogEntry = {
+          id: `settlement-${settlement.id}`,
+          groupId: target.id,
+          category: "LEDGER",
+          eventType: "SETTLEMENT_RECORDED",
+          actorId: settlement.payer_id,
+          actorName: payer?.name ?? "Member",
+          summary: `${payer?.name ?? "Member"} settled ${formatMinorUnits(settlement.amount_cents, settlement.currency || target.baseCurrency)} with ${recipient?.name ?? "Member"}`,
+          details: [`Payment rail: ${settlement.payment_rail}`],
+          createdAt: settlement.settled_at,
+        };
+        return {
+          ...prev,
+          [target.id]: {
+            ...prev[target.id],
+            members: updatedMembers,
+            userNetLedgerCents:
+              selfMember?.netBalanceCents ?? target.userNetLedgerCents,
+            isFullySettled: updatedMembers.every(
+              (m) => m.netBalanceCents === 0,
+            ),
+            auditLogs: [newAuditEntry, ...existingLogs],
+          },
+        };
+      });
+      pushToast({
+        tone: "success",
+        title: "Settlement recorded",
+        description: `Logged ${formatMinorUnits(settlement.amount_cents, settlement.currency)} settlement.`,
+      });
       router.refresh();
     },
-    [router],
+    [allGroups, pushToast, router],
   );
 
   const cycleLabel = formatCycleLabel(cycle);
 
+  const activeMemberCount = selectedGroup
+    ? selectedGroup.members.filter((m) => m.status === "ACTIVE").length
+    : 0;
+  const perMemberCents =
+    selectedGroup && activeMemberCount > 0
+      ? Math.round(selectedGroup.cycleTurnoverCents / activeMemberCount)
+      : 0;
+
   return (
-    <div className="flex flex-col gap-8 pb-12">
+    <div className="flex flex-col gap-6 pb-12">
       {/* Page Header */}
-      <section className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
-        <div className="flex max-w-2xl flex-col gap-1">
-          <div className="mb-0.5 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-ink-muted-48">
-            <span className="text-[#0066cc]">Expense Architecture</span>
-            <span aria-hidden="true">·</span>
-            <span>Active Ledgers ({activeGroups.length})</span>
-          </div>
-          <h1 className="font-display text-3xl font-semibold tracking-tight text-ink">
+      <section className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+        <div className="flex flex-col gap-0.5">
+          <h1 className="font-display text-[28px] font-semibold leading-tight tracking-tight text-on-surface sm:text-[30px]">
             Split Groups
           </h1>
-          <p className="text-[14px] leading-relaxed text-ink-muted-48">
-            Manage shared living spaces, trips, and recurring multi-party
-            balances with isolated per-group ledgers.
+          <p className="text-[14px] text-outline">
+            Shared groups, member splits, and group balances.
           </p>
         </div>
 
-        <div className="flex shrink-0 flex-wrap items-center gap-2.5">
-          <Button
-            type="button"
-            variant="secondary"
-            size="md"
-            leftIcon={<SlidersHorizontal className="h-4 w-4 text-ink-muted-48" />}
-            onClick={() => setArchiveModalOpen(true)}
-          >
-            Archive Rules
-          </Button>
+        <div className="flex flex-wrap items-center gap-3">
+          <SegmentedControl
+            variant="pill-tabs"
+            ariaLabel="Group status view"
+            options={viewOptions}
+            value={viewTab}
+            onChange={(next) => {
+              setViewTab(next);
+              if (next === "active") {
+                setInspectedArchivedId(null);
+              }
+            }}
+          />
           <Button
             type="button"
             variant="primary"
             size="md"
-            leftIcon={<Plus className="h-4 w-4" />}
-            onClick={() => setCreateModalOpen(true)}
+            leftIcon={<Plus className="h-4 w-4" aria-hidden="true" />}
+            onClick={openCreateModal}
           >
-            Create New Group
+            Create Group
           </Button>
         </div>
       </section>
@@ -1042,7 +1335,7 @@ export function SplitGroupsClient({
               type="button"
               variant="secondary"
               size="sm"
-              leftIcon={<RefreshCw className="h-3.5 w-3.5" />}
+              leftIcon={<RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />}
               onClick={() => router.refresh()}
             >
               Retry
@@ -1051,91 +1344,245 @@ export function SplitGroupsClient({
         />
       )}
 
-      {/* Residential 7-Day Post-Lease Archive Prompts */}
-      {leasePromptGroups.map((promptGroup) => (
-        <AlertBanner
-          key={`lease-prompt-${promptGroup.id}`}
-          tone="warning"
-          title={`Lease ended for ${promptGroup.name}`}
-          description={`The configured lease ended ${promptGroup.daysSinceLeaseEnd ?? 7} days ago (${promptGroup.leaseEndDate}). Archive this group to lock it as read-only, or dismiss this reminder.`}
-          action={
-            <div className="flex flex-wrap items-center gap-2">
-              {promptGroup.currentUserRole === "ADMIN" && (
-                <Button
-                  type="button"
-                  variant="primary"
-                  size="sm"
-                  onClick={() => setArchivePromptTarget(promptGroup)}
-                >
-                  Archive Group
-                </Button>
-              )}
+      {/* Active View */}
+      {viewTab === "active" && (
+        <>
+          {!initialData.loadError && activeGroups.length === 0 && (
+            <Card
+              variant="section"
+              padding="lg"
+              className="flex flex-col items-center justify-center gap-4 py-14 text-center"
+            >
+              <div className="flex h-12 w-12 items-center justify-center rounded-full border border-outline-variant/60 bg-surface-container-low text-primary">
+                <Users className="h-6 w-6" aria-hidden="true" />
+              </div>
+              <div className="max-w-md space-y-1">
+                <h2 className="font-display text-[19px] font-semibold text-on-surface">
+                  No active split groups yet
+                </h2>
+                <p className="text-[14px] leading-relaxed text-outline">
+                  Create your first group to track shared expenses, assign split
+                  ratios, and keep balances isolated per household or trip.
+                </p>
+              </div>
               <Button
                 type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => void handleSnoozeLeasePrompt(promptGroup)}
+                variant="primary"
+                size="md"
+                leftIcon={<Plus className="h-4 w-4" aria-hidden="true" />}
+                onClick={openCreateModal}
               >
-                {promptGroup.currentUserRole === "ADMIN" ? "Snooze" : "Dismiss"}
+                Create Group
               </Button>
-            </div>
-          }
-        />
-      ))}
+            </Card>
+          )}
 
-      {/* Empty State */}
-      {!initialData.loadError && activeGroups.length === 0 && (
-        <Card
-          variant="section"
-          padding="lg"
-          className="flex flex-col items-center justify-center gap-4 py-14 text-center"
-        >
-          <div className="flex h-12 w-12 items-center justify-center rounded-full border border-hairline bg-canvas-parchment text-[#0066cc]">
-            <Users className="h-6 w-6" aria-hidden="true" />
-          </div>
-          <div className="max-w-md space-y-1">
-            <h2 className="font-display text-[19px] font-semibold text-ink">
-              No active split groups yet
-            </h2>
-            <p className="text-[14px] leading-relaxed text-ink-muted-48">
-              Create your first group to track shared expenses, assign split
-              ratios, and keep balances isolated per household or trip.
-            </p>
-          </div>
-          <Button
-            type="button"
-            variant="primary"
-            size="md"
-            leftIcon={<Plus className="h-4 w-4" />}
-            onClick={() => setCreateModalOpen(true)}
-          >
-            Create New Group
-          </Button>
-        </Card>
+          {/* 4-Column Active Group Cards Grid */}
+          {activeGroups.length > 0 && (
+            <section
+              aria-label="Active split groups"
+              className="grid grid-cols-1 items-stretch gap-4 md:grid-cols-2 xl:grid-cols-4"
+            >
+              {activeGroups.map((group) => (
+                <SplitGroupCard
+                  key={group.id}
+                  group={group}
+                  isSelected={selectedGroup?.id === group.id}
+                  onSelectGroup={handleSelectGroup}
+                  onEditGroup={openEditModal}
+                  onOpenSplitRules={handleOpenSplitRules}
+                  onOpenAuditLog={handleOpenAuditLog}
+                  onArchiveGroup={(g) => setArchiveTargetGroup(g)}
+                />
+              ))}
+            </section>
+          )}
+        </>
       )}
 
-      {/* Active Groups 3-Column Grid */}
-      {activeGroups.length > 0 && (
-        <section
-          aria-label="Active split groups"
-          className="grid grid-cols-1 items-stretch gap-6 lg:grid-cols-3"
-        >
-          {activeGroups.map((group) => (
-            <SplitGroupCard
-              key={group.id}
-              group={group}
-              isSelected={selectedGroup?.id === group.id}
-              onManageGroup={handleManageGroup}
-              onQuickSplit={handleQuickSplit}
-              onCopyInviteLink={handleCopyInviteLink}
-              onLeaveGroup={(g) => setLeaveTargetGroup(g)}
-            />
-          ))}
+      {/* Archived View */}
+      {viewTab === "archived" && (
+        <section aria-label="Archived ledgers" className="flex flex-col gap-5">
+          <AlertBanner
+            tone="info"
+            description="Archived groups are read-only. Restore any group to resume adding expenses or editing split rules."
+          />
+          {archivedGroups.length === 0 ? (
+            <Card
+              variant="section"
+              padding="lg"
+              className="flex flex-col items-center justify-center gap-2 py-12 text-center"
+            >
+              <Archive className="h-6 w-6 text-outline" aria-hidden="true" />
+              <p className="text-[14px] font-medium text-on-surface">
+                No archived groups
+              </p>
+              <p className="text-[13px] text-outline">
+                Groups you archive from the active view will appear here.
+              </p>
+            </Card>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 tabular-nums">
+                {archivedGroups.map((archived) => (
+                  <ArchivedGroupCard
+                    key={archived.id}
+                    group={archived}
+                    isRestoring={restoringGroupId === archived.id}
+                    disableRestore={
+                      restoringGroupId !== null &&
+                      restoringGroupId !== archived.id
+                    }
+                    onViewFinalLedger={(g) => setInspectedArchivedId(g.id)}
+                    onOpenAuditLog={(g) => {
+                      setInspectedArchivedId(g.id);
+                      setAuditDrawerOpen(true);
+                    }}
+                    onRestoreGroup={(g) => void handleRestoreGroup(g)}
+                    onDeleteGroup={(g) => setDeleteTargetGroup(g)}
+                  />
+                ))}
+              </div>
+
+              {/* Final Settlement History Table */}
+              <Card
+                variant="section"
+                padding="lg"
+                data-testid="final-settlement-history"
+                className="flex flex-col gap-4 tabular-nums"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="font-display text-[17px] font-semibold text-on-surface">
+                      Final Settlement History
+                    </h3>
+                    <p className="text-[12px] text-outline">
+                      Historical ledger closures and reconciled group totals.
+                    </p>
+                  </div>
+                  <span className="text-[12px] font-medium text-outline">
+                    {archivedGroups.length}{" "}
+                    {archivedGroups.length === 1 ? "record" : "records"}
+                  </span>
+                </div>
+
+                <Table>
+                  <TableHeader>
+                    <tr>
+                      <TableHead>GROUP</TableHead>
+                      <TableHead>ARCHIVED ON</TableHead>
+                      <TableHead>MEMBERS</TableHead>
+                      <TableHead>TOTAL SETTLED</TableHead>
+                      <TableHead>FINAL STATUS</TableHead>
+                      <TableHead className="text-right">ACTION</TableHead>
+                    </tr>
+                  </TableHeader>
+                  <TableBody>
+                    {archivedGroups.map((archived) => {
+                      const archivedDateLabel = formatArchivedDate(
+                        archived.archivedAt,
+                      );
+                      const isArchivedAdmin =
+                        archived.currentUserRole === "ADMIN";
+                      const totalSettledCents = archived.totalSettledCents ?? 0;
+                      const unsettledMembersCount = archived.members.filter(
+                        (m) => m.netBalanceCents !== 0,
+                      ).length;
+                      const isSettled =
+                        archived.isFullySettled && unsettledMembersCount === 0;
+
+                      return (
+                        <TableRow key={archived.id}>
+                          <TableCell>
+                            <div className="flex items-center gap-2.5">
+                              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-hairline bg-surface-container-low text-outline">
+                                <Archive
+                                  className="h-3.5 w-3.5"
+                                  aria-hidden="true"
+                                />
+                              </div>
+                              <div className="min-w-0">
+                                <div className="truncate font-semibold text-on-surface">
+                                  {archived.name}
+                                </div>
+                                <div className="truncate text-[11px] text-outline">
+                                  {formatSplitRuleLabel(archived)} ·{" "}
+                                  {isSettled ? "Event Locked" : "Open Balances"}
+                                </div>
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap text-[13px] text-outline">
+                            {archivedDateLabel ?? "—"}
+                          </TableCell>
+                          <TableCell>
+                            <AvatarStack
+                              members={archived.members.map((m) => ({
+                                id: m.userId,
+                                name: m.name,
+                              }))}
+                              max={4}
+                              size="sm"
+                            />
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap font-semibold text-on-surface">
+                            {formatMinorUnits(
+                              totalSettledCents,
+                              archived.baseCurrency,
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              tone={isSettled ? "success" : "warning"}
+                              size="sm"
+                            >
+                              {isSettled ? "Reconciled" : "Unsettled"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="inline-flex items-center gap-1.5">
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                size="sm"
+                                onClick={() =>
+                                  setInspectedArchivedId(archived.id)
+                                }
+                              >
+                                Ledger
+                              </Button>
+                              {isArchivedAdmin && (
+                                <Button
+                                  type="button"
+                                  variant="primary"
+                                  size="sm"
+                                  loading={restoringGroupId === archived.id}
+                                  disabled={
+                                    restoringGroupId !== null &&
+                                    restoringGroupId !== archived.id
+                                  }
+                                  onClick={() =>
+                                    void handleRestoreGroup(archived)
+                                  }
+                                >
+                                  Restore
+                                </Button>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </Card>
+            </>
+          )}
         </section>
       )}
 
-      {/* Spotlight Partition Panel */}
-      {selectedGroup && (
+      {/* Selected Group Spotlight Panel */}
+      {(viewTab === "active" || inspectedArchivedId !== null) && selectedGroup && (
         <Card
           variant="spotlight"
           padding="lg"
@@ -1146,19 +1593,7 @@ export function SplitGroupsClient({
             <AlertBanner
               tone="info"
               title="Archived Group — Read-Only"
-              description="This ledger is archived. New expenses, settlements, recurring rules, split ratio changes, and member departures are disabled."
-              action={
-                selectedGroup.currentUserRole === "ADMIN" ? (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => setArchiveModalOpen(true)}
-                  >
-                    Manage Archive
-                  </Button>
-                ) : undefined
-              }
+              description="This ledger is archived. New expenses, settlements, split ratio changes, and member departures are disabled."
             />
           )}
 
@@ -1166,7 +1601,7 @@ export function SplitGroupsClient({
             <AlertBanner
               tone="warning"
               title="Custom split ratios need review"
-              description="A new member joined in CUSTOM_RATIOS mode with a 0% default share. Review member allocations so active percentages sum to 100%."
+              description="A new member joined in custom ratio mode with a 0% default share. Review member allocations so active percentages sum to 100%."
               action={
                 selectedGroup.currentUserRole === "ADMIN" ? (
                   <Button
@@ -1182,16 +1617,19 @@ export function SplitGroupsClient({
             />
           )}
 
-          <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
-            <div>
-              <div className="mb-1 flex flex-wrap items-center gap-2">
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-[#0066cc]">
-                  Spotlight Partition
-                </span>
-                <Badge tone="neutral" size="sm">
-                  {selectedGroup.defaultSplitMode === "EQUAL"
-                    ? "Equal Split"
-                    : "Custom Ratios"}
+          {/* Spotlight Header */}
+          <div className="flex flex-col justify-between gap-4 border-b border-outline-variant/40 pb-4 lg:flex-row lg:items-center">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2.5">
+                <h2 className="truncate font-display text-[20px] font-semibold tracking-tight text-on-surface">
+                  {selectedGroup.name}
+                </h2>
+                <Badge
+                  tone="neutral"
+                  size="sm"
+                  className="border-outline-variant/60 bg-surface-container-low text-on-surface-variant"
+                >
+                  {formatSplitRuleLabel(selectedGroup)}
                 </Badge>
                 {selectedGroup.currentUserRole !== "ADMIN" && (
                   <Badge tone="neutral" size="sm">
@@ -1199,523 +1637,409 @@ export function SplitGroupsClient({
                   </Badge>
                 )}
               </div>
-              <h2 className="font-display text-[21px] font-semibold tracking-tight text-ink">
-                {selectedGroup.name} · Split Rules &amp; Ratios
-              </h2>
-              <p className="text-[13px] text-ink-muted-48">
-                Member contributions for {cycleLabel} and cumulative unsettled
-                balances in {selectedGroup.baseCurrency}.
+              <p className="mt-1 text-[13px] text-outline tabular-nums">
+                {formatMinorUnits(
+                  selectedGroup.cycleTurnoverCents,
+                  selectedGroup.baseCurrency,
+                )}{" "}
+                total ·{" "}
+                {formatMinorUnits(perMemberCents, selectedGroup.baseCurrency)}{" "}
+                per member
               </p>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              {selectedGroup.currentUserRole === "ADMIN" &&
-              selectedGroup.status !== "ARCHIVED" ? (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  leftIcon={<SlidersHorizontal className="h-3.5 w-3.5" />}
-                  onClick={() => setEditRatiosModalOpen(true)}
-                >
-                  Edit Ratios
-                </Button>
-              ) : (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  leftIcon={<Eye className="h-3.5 w-3.5" />}
-                  onClick={() => setEditRatiosModalOpen(true)}
-                >
-                  View Ratios
-                </Button>
-              )}
+            <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+              <SegmentedControl
+                variant="pill-tabs"
+                ariaLabel="Group detail tabs"
+                options={spotlightTabOptions}
+                value={spotlightTab}
+                onChange={setSpotlightTab}
+                className="w-full sm:w-auto [&>button]:flex-1 [&>button]:px-2.5 [&>button]:text-[12px] sm:[&>button]:flex-initial sm:[&>button]:px-4 sm:[&>button]:text-[13px]"
+              />
               <Button
                 type="button"
                 variant="secondary"
                 size="sm"
-                leftIcon={<History className="h-3.5 w-3.5" />}
                 onClick={() => setAuditDrawerOpen(true)}
               >
-                Log
+                Audit Log
               </Button>
-              {selectedGroup.currentUserRole === "ADMIN" &&
-                selectedGroup.status !== "ARCHIVED" &&
-                (selectedGroup.isCurrentCycleClosed ? (
-                  <Badge tone="warning" size="sm">
-                    Cycle Closed
-                  </Badge>
-                ) : (
+              {selectedGroup.status !== "ARCHIVED" && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={selectedGroup.currentUserRole !== "ADMIN"}
+                  onClick={() => openEditModal(selectedGroup)}
+                >
+                  Edit Group
+                </Button>
+              )}
+              {spotlightTab === "rules" &&
+                selectedGroup.currentUserRole === "ADMIN" &&
+                selectedGroup.status !== "ARCHIVED" && (
                   <Button
-                    type="button"
-                    variant="secondary"
+                    type="submit"
+                    form="split-rules-form"
+                    variant="primary"
                     size="sm"
-                    leftIcon={<Lock className="h-3.5 w-3.5" />}
-                    onClick={() => setCloseCycleTargetGroup(selectedGroup)}
+                    loading={savingRules}
+                    leftIcon={
+                      <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                    }
                   >
-                    Close &amp; Lock Cycle
+                    Save Rules
                   </Button>
-                ))}
+                )}
             </div>
           </div>
 
-          {/* Per-Member Allocation Cards */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            {selectedGroup.members.map((member) => {
-              const periodSharePercent =
-                selectedGroup.cycleTurnoverCents > 0
-                  ? Math.min(
-                      100,
+          {/* Tab 1: Members & Balances */}
+          {spotlightTab === "members" && (
+            <>
+              <div>
+                <div className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-outline tabular-nums">
+                  GROUP MEMBERS ({selectedGroup.members.length})
+                </div>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-3 tabular-nums">
+                  {selectedGroup.members.map((member) => {
+                    const memberShareCents =
+                      member.shareThisPeriodCents ??
                       Math.round(
-                        (member.paidThisPeriodCents /
-                          selectedGroup.cycleTurnoverCents) *
+                        (selectedGroup.cycleTurnoverCents *
+                          member.sharePercentage) /
                           100,
-                      ),
-                    )
-                  : 0;
+                      );
+                    const roleSubtitle =
+                      member.status === "FORMER_MEMBER"
+                        ? "Former Member"
+                        : member.role === "ADMIN"
+                          ? "Owner"
+                          : "Member";
 
-              const roleText = [
-                member.isCurrentUser ? "You" : null,
-                member.status === "FORMER_MEMBER"
-                  ? "Former Member"
-                  : member.role === "ADMIN"
-                    ? "Admin"
-                    : "Member",
-              ]
-                .filter(Boolean)
-                .join(" · ");
-
-              return (
-                <Card
-                  key={member.userId}
-                  variant="sub-card"
-                  padding="sm"
-                  className="flex flex-col justify-between gap-4"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex min-w-0 items-center gap-2.5">
-                      <Avatar name={member.name} size="md" />
-                      <div className="min-w-0">
-                        <h3 className="truncate text-[14px] font-semibold text-ink">
-                          {member.name}
-                        </h3>
-                        <p className="truncate text-[11px] font-medium text-[#0066cc]">
-                          {roleText}
-                        </p>
-                      </div>
-                    </div>
-                    <Badge tone="neutral" size="sm">
-                      {member.sharePercentage}%
-                    </Badge>
-                  </div>
-
-                  <div className="flex flex-col gap-1.5">
-                    <span className="text-[12px] text-ink-muted-48">
-                      Paid This Period
-                    </span>
-                    <span className="text-[20px] font-semibold tracking-tight tabular-nums text-ink">
-                      {formatMinorUnits(
-                        member.paidThisPeriodCents,
-                        selectedGroup.baseCurrency,
-                      )}
-                    </span>
-                    <ProgressBar
-                      value={periodSharePercent}
-                      max={100}
-                      label={`${member.name} share of period spend`}
-                      size="sm"
-                      tone="primary"
-                    />
-                  </div>
-
-                  <div className="flex flex-wrap items-center justify-between gap-2 border-t border-hairline pt-2.5 text-[12px]">
-                    <span
-                      className={cn(
-                        "font-semibold tabular-nums",
-                        member.netBalanceCents > 0
-                          ? "text-emerald-700"
-                          : member.netBalanceCents < 0
-                            ? "text-red-600"
-                            : "text-ink-muted-48",
-                      )}
-                    >
-                      {member.netBalanceCents > 0
-                        ? `Owed ${formatMinorUnits(
-                            member.netBalanceCents,
-                            selectedGroup.baseCurrency,
-                            { showPlus: true },
-                          )}`
-                        : member.netBalanceCents < 0
-                          ? `Due ${formatMinorUnits(
-                              member.netBalanceCents,
-                              selectedGroup.baseCurrency,
-                            )}`
-                          : "Settled"}
-                    </span>
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      {member.status === "FORMER_MEMBER" ? (
-                        <Badge tone="warning" size="sm">
-                          Former
-                        </Badge>
-                      ) : member.netBalanceCents === 0 ? (
-                        <Badge tone="neutral" size="sm">
-                          Balanced
-                        </Badge>
-                      ) : null}
-                      {(() => {
-                        const currentMember = selectedGroup.members.find(
-                          (m) => m.isCurrentUser,
-                        );
-                        const canRemindMember =
-                          selectedGroup.status !== "ARCHIVED" &&
-                          currentMember?.status === "ACTIVE" &&
-                          !member.isCurrentUser &&
-                          member.netBalanceCents < 0;
-                        if (!canRemindMember) return null;
-                        const reminderKey = getReminderCooldownKey(
-                          selectedGroup.id,
-                          member.userId,
-                        );
-                        const cooldown = getActiveCooldown(
-                          selectedGroup.id,
-                          member.userId,
-                        );
-                        const isSending = Boolean(
-                          sendingReminderKeys[reminderKey],
-                        );
-                        return (
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            size="sm"
-                            data-testid={`split-group-remind-${member.userId}`}
-                            loading={isSending}
-                            disabled={Boolean(cooldown) || isSending}
-                            aria-label={
-                              cooldown
-                                ? `${formatCooldownLabel(cooldown.remainingHours)} for ${member.name}`
-                                : `Remind ${member.name}`
-                            }
-                            onClick={() =>
-                              void handleSendMemberReminder(selectedGroup, member)
-                            }
-                            className={cn(
-                              "h-7 px-2.5 text-[11px]",
-                              cooldown ? "text-ink-muted-48" : "text-[#0066cc]",
-                            )}
-                          >
-                            {cooldown
-                              ? formatCooldownLabel(cooldown.remainingHours)
-                              : "Remind"}
-                          </Button>
-                        );
-                      })()}
-                    </div>
-                  </div>
-
-                  {(member.status === "FORMER_MEMBER" ||
-                    (selectedGroup.currentUserRole === "ADMIN" &&
+                    const currentMember = selectedGroup.members.find(
+                      (m) => m.isCurrentUser,
+                    );
+                    const canRemindMember =
                       selectedGroup.status !== "ARCHIVED" &&
+                      currentMember?.status === "ACTIVE" &&
                       !member.isCurrentUser &&
-                      member.status === "ACTIVE")) && (
-                    <div className="flex items-center justify-between gap-2 pt-1 text-[11px]">
-                      {member.status === "FORMER_MEMBER" ? (
-                        <span className="text-ink-muted-48">
-                          Excluded from new splits
-                        </span>
-                      ) : (
-                        <span />
-                      )}
-                      {selectedGroup.currentUserRole === "ADMIN" &&
-                        selectedGroup.status !== "ARCHIVED" &&
-                        !member.isCurrentUser &&
-                        member.status === "ACTIVE" && (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            aria-label={`Remove ${member.name}`}
-                            leftIcon={<UserMinus className="h-3.5 w-3.5" />}
-                            onClick={() =>
-                              setRemoveTarget({
-                                group: selectedGroup,
-                                member,
-                              })
-                            }
-                            className="h-7 px-2 text-[11px] text-red-600 hover:bg-red-50"
-                          >
-                            Remove
-                          </Button>
+                      member.netBalanceCents < 0;
+                    const reminderKey = getReminderCooldownKey(
+                      selectedGroup.id,
+                      member.userId,
+                    );
+                    const cooldown = getActiveCooldown(
+                      selectedGroup.id,
+                      member.userId,
+                    );
+                    const isSending = Boolean(sendingReminderKeys[reminderKey]);
+
+                    return (
+                      <Card
+                        key={member.userId}
+                        variant="sub-card"
+                        padding="sm"
+                        className="flex flex-col justify-between gap-3"
+                      >
+                        <div>
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex min-w-0 items-center gap-2.5">
+                              <Avatar name={member.name} size="md" />
+                              <div className="min-w-0">
+                                <h3 className="truncate text-[14px] font-semibold text-on-surface">
+                                  {member.name}
+                                  {member.isCurrentUser ? " (You)" : ""}
+                                </h3>
+                                <p className="truncate text-[12px] text-outline">
+                                  {roleSubtitle}
+                                </p>
+                              </div>
+                            </div>
+                            {member.status === "FORMER_MEMBER" ? (
+                              <Badge tone="warning" size="sm">
+                                Former
+                              </Badge>
+                            ) : member.netBalanceCents > 0 ? (
+                              <Badge tone="success" size="sm">
+                                Owed to you
+                              </Badge>
+                            ) : member.netBalanceCents < 0 ? (
+                              <Badge tone="danger" size="sm">
+                                Owes group
+                              </Badge>
+                            ) : (
+                              <Badge tone="neutral" size="sm">
+                                Settled
+                              </Badge>
+                            )}
+                          </div>
+
+                          <div className="mt-3 space-y-1 border-t border-outline-variant/50 pt-3 text-[13px]">
+                            <div className="flex justify-between gap-2">
+                              <span className="text-outline">Paid:</span>
+                              <span className="font-medium text-on-surface">
+                                {formatMinorUnits(
+                                  member.paidThisPeriodCents,
+                                  selectedGroup.baseCurrency,
+                                )}
+                              </span>
+                            </div>
+                            <div className="flex justify-between gap-2">
+                              <span className="text-outline">Share:</span>
+                              <span className="font-medium text-on-surface">
+                                {formatMinorUnits(
+                                  memberShareCents,
+                                  selectedGroup.baseCurrency,
+                                )}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-end justify-between gap-2 border-t border-outline-variant/50 pt-3">
+                          <div>
+                            <span className="block text-[11px] text-outline">
+                              Net Position
+                            </span>
+                            <span
+                              className={cn(
+                                "text-[15px] font-semibold tabular-nums",
+                                member.netBalanceCents > 0
+                                  ? "text-emerald-700"
+                                  : member.netBalanceCents < 0
+                                    ? "text-red-600"
+                                    : "text-outline",
+                              )}
+                            >
+                              {formatMinorUnits(
+                                member.netBalanceCents,
+                                selectedGroup.baseCurrency,
+                                { showPlus: true },
+                              )}
+                            </span>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {canRemindMember && (
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                size="sm"
+                                data-testid={`split-group-remind-${member.userId}`}
+                                loading={isSending}
+                                disabled={Boolean(cooldown) || isSending}
+                                aria-label={
+                                  cooldown
+                                    ? `${formatCooldownLabel(cooldown.remainingHours)} for ${member.name}`
+                                    : `Remind ${member.name}`
+                                }
+                                onClick={() =>
+                                  void handleSendMemberReminder(
+                                    selectedGroup,
+                                    member,
+                                  )
+                                }
+                                className="h-7 px-3 text-[11px]"
+                              >
+                                {cooldown
+                                  ? formatCooldownLabel(cooldown.remainingHours)
+                                  : "Remind"}
+                              </Button>
+                            )}
+                            {selectedGroup.currentUserRole === "ADMIN" &&
+                              selectedGroup.status !== "ARCHIVED" &&
+                              !member.isCurrentUser &&
+                              member.status === "ACTIVE" && (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  aria-label={`Remove ${member.name}`}
+                                  leftIcon={
+                                    <UserMinus
+                                      className="h-3.5 w-3.5"
+                                      aria-hidden="true"
+                                    />
+                                  }
+                                  onClick={() =>
+                                    setRemoveTarget({
+                                      group: selectedGroup,
+                                      member,
+                                    })
+                                  }
+                                  className="h-7 px-2 text-[11px] text-red-600 hover:bg-red-50"
+                                >
+                                  Remove
+                                </Button>
+                              )}
+                          </div>
+                        </div>
+
+                        {member.status === "FORMER_MEMBER" && (
+                          <span className="text-[11px] text-outline">
+                            Excluded from new splits
+                          </span>
                         )}
-                    </div>
-                  )}
-                </Card>
-              );
-            })}
-          </div>
-
-          {/* Assigned Habitat & Member Invitation Gateway */}
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-            <Card
-              variant="sub-card"
-              padding="md"
-              data-testid="assigned-habitat-card"
-              className="flex flex-col justify-between gap-4 lg:col-span-6"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex flex-col gap-1">
-                  <span className="text-[11px] font-semibold uppercase tracking-wider text-[#0066cc]">
-                    Assigned Habitat
-                  </span>
-                  <h3 className="text-[16px] font-semibold text-ink">
-                    {selectedGroup.name}
-                  </h3>
-                  <p className="text-[12px] text-ink-muted-80">
-                    {selectedGroup.operationalBudgetCents !== null
-                      ? `${formatMinorUnits(
-                          selectedGroup.operationalBudgetCents,
-                          selectedGroup.baseCurrency,
-                        )} Monthly Target`
-                      : "No Monthly Budget Cap"}
-                  </p>
-                  <p className="text-[12px] text-ink-muted-48">
-                    Base currency {selectedGroup.baseCurrency} · Anchored on day{" "}
-                    {selectedGroup.billingCycleAnchorDay} of each month
-                  </p>
+                      </Card>
+                    );
+                  })}
                 </div>
-                <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-hairline bg-canvas text-ink-muted-48">
-                  <Home className="h-4 w-4" aria-hidden="true" />
-                </span>
               </div>
 
-              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-hairline pt-3 text-[12px] text-ink-muted-48">
-                <span>
-                  {selectedGroup.leaseEndDate
-                    ? `Lease ends ${selectedGroup.leaseEndDate}`
-                    : "No lease end date configured"}
-                </span>
-                <span className="font-medium text-ink-muted-80">
-                  {selectedGroup.recurringRuleCount > 0
-                    ? `Auto-ingestion active (${selectedGroup.recurringRuleCount})`
-                    : selectedGroup.simplifyDebts
-                      ? "Debt simplification on"
-                      : "Direct peer balances"}
-                </span>
-              </div>
-            </Card>
-
-            <Card
-              variant="sub-card"
-              padding="md"
-              data-testid="member-invitation-gateway"
-              className="flex flex-col justify-between gap-3 lg:col-span-6"
-            >
-              <div className="flex flex-col gap-1">
-                <div className="flex items-center justify-between">
-                  <span className="text-[12px] font-semibold uppercase tracking-wider text-ink">
-                    Member Invitation Gateway
+              {/* WHO OWES WHOM */}
+              <div>
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-outline">
+                    WHO OWES WHOM
                   </span>
-                  <Share2
-                    className="h-4 w-4 text-[#0066cc]"
-                    aria-hidden="true"
-                  />
+                  <span className="text-[12px] text-outline tabular-nums">
+                    {simplifiedTransfers.length === 0
+                      ? "All balances settled"
+                      : `${simplifiedTransfers.length} ${simplifiedTransfers.length === 1 ? "transfer" : "transfers"} to zero balances`}
+                  </span>
                 </div>
-                <p className="text-[12px] leading-relaxed text-ink-muted-48">
-                  Members joining via this signed link are onboarded into{" "}
-                  {selectedGroup.name} using{" "}
-                  {selectedGroup.defaultSplitMode === "EQUAL"
-                    ? "equal split shares"
-                    : "custom split ratios (0% initial share until reviewed)"}
-                  .
-                </p>
-              </div>
 
-              <div className="flex items-center gap-2 rounded-pill border border-hairline bg-canvas px-3 py-1.5">
-                <Link2
-                  className="h-4 w-4 shrink-0 text-ink-muted-48"
-                  aria-hidden="true"
-                />
-                <input
-                  id="invite-link-input"
-                  type="text"
-                  readOnly
-                  aria-label="Group invite link"
-                  value={buildInvitePath(selectedGroup)}
-                  className="w-full min-w-0 bg-transparent font-mono text-[12px] text-ink focus:outline-none"
-                />
-                <Button
-                  type="button"
-                  variant="primary"
-                  size="sm"
-                  onClick={() => void handleCopyInviteLink(selectedGroup)}
-                  leftIcon={
-                    copiedGroupId === selectedGroup.id ? (
-                      <Check className="h-3.5 w-3.5" />
-                    ) : (
-                      <Copy className="h-3.5 w-3.5" />
-                    )
-                  }
-                >
-                  {copiedGroupId === selectedGroup.id ? "Copied" : "Copy"}
-                </Button>
-                <span role="status" aria-live="polite" className="sr-only">
-                  {copyStatusText}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between border-t border-hairline pt-2 text-[11px] text-ink-muted-48">
-                <span>Slug: {selectedGroup.slug}</span>
-                {selectedGroup.currentUserRole === "ADMIN" &&
-                selectedGroup.status !== "ARCHIVED" ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    loading={regeneratingGroupId === selectedGroup.id}
-                    onClick={() => void handleRegenerateInviteLink(selectedGroup)}
-                    className="h-7 px-2.5 text-[11px] font-semibold text-[#0066cc]"
+                {simplifiedTransfers.length === 0 ? (
+                  <Card
+                    variant="sub-card"
+                    padding="sm"
+                    className="text-center text-[13px] text-outline"
                   >
-                    Regenerate Link
-                  </Button>
+                    Everyone in {selectedGroup.name} is currently settled up.
+                  </Card>
                 ) : (
-                  <span>Member view · Copy only</span>
+                  <div className="flex flex-col gap-2.5">
+                    {simplifiedTransfers.map((transfer) => {
+                      const reminderKey = getReminderCooldownKey(
+                        selectedGroup.id,
+                        transfer.payer.userId,
+                      );
+                      const cooldown = getActiveCooldown(
+                        selectedGroup.id,
+                        transfer.payer.userId,
+                      );
+                      const isSending = Boolean(
+                        sendingReminderKeys[reminderKey],
+                      );
+                      return (
+                        <div
+                          key={`${transfer.payer.userId}-${transfer.recipient.userId}`}
+                          className="flex flex-col justify-between gap-3 rounded-[14px] border border-outline-variant/60 bg-surface-container-lowest px-4 py-3 sm:flex-row sm:items-center"
+                        >
+                          <div className="flex min-w-0 items-center gap-2.5">
+                            <Avatar name={transfer.payer.name} size="sm" />
+                            <span className="truncate text-[13px] font-medium text-on-surface">
+                              {transfer.payer.isCurrentUser
+                                ? "You"
+                                : transfer.payer.name}
+                            </span>
+                            <ArrowRight
+                              className="h-3.5 w-3.5 shrink-0 text-outline"
+                              aria-hidden="true"
+                            />
+                            <span className="truncate text-[13px] font-medium text-on-surface">
+                              {transfer.recipient.isCurrentUser
+                                ? "You"
+                                : transfer.recipient.name}
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2.5 sm:justify-end">
+                            <span className="text-[14px] font-semibold text-on-surface tabular-nums">
+                              {formatMinorUnits(
+                                transfer.amountCents,
+                                selectedGroup.baseCurrency,
+                              )}
+                            </span>
+                            {selectedGroup.status !== "ARCHIVED" &&
+                              !transfer.payer.isCurrentUser && (
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  size="sm"
+                                  loading={isSending}
+                                  disabled={Boolean(cooldown) || isSending}
+                                  onClick={() =>
+                                    void handleSendMemberReminder(
+                                      selectedGroup,
+                                      transfer.payer,
+                                    )
+                                  }
+                                  className="h-8 px-3 text-[12px]"
+                                >
+                                  {cooldown
+                                    ? formatCooldownLabel(
+                                        cooldown.remainingHours,
+                                      )
+                                    : "Remind"}
+                                </Button>
+                              )}
+                            {selectedGroup.status !== "ARCHIVED" && (
+                              <Button
+                                type="button"
+                                variant="primary"
+                                size="sm"
+                                data-testid={`who-owes-settle-${transfer.payer.userId}-${transfer.recipient.userId}`}
+                                onClick={() =>
+                                  setSettlementModalDebtKey(
+                                    getSettlementDebtKey({
+                                      groupId: selectedGroup.id,
+                                      payerId: transfer.payer.userId,
+                                      recipientId: transfer.recipient.userId,
+                                    }),
+                                  )
+                                }
+                                className="h-8 px-3.5 text-[12px]"
+                              >
+                                Mark Settled
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 )}
               </div>
-            </Card>
-          </div>
+            </>
+          )}
+
+          {/* Tab 2: Split Rules & Invite */}
+          {spotlightTab === "rules" && (
+            <SplitRulesInviteTab
+              key={`${selectedGroup.id}-${selectedGroup.defaultSplitMode}-${selectedGroup.baseCurrency}-${selectedGroup.cycleResetDay ?? selectedGroup.billingCycleAnchorDay}-${selectedGroup.autoSettleOnReset ?? true}-${selectedGroup.allowAnyMemberAddExpense ?? true}-${selectedGroup.requireReceiptOver100 ?? false}-${selectedGroup.sendCycleCloseReminders ?? true}-${selectedGroup.members.map((m) => `${m.userId}:${m.status}:${m.sharePercentage}:${m.shareUnits ?? 1}`).join(",")}`}
+              group={selectedGroup}
+              inviteLinkUrl={buildInvitePath(selectedGroup)}
+              copiedGroupId={copiedGroupId}
+              copyStatusText={copyStatusText}
+              regeneratingGroupId={regeneratingGroupId}
+              onCopyInviteLink={(g) => void handleCopyInviteLink(g)}
+              onRegenerateInviteLink={(g) => void handleRegenerateInviteLink(g)}
+              onArchiveGroup={(g) => setArchiveTargetGroup(g)}
+              onLeaveGroup={(g) => setLeaveTargetGroup(g)}
+              onRemoveMember={(g, member) => setRemoveTarget({ group: g, member })}
+              onRulesSaved={handleRulesSaved}
+              onSavingChange={setSavingRules}
+              onNotify={pushToast}
+            />
+          )}
         </Card>
       )}
 
-      {/* 3-Column Summary Strip */}
-      {selectedGroup && (
-        <section
-          aria-label="Selected group activity summary"
-          className="grid grid-cols-1 gap-6 md:grid-cols-3"
-        >
-          <Card variant="kpi" padding="md" className="flex items-center gap-4">
-            <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#0066cc]/20 bg-[#0066cc]/10 text-[#0066cc]">
-              <ReceiptText className="h-5 w-5" aria-hidden="true" />
-            </span>
-            <div className="flex flex-col">
-              <span className="text-[12px] text-ink-muted-48">
-                Monthly Logged Vouchers
-              </span>
-              <span className="text-[18px] font-semibold tracking-tight text-ink">
-                {selectedGroup.cycleTransactionCount}{" "}
-                {selectedGroup.cycleTransactionCount === 1
-                  ? "Transaction"
-                  : "Transactions"}
-              </span>
-            </div>
-          </Card>
-
-          <Card variant="kpi" padding="md" className="flex items-center gap-4">
-            <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700">
-              <Repeat className="h-5 w-5" aria-hidden="true" />
-            </span>
-            <div className="flex flex-col">
-              <span className="text-[12px] text-ink-muted-48">
-                Recurring Rules
-              </span>
-              <span className="text-[18px] font-semibold tracking-tight text-ink">
-                {selectedGroup.recurringRuleCount} Active
-              </span>
-            </div>
-          </Card>
-
-          <Card variant="kpi" padding="md" className="flex items-center gap-4">
-            <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-indigo-200 bg-indigo-50 text-indigo-700">
-              <CheckCircle2 className="h-5 w-5" aria-hidden="true" />
-            </span>
-            <div className="flex flex-col">
-              <span className="text-[12px] text-ink-muted-48">
-                Ledger Consensus
-              </span>
-              <span className="text-[18px] font-semibold tracking-tight text-ink">
-                {selectedGroup.isFullySettled ? "Fully Settled" : "Open Balances"}
-              </span>
-            </div>
-          </Card>
-        </section>
-      )}
-
-      {/* Collapsible Archived Ledgers */}
-      {archivedGroups.length > 0 && (
-        <section aria-label="Archived ledgers" className="flex flex-col gap-3">
-          <button
-            type="button"
-            aria-expanded={archivedExpanded}
-            aria-controls="archived-ledgers-panel"
-            onClick={() => setArchivedExpanded((prev) => !prev)}
-            className="flex w-fit items-center gap-2 rounded-pill border border-hairline bg-canvas px-4 py-2 text-[13px] font-medium text-ink-muted-80 transition-colors hover:bg-surface-pearl focus-visible:outline-2 focus-visible:outline-primary-focus"
-          >
-            <Archive className="h-4 w-4 text-ink-muted-48" aria-hidden="true" />
-            <span>Archived Ledgers ({archivedGroups.length})</span>
-            {archivedExpanded ? (
-              <ChevronDown className="h-4 w-4" aria-hidden="true" />
-            ) : (
-              <ChevronRight className="h-4 w-4" aria-hidden="true" />
-            )}
-          </button>
-
-          {archivedExpanded && (
-            <div
-              id="archived-ledgers-panel"
-              className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3"
-            >
-              {archivedGroups.map((archived) => (
-                <Card
-                  key={archived.id}
-                  variant="sub-card"
-                  padding="md"
-                  data-testid={`archived-group-card-${archived.id}`}
-                  className="flex flex-col justify-between gap-3"
-                >
-                  <div className="flex flex-col gap-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[15px] font-semibold text-ink">
-                        {archived.name}
-                      </span>
-                      <Badge tone="neutral" size="sm">
-                        ARCHIVED
-                      </Badge>
-                    </div>
-                    <p className="text-[12px] text-ink-muted-48">
-                      Read-only · {archived.baseCurrency} ·{" "}
-                      {archived.members.length} members · Net{" "}
-                      {formatMinorUnits(
-                        archived.userNetLedgerCents,
-                        archived.baseCurrency,
-                        { showPlus: true },
-                      )}
-                    </p>
-                  </div>
-                  <div className="flex items-center justify-between border-t border-hairline pt-2.5">
-                    <span className="text-[11px] font-medium text-ink-muted-48">
-                      Writes locked
-                    </span>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => setInspectedArchivedId(archived.id)}
-                    >
-                      Inspect Ledger
-                    </Button>
-                  </div>
-                </Card>
-              ))}
-            </div>
-          )}
-        </section>
-      )}
-
+      {/* Create / Edit Group Modal */}
       <CreateGroupModal
-        open={createModalOpen}
-        onClose={() => setCreateModalOpen(false)}
+        open={groupModalState.open}
+        mode={groupModalState.mode}
+        group={groupModalState.group}
+        currentUserName={currentUser?.fullName ?? "You"}
+        currentUserEmail={currentUser?.email ?? ""}
+        onClose={() =>
+          setGroupModalState((prev) => ({ ...prev, open: false }))
+        }
         defaultCurrency={defaultCurrency}
         onCreated={handleGroupCreated}
+        onUpdated={handleGroupUpdated}
       />
 
       {selectedGroup && (
@@ -1737,15 +2061,92 @@ export function SplitGroupsClient({
         />
       )}
 
-      <ArchiveRulesModal
-        key={`${selectedGroup?.id ?? "none"}-${archiveModalOpen ? "open" : "closed"}`}
-        open={archiveModalOpen}
-        onClose={() => setArchiveModalOpen(false)}
-        groups={allGroups}
-        initialGroupId={selectedGroup?.id ?? null}
-        onSaved={handleArchiveRulesSaved}
-        onArchiveCheckCompleted={handleArchiveCheckCompleted}
-      />
+      {selectedGroup && (
+        <RecordSettlementModal
+          open={Boolean(settlementModalDebtKey)}
+          onClose={() => setSettlementModalDebtKey(null)}
+          debts={settlementDebts}
+          currentUserId={currentUser?.id ?? ""}
+          initialDebtKey={settlementModalDebtKey}
+          onSettled={handleSettlementRecorded}
+        />
+      )}
+
+      {archiveTargetGroup && (
+        <ConfirmDialog
+          open={Boolean(archiveTargetGroup)}
+          onClose={() => {
+            if (!actionLoading) setArchiveTargetGroup(null);
+          }}
+          onConfirm={handleArchiveGroupConfirm}
+          title={`Archive ${archiveTargetGroup.name}?`}
+          variant="danger"
+          loading={actionLoading}
+          confirmLabel="Archive Group"
+          description="This group will move to Archived (read-only) and stop accepting new expenses. Existing transactions and settlement history remain in your ledger."
+        >
+          {(() => {
+            const unsettledCount = archiveTargetGroup.members.filter(
+              (m) => m.netBalanceCents !== 0,
+            ).length;
+            return (
+              <div className="flex items-center justify-between gap-3 rounded-[14px] border border-hairline bg-surface-container-low p-3.5 text-[13px] tabular-nums">
+                <span className="font-medium text-outline">
+                  Current Net Ledger
+                </span>
+                <span className="font-semibold text-on-surface">
+                  {formatMinorUnits(
+                    archiveTargetGroup.userNetLedgerCents,
+                    archiveTargetGroup.baseCurrency,
+                    { showPlus: true },
+                  )}{" "}
+                  ({unsettledCount}{" "}
+                  {unsettledCount === 1
+                    ? "unsettled balance"
+                    : "unsettled balances"}
+                  )
+                </span>
+              </div>
+            );
+          })()}
+        </ConfirmDialog>
+      )}
+
+      {deleteTargetGroup && (
+        <ConfirmDialog
+          open={Boolean(deleteTargetGroup)}
+          onClose={() => {
+            if (!actionLoading) setDeleteTargetGroup(null);
+          }}
+          onConfirm={handleDeleteGroupConfirm}
+          title={`Delete ${deleteTargetGroup.name}?`}
+          variant="danger"
+          loading={actionLoading}
+          confirmLabel="Delete Group"
+          blockedReason={(() => {
+            const unsettledCount = deleteTargetGroup.members.filter(
+              (m) => m.netBalanceCents !== 0,
+            ).length;
+            if (unsettledCount === 0 && deleteTargetGroup.isFullySettled) {
+              return undefined;
+            }
+            return `Cannot permanently delete ${deleteTargetGroup.name} while ${
+              unsettledCount > 0 ? unsettledCount : "some"
+            } ${
+              unsettledCount === 1 ? "member has" : "members have"
+            } an unsettled balance. Restore the group and settle all balances to ${formatMinorUnits(0, deleteTargetGroup.baseCurrency)} first.`;
+          })()}
+          description={(() => {
+            const unsettledCount = deleteTargetGroup.members.filter(
+              (m) => m.netBalanceCents !== 0,
+            ).length;
+            if (unsettledCount > 0 || !deleteTargetGroup.isFullySettled) {
+              return `All member balances must equal ${formatMinorUnits(0, deleteTargetGroup.baseCurrency)} before ${deleteTargetGroup.name} can be permanently deleted.`;
+            }
+            return `All member balances are ${formatMinorUnits(0, deleteTargetGroup.baseCurrency)}. Permanently deleting ${deleteTargetGroup.name} removes the group, its expenses, settlements, and audit history. This action cannot be undone.`;
+          })()}
+        />
+      )}
 
       {leaveTargetGroup && (
         <ConfirmDialog
@@ -1807,21 +2208,6 @@ export function SplitGroupsClient({
               ? `${removeTarget.member.name} has an unsettled balance of ${formatMinorUnits(removeTarget.member.netBalanceCents, removeTarget.group.baseCurrency, { showPlus: true })}. Removing them transitions their membership to FORMER_MEMBER: they are excluded from all future default splits while retaining settlement access until cleared.`
               : `${removeTarget.member.name} has a ${formatMinorUnits(0, removeTarget.group.baseCurrency)} balance and will be removed from ${removeTarget.group.name}.`
           }
-        />
-      )}
-
-      {archivePromptTarget && (
-        <ConfirmDialog
-          open={Boolean(archivePromptTarget)}
-          onClose={() => {
-            if (!actionLoading) setArchivePromptTarget(null);
-          }}
-          onConfirm={handleArchiveFromPrompt}
-          title={`Archive ${archivePromptTarget.name}?`}
-          variant="danger"
-          loading={actionLoading}
-          confirmLabel="Archive Group"
-          description={`Lease ended on ${archivePromptTarget.leaseEndDate}. Archiving transitions ${archivePromptTarget.name} to ARCHIVED (read-only), blocking all new expenses, settlements, and recurring rules.`}
         />
       )}
 

@@ -1,5 +1,6 @@
 import type {
   ExpenseSplitMethod,
+  GroupCategory,
   GroupStatus,
   GroupType,
   MemberStatus,
@@ -22,6 +23,7 @@ export interface ShellGroupSummary {
   slug?: string;
   status: GroupStatus;
   groupType: GroupType;
+  category?: GroupCategory;
   baseCurrency: string;
   defaultSplitMode?: SplitMode;
   simplifyDebts?: boolean;

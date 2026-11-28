@@ -221,6 +221,7 @@ beforeEach(() => {
   pushMock.mockReset();
   refreshMock.mockReset();
   vi.restoreAllMocks();
+
 });
 
 afterEach(() => {
@@ -228,29 +229,19 @@ afterEach(() => {
 });
 
 describe("Spotlight Partition, ADMIN Edit Ratios Modal & Audit Log Drawer", () => {
-  it("renders Spotlight Partition with Paid This Period, Owed/Due status, Assigned Habitat, lease info, and 3-column summary strip", () => {
+  it("renders Spotlight Partition with Group Members Paid/Share/Net Position and Who Owes Whom transfers", () => {
     renderSplitGroups();
 
     const spotlight = screen.getByTestId("spotlight-partition");
-    expect(within(spotlight).getAllByText("Paid This Period").length).toBe(3);
-    expect(within(spotlight).getByText("Owed +$462.50")).toBeInTheDocument();
-    expect(within(spotlight).getByText("Due -$462.50")).toBeInTheDocument();
+    expect(within(spotlight).getByText("GROUP MEMBERS (3)")).toBeInTheDocument();
+    expect(within(spotlight).getAllByText("Paid:").length).toBe(3);
+    expect(within(spotlight).getAllByText("Share:").length).toBe(3);
+    expect(within(spotlight).getAllByText("Net Position").length).toBe(3);
+    expect(within(spotlight).getByText("+$462.50")).toBeInTheDocument();
+    expect(within(spotlight).getByText("-$462.50")).toBeInTheDocument();
     expect(within(spotlight).getByText("Settled")).toBeInTheDocument();
-
-    const habitatCard = screen.getByTestId("assigned-habitat-card");
-    expect(within(habitatCard).getByText("Assigned Habitat")).toBeInTheDocument();
-    expect(within(habitatCard).getByText("Apt 4B Roommates")).toBeInTheDocument();
-    expect(within(habitatCard).getByText("$4,500.00 Monthly Target")).toBeInTheDocument();
-    expect(within(habitatCard).getByText("Lease ends 2027-08-31")).toBeInTheDocument();
-    expect(within(habitatCard).getByText("Auto-ingestion active (2)")).toBeInTheDocument();
-
-    const summary = screen.getByLabelText("Selected group activity summary");
-    expect(within(summary).getByText("Monthly Logged Vouchers")).toBeInTheDocument();
-    expect(within(summary).getByText("4 Transactions")).toBeInTheDocument();
-    expect(within(summary).getByText("Recurring Rules")).toBeInTheDocument();
-    expect(within(summary).getByText("2 Active")).toBeInTheDocument();
-    expect(within(summary).getByText("Ledger Consensus")).toBeInTheDocument();
-    expect(within(summary).getByText("Open Balances")).toBeInTheDocument();
+    expect(within(spotlight).getByText("WHO OWES WHOM")).toBeInTheDocument();
+    expect(within(spotlight).getByText("1 transfer to zero balances")).toBeInTheDocument();
   });
 
   it("enforces view-only ratio display for MEMBER role and prevents saving changes", async () => {
@@ -260,44 +251,36 @@ describe("Spotlight Partition, ADMIN Edit Ratios Modal & Audit Log Drawer", () =
     renderSplitGroups();
 
     // Switch to Tahoe Ski Cabin where current user is MEMBER
-    await user.click(
-      screen.getByRole("button", { name: "Manage Group Tahoe Ski Cabin" }),
-    );
+    await user.click(screen.getByTestId("group-card-grp-tahoe"));
 
     const spotlight = screen.getByTestId("spotlight-partition");
     expect(within(spotlight).getByText("View-only")).toBeInTheDocument();
+    await user.click(
+      within(spotlight).getByRole("tab", { name: "Split Rules & Invite" }),
+    );
     expect(
       within(spotlight).queryByRole("button", { name: "Edit Ratios" }),
     ).not.toBeInTheDocument();
 
-    const viewRatiosBtn = within(spotlight).getByRole("button", {
-      name: "View Ratios",
-    });
-    await user.click(viewRatiosBtn);
-
-    const dialog = screen.getByRole("dialog", {
-      name: "Split Rules & Ratios (View Only)",
-    });
-    expect(within(dialog).getByText("View-only split ratios")).toBeInTheDocument();
-    expect(within(dialog).getByText("35%")).toBeInTheDocument();
-    expect(within(dialog).getByText("65%")).toBeInTheDocument();
-
-    // Mode tabs are disabled and Save Ratios button is absent
+    // Save Rules CTA is hidden for MEMBER role and inline controls are disabled
     expect(
-      within(dialog).getByRole("tab", { name: "Equal Split" }),
-    ).toBeDisabled();
-    expect(
-      within(dialog).getByRole("tab", { name: "Custom Ratios" }),
-    ).toBeDisabled();
-    expect(
-      within(dialog).queryByRole("button", { name: "Save Ratios" }),
+      within(spotlight).queryByRole("button", { name: "Save Rules" }),
     ).not.toBeInTheDocument();
 
-    await user.click(within(dialog).getByRole("button", { name: "Close" }));
-    expect(fetchSpy).not.toHaveBeenCalledWith(
-      expect.stringContaining("/ratios"),
-      expect.anything(),
-    );
+    expect(
+      within(spotlight).getByLabelText("Alex Rivera split percentage"),
+    ).toBeDisabled();
+    expect(
+      within(spotlight).getByLabelText("Marcus Vance split percentage"),
+    ).toBeDisabled();
+    expect(
+      within(spotlight).getByRole("radio", { name: "Equal" }),
+    ).toBeDisabled();
+    expect(
+      within(spotlight).getByRole("radio", { name: "Custom" }),
+    ).toBeDisabled();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("rejects totals != 100% in Edit Ratios modal and clears NEEDS_RATIO_UPDATE on valid ADMIN save while updating Audit Log", async () => {
@@ -404,11 +387,11 @@ describe("Spotlight Partition, ADMIN Edit Ratios Modal & Audit Log Drawer", () =
     ).not.toBeInTheDocument();
 
     // Open Audit Log Drawer via "Log" button and verify recorded entries + filtering
-    await user.click(within(spotlight).getByRole("button", { name: "Log" }));
+    await user.click(within(spotlight).getByRole("button", { name: "Audit Log" }));
 
     const drawer = screen.getByTestId("audit-log-drawer");
     expect(
-      within(drawer).getByText("Apt 4B Roommates · Audit Log"),
+      screen.getByRole("dialog", { name: "Audit Log · Apt 4B Roommates" }),
     ).toBeInTheDocument();
     expect(
       within(drawer).getByText(
@@ -421,8 +404,22 @@ describe("Spotlight Partition, ADMIN Edit Ratios Modal & Audit Log Drawer", () =
       ),
     ).toBeInTheDocument();
 
-    // Filter to Governance only
-    await user.click(within(drawer).getByRole("tab", { name: "Governance" }));
+    // Filter to Rules (includes ratios & governance events)
+    await user.click(within(drawer).getByRole("tab", { name: "Rules" }));
+    expect(
+      within(drawer).getByText(
+        "Updated split ratios (Custom Ratios) and cleared review flag",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(drawer).getByText(
+        "Samira Patel joined in CUSTOM_RATIOS mode (0% initial share; review required)",
+      ),
+    ).toBeInTheDocument();
+
+    // Search filter narrows events by text
+    const searchInput = within(drawer).getByPlaceholderText("Filter log...");
+    await user.type(searchInput, "joined in CUSTOM_RATIOS");
     expect(
       within(drawer).queryByText(
         "Updated split ratios (Custom Ratios) and cleared review flag",
@@ -433,18 +430,94 @@ describe("Spotlight Partition, ADMIN Edit Ratios Modal & Audit Log Drawer", () =
         "Samira Patel joined in CUSTOM_RATIOS mode (0% initial share; review required)",
       ),
     ).toBeInTheDocument();
+    await user.clear(searchInput);
 
-    // Filter to Ratios & Rules only
-    await user.click(within(drawer).getByRole("tab", { name: "Ratios & Rules" }));
+    // Filter to Expenses and Settlements tabs
+    await user.click(within(drawer).getByRole("tab", { name: "Expenses" }));
+    expect(within(drawer).getByText("No matching audit events")).toBeInTheDocument();
+
+    await user.click(within(drawer).getByRole("tab", { name: "Settlements" }));
+    expect(within(drawer).getByText("No matching audit events")).toBeInTheDocument();
+
+    await user.click(within(drawer).getByRole("tab", { name: "All Events" }));
     expect(
-      within(drawer).getByText(
-        "Updated split ratios (Custom Ratios) and cleared review flag",
+      screen.getByRole("button", { name: "Export Log" }),
+    ).not.toBeDisabled();
+  });
+  it("opens RecordSettlementModal from WHO OWES WHOM Mark Settled and filters/exports Audit Log events", async () => {
+    const user = userEvent.setup();
+    const mixedAuditLogs: GroupAuditLogEntry[] = [
+      {
+        id: "exp-1",
+        groupId: "grp-apt-4b",
+        category: "LEDGER",
+        eventType: "EXPENSE_ADDED",
+        actorId: "usr-1",
+        actorName: "Alex Rivera",
+        summary: 'Alex Rivera added expense "Whole Foods Market"',
+        details: ["$368.40 · 3-Way Equal"],
+        createdAt: "2026-11-26T14:14:00.000Z",
+      },
+      {
+        id: "settle-1",
+        groupId: "grp-apt-4b",
+        category: "LEDGER",
+        eventType: "SETTLEMENT_RECORDED",
+        actorId: "usr-2",
+        actorName: "Elena Rostova",
+        summary: "Elena Rostova settled $120.00 with Alex Rivera",
+        details: ["Payment rail: VENMO"],
+        createdAt: "2026-11-24T11:05:00.000Z",
+      },
+      ...INITIAL_AUDIT_LOGS,
+    ];
+
+    const groupsWithMixedLogs: SplitGroupDetail[] = GROUPS_FIXTURE.map((g, i) =>
+      i === 0 ? { ...g, auditLogs: mixedAuditLogs } : g,
+    );
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          groupId: "grp-apt-4b",
+          entries: mixedAuditLogs,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
       ),
+    );
+
+    renderSplitGroups(groupsWithMixedLogs);
+
+    const spotlight = screen.getByTestId("spotlight-partition");
+    const markSettledBtn = within(spotlight).getByTestId(
+      "who-owes-settle-usr-2-usr-1",
+    );
+    await user.click(markSettledBtn);
+
+    const settleDialog = screen.getByRole("dialog", {
+      name: "Record Settlement",
+    });
+    expect(within(settleDialog).getByDisplayValue("462.50")).toBeInTheDocument();
+    await user.click(within(settleDialog).getByRole("button", { name: "Cancel" }));
+
+    await user.click(within(spotlight).getByRole("button", { name: "Audit Log" }));
+    const auditDrawer = screen.getByTestId("audit-log-drawer");
+
+    await user.click(within(auditDrawer).getByRole("tab", { name: "Expenses" }));
+    expect(
+      within(auditDrawer).getByText('Alex Rivera added expense "Whole Foods Market"'),
     ).toBeInTheDocument();
     expect(
-      within(drawer).queryByText(
-        "Samira Patel joined in CUSTOM_RATIOS mode (0% initial share; review required)",
-      ),
+      within(auditDrawer).queryByText("Elena Rostova settled $120.00 with Alex Rivera"),
+    ).not.toBeInTheDocument();
+
+    await user.click(within(auditDrawer).getByRole("tab", { name: "Settlements" }));
+    expect(
+      within(auditDrawer).getByText("Elena Rostova settled $120.00 with Alex Rivera"),
+    ).toBeInTheDocument();
+    expect(
+      within(auditDrawer).queryByText('Alex Rivera added expense "Whole Foods Market"'),
     ).not.toBeInTheDocument();
   });
 });

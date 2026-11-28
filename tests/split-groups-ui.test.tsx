@@ -45,95 +45,153 @@ import type {
 
 const CURRENT_USER: ShellUserSummary = {
   id: "usr-1",
-  fullName: "Alex Rivera",
-  email: "alex@example.com",
+  fullName: "Jordan Doe",
+  email: "jordan@example.com",
 };
 
 const INITIAL_ACTIVE_GROUPS: SplitGroupDetail[] = [
   {
     id: "grp-apt-4b",
-    name: "Apt 4B Roommates",
+    name: "Apartment 4B Shared",
     slug: "apt-4b",
     groupType: "RESIDENTIAL",
+    category: "HOME",
     status: "ACTIVE",
     baseCurrency: "USD",
     defaultSplitMode: "EQUAL",
     simplifyDebts: true,
     operationalBudgetCents: 450000,
     billingCycleAnchorDay: 1,
-    leaseEndDate: "2027-08-31",
+    leaseEndDate: null,
     inviteToken: "token-apt4b",
-    cycleTurnoverCents: 384250,
+    cycleTurnoverCents: 283770,
     cycleTransactionCount: 4,
-    userNetLedgerCents: 46250,
-    recurringRuleCount: 2,
+    userNetLedgerCents: 58000,
+    recurringRuleCount: 0,
     isFullySettled: false,
     currentUserRole: "ADMIN",
     members: [
       {
         userId: "usr-1",
-        name: "Alex Rivera",
-        email: "alex@example.com",
+        name: "Jordan Doe",
+        email: "jordan@example.com",
         role: "ADMIN",
         status: "ACTIVE",
-        sharePercentage: 50,
-        paidThisPeriodCents: 238375,
-        netBalanceCents: 46250,
+        sharePercentage: 33.33,
+        paidThisPeriodCents: 152590,
+        netBalanceCents: 58000,
         isCurrentUser: true,
       },
       {
         userId: "usr-2",
-        name: "Elena Rostova",
-        email: "elena@example.com",
+        name: "Marcus Kim",
+        email: "marcus@example.com",
         role: "MEMBER",
         status: "ACTIVE",
-        sharePercentage: 50,
-        paidThisPeriodCents: 145875,
-        netBalanceCents: -46250,
+        sharePercentage: 33.33,
+        paidThisPeriodCents: 65590,
+        netBalanceCents: -29000,
+        isCurrentUser: false,
+      },
+      {
+        userId: "usr-3",
+        name: "Alex Lee",
+        email: "alex@example.com",
+        role: "MEMBER",
+        status: "ACTIVE",
+        sharePercentage: 33.34,
+        paidThisPeriodCents: 65590,
+        netBalanceCents: -29000,
         isCurrentUser: false,
       },
     ],
   },
   {
-    id: "grp-tahoe",
-    name: "Tahoe Ski Cabin",
-    slug: "tahoe-ski",
+    id: "grp-cabin",
+    name: "Weekend Cabin Crew",
+    slug: "weekend-cabin",
     groupType: "TRIP",
+    category: "TRIP",
     status: "ACTIVE",
-    baseCurrency: "EUR",
-    defaultSplitMode: "EQUAL",
+    baseCurrency: "USD",
+    defaultSplitMode: "CUSTOM",
     simplifyDebts: true,
     operationalBudgetCents: null,
     billingCycleAnchorDay: 1,
     leaseEndDate: null,
-    inviteToken: "token-tahoe",
-    cycleTurnoverCents: 245000,
+    inviteToken: "token-cabin",
+    cycleTurnoverCents: 124000,
     cycleTransactionCount: 2,
-    userNetLedgerCents: -8500,
+    userNetLedgerCents: -14540,
     recurringRuleCount: 0,
     isFullySettled: false,
     currentUserRole: "MEMBER",
     members: [
       {
         userId: "usr-1",
-        name: "Alex Rivera",
-        email: "alex@example.com",
+        name: "Jordan Doe",
+        email: "jordan@example.com",
         role: "MEMBER",
         status: "ACTIVE",
         sharePercentage: 50,
-        paidThisPeriodCents: 114000,
-        netBalanceCents: -8500,
+        paidThisPeriodCents: 47460,
+        netBalanceCents: -14540,
         isCurrentUser: true,
       },
       {
-        userId: "usr-3",
-        name: "Marcus Vance",
+        userId: "usr-2",
+        name: "Marcus Kim",
         email: "marcus@example.com",
         role: "ADMIN",
         status: "ACTIVE",
         sharePercentage: 50,
-        paidThisPeriodCents: 131000,
-        netBalanceCents: 8500,
+        paidThisPeriodCents: 76540,
+        netBalanceCents: 14540,
+        isCurrentUser: false,
+      },
+    ],
+  },
+  {
+    id: "grp-lunch",
+    name: "Friday Lunch Club",
+    slug: "friday-lunch",
+    groupType: "RECURRING",
+    category: "DINING",
+    status: "ACTIVE",
+    baseCurrency: "USD",
+    defaultSplitMode: "EQUAL",
+    simplifyDebts: true,
+    operationalBudgetCents: null,
+    billingCycleAnchorDay: 1,
+    leaseEndDate: null,
+    inviteToken: "token-lunch",
+    cycleTurnoverCents: 34000,
+    cycleTransactionCount: 1,
+    userNetLedgerCents: 0,
+    recurringRuleCount: 0,
+    isFullySettled: true,
+    currentUserRole: "ADMIN",
+    members: [
+      {
+        userId: "usr-1",
+        name: "Jordan Doe",
+        email: "jordan@example.com",
+        role: "ADMIN",
+        status: "ACTIVE",
+        sharePercentage: 50,
+        paidThisPeriodCents: 17000,
+        netBalanceCents: 0,
+        isCurrentUser: true,
+      },
+      {
+        userId: "usr-2",
+        name: "Marcus Kim",
+        email: "marcus@example.com",
+        role: "MEMBER",
+        status: "ACTIVE",
+        sharePercentage: 50,
+        paidThisPeriodCents: 17000,
+        netBalanceCents: 0,
         isCurrentUser: false,
       },
     ],
@@ -175,28 +233,40 @@ afterEach(() => {
   cleanup();
 });
 
-describe("Split Groups Page, Create Modal & Active Group Sync", () => {
-  it("renders active group cards with type badge, AvatarStack, formatted turnover/net ledger, Manage Group, and Quick Split", () => {
+describe("Split Groups v2 Active View, 4-Column Cards, Create/Edit Modal & Card Menu", () => {
+  it("renders 4-column desktop grid with category badge, split rule, AvatarStack, Cycle Spend, and Your Net", () => {
     renderSplitGroupsPage();
 
+    const grid = screen.getByRole("region", { name: "Active split groups" });
+    expect(grid.className).toContain("grid-cols-1");
+    expect(grid.className).toContain("xl:grid-cols-4");
+
     const aptCard = screen.getByTestId("group-card-grp-apt-4b");
-    expect(within(aptCard).getByText("Primary Residence")).toBeInTheDocument();
-    expect(within(aptCard).getByText("Apt 4B Roommates")).toBeInTheDocument();
+    expect(within(aptCard).getByText("Home")).toBeInTheDocument();
+    expect(within(aptCard).getByText("Apartment 4B Shared")).toBeInTheDocument();
+    expect(within(aptCard).getByText("3-Way Equal (33.3%)")).toBeInTheDocument();
     expect(
       within(aptCard).getByRole("group", {
-        name: /Members: Alex Rivera, Elena Rostova/i,
+        name: /Members: Jordan Doe, Marcus Kim, Alex Lee/i,
       }),
     ).toBeInTheDocument();
-    expect(within(aptCard).getByText("$3,842.50")).toBeInTheDocument();
-    expect(within(aptCard).getByText("+$462.50")).toBeInTheDocument();
+    expect(within(aptCard).getByText("Cycle Spend")).toBeInTheDocument();
+    expect(within(aptCard).getByText("$2,837.70")).toBeInTheDocument();
+    expect(within(aptCard).getByText("Your Net")).toBeInTheDocument();
+    expect(within(aptCard).getByText("+$580.00")).toBeInTheDocument();
 
-    const tahoeCard = screen.getByTestId("group-card-grp-tahoe");
-    expect(within(tahoeCard).getByText("Seasonal Trip")).toBeInTheDocument();
-    expect(within(tahoeCard).getByText("€2,450.00")).toBeInTheDocument();
-    expect(within(tahoeCard).getByText("-€85.00")).toBeInTheDocument();
+    const cabinCard = screen.getByTestId("group-card-grp-cabin");
+    expect(within(cabinCard).getByText("Trip")).toBeInTheDocument();
+    expect(within(cabinCard).getByText("Itemized Custom")).toBeInTheDocument();
+    expect(within(cabinCard).getByText("-$145.40")).toBeInTheDocument();
+
+    const lunchCard = screen.getByTestId("group-card-grp-lunch");
+    expect(within(lunchCard).getByText("Dining")).toBeInTheDocument();
+    expect(within(lunchCard).getByText("2-Way (50/50)")).toBeInTheDocument();
+    expect(within(lunchCard).getByText("Settled")).toBeInTheDocument();
   });
 
-  it("synchronizes ?group= URL param, Spotlight panel, and Sidebar Active Group switcher on Manage Group and Quick Split", async () => {
+  it("selects a group into Spotlight and syncs Sidebar ACTIVE GROUP when clicking a group card", async () => {
     const user = userEvent.setup();
     renderSplitGroupsPage();
 
@@ -204,59 +274,70 @@ describe("Split Groups Page, Create Modal & Active Group Sync", () => {
     const splitGroupsLink = within(nav).getByRole("link", {
       name: /Split Groups/i,
     });
-    expect(within(splitGroupsLink).getByText("2")).toBeInTheDocument();
+    expect(within(splitGroupsLink).getByText("3")).toBeInTheDocument();
 
-    // Click Manage Group on Tahoe Ski Cabin
-    await user.click(
-      screen.getByRole("button", { name: "Manage Group Tahoe Ski Cabin" }),
-    );
+    // Click Weekend Cabin Crew card directly
+    await user.click(screen.getByTestId("group-card-grp-cabin"));
 
     expect(replaceMock).toHaveBeenCalledWith(
-      "/split-groups?cycle=2026-11&group=grp-tahoe",
+      "/split-groups?cycle=2026-11&group=grp-cabin",
       { scroll: false },
     );
 
-    // Sidebar Active Group switcher reflects Tahoe Ski Cabin
+    // Sidebar Active Group switcher reflects Weekend Cabin Crew
     expect(
       screen.getByRole("button", { name: /Active Group/i }),
-    ).toHaveTextContent("Tahoe Ski Cabin");
+    ).toHaveTextContent("Weekend Cabin Crew");
 
-    // Spotlight Partition switches to Tahoe Ski Cabin
+    // Spotlight panel switches to Weekend Cabin Crew
     const spotlight = screen.getByTestId("spotlight-partition");
     expect(
-      within(spotlight).getByRole("heading", {
-        name: /Tahoe Ski Cabin · Split Rules & Ratios/i,
-      }),
+      within(spotlight).getByRole("heading", { name: "Weekend Cabin Crew" }),
     ).toBeInTheDocument();
-
-    // Quick Split on Apt 4B selects Apt 4B and opens the Add Expense dialog scoped to it
-    await user.click(
-      screen.getByRole("button", { name: "Quick Split for Apt 4B Roommates" }),
-    );
-    expect(replaceMock).toHaveBeenLastCalledWith(
-      "/split-groups?cycle=2026-11&group=grp-apt-4b",
-      { scroll: false },
-    );
-    expect(
-      screen.getByRole("dialog", { name: "Add Expense" }),
-    ).toHaveTextContent("Logging to Apt 4B Roommates");
   });
 
-  it("validates fields, creates a new group via modal, assigns creator as ADMIN, and syncs Sidebar & ?group=", async () => {
+  it("opens the card ⋮ menu with Edit Group, Split Rules & Invite, Audit Log, and Archive Group", async () => {
+    const user = userEvent.setup();
+    renderSplitGroupsPage();
+
+    await user.click(
+      screen.getByRole("button", { name: "Actions for Apartment 4B Shared" }),
+    );
+
+    expect(screen.getByRole("menuitem", { name: "Edit Group" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("menuitem", { name: "Split Rules & Invite" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Audit Log" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("menuitem", { name: "Archive Group" }),
+    ).toBeInTheDocument();
+
+    // Click Split Rules & Invite from card menu
+    await user.click(
+      screen.getByRole("menuitem", { name: "Split Rules & Invite" }),
+    );
+    expect(
+      screen.getByTestId("member-invitation-gateway"),
+    ).toBeInTheDocument();
+  });
+
+  it("creates a new group and edits an existing group via Create / Edit Group modal with v2 categories", async () => {
     const user = userEvent.setup();
     const createdGroup: SplitGroupDetail = {
-      id: "grp-berlin",
-      name: "Berlin Studio",
-      slug: "berlin-studio-abc123",
+      id: "grp-utilities",
+      name: "Shared Utilities",
+      slug: "shared-utilities-abc123",
       groupType: "RECURRING",
+      category: "UTILITIES",
       status: "ACTIVE",
       baseCurrency: "EUR",
-      defaultSplitMode: "EQUAL",
+      defaultSplitMode: "PERCENTAGE",
       simplifyDebts: true,
-      operationalBudgetCents: 125050,
-      billingCycleAnchorDay: 15,
+      operationalBudgetCents: null,
+      billingCycleAnchorDay: 1,
       leaseEndDate: null,
-      inviteToken: "tok-berlin",
+      inviteToken: "tok-util",
       cycleTurnoverCents: 0,
       cycleTransactionCount: 0,
       userNetLedgerCents: 0,
@@ -266,8 +347,8 @@ describe("Split Groups Page, Create Modal & Active Group Sync", () => {
       members: [
         {
           userId: "usr-1",
-          name: "Alex Rivera",
-          email: "alex@example.com",
+          name: "Jordan Doe",
+          email: "jordan@example.com",
           role: "ADMIN",
           status: "ACTIVE",
           sharePercentage: 100,
@@ -278,95 +359,115 @@ describe("Split Groups Page, Create Modal & Active Group Sync", () => {
       ],
     };
 
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          group: createdGroup,
-          shellGroup: toShellGroupSummary(createdGroup),
-        }),
-        { status: 201, headers: { "Content-Type": "application/json" } },
-      ),
-    );
+    const updatedGroup: SplitGroupDetail = {
+      ...createdGroup,
+      name: "Utilities & Fiber",
+      category: "OTHER",
+      defaultSplitMode: "CUSTOM",
+    };
+
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            group: createdGroup,
+            shellGroup: toShellGroupSummary(createdGroup),
+          }),
+          { status: 201, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            group: updatedGroup,
+            shellGroup: toShellGroupSummary(updatedGroup),
+            invitedEmails: [],
+            removedMemberIds: [],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
 
     renderSplitGroupsPage();
 
-    await user.click(screen.getByRole("button", { name: "Create New Group" }));
-
-    const dialog = screen.getByRole("dialog", { name: "Create New Group" });
-    expect(dialog).toBeInTheDocument();
+    // 1. Open Create Group modal
+    await user.click(screen.getByRole("button", { name: "Create Group" }));
+    const createDialog = screen.getByRole("dialog", { name: "Create Group" });
 
     // Submit empty form to check validation
-    await user.click(within(dialog).getByRole("button", { name: "Create Group" }));
+    await user.click(
+      within(createDialog).getByRole("button", { name: "Create Group" }),
+    );
     expect(
-      within(dialog).getByText("Please enter a group name."),
+      within(createDialog).getByText("Please enter a group name."),
     ).toBeInTheDocument();
     expect(fetchSpy).not.toHaveBeenCalled();
 
-    // Fill out form fields
-    const nameInput = within(dialog).getByLabelText(/Group Name/i);
-    await user.type(nameInput, "Berlin Studio");
-
-    // Select Group Type -> Recurring Flat
-    await user.click(within(dialog).getByRole("button", { name: /Group Type/i }));
-    await user.click(within(dialog).getByRole("option", { name: /Recurring Flat/i }));
-
-    // Select Base Currency -> EUR
+    // Fill fields: Name, Category=Utilities, Default Split Method=Percentage, Currency=EUR, Member email
+    await user.type(
+      within(createDialog).getByLabelText(/Group Name/i),
+      "Shared Utilities",
+    );
     await user.click(
-      within(dialog).getByRole("button", { name: /Base Currency/i }),
+      within(createDialog).getByRole("radio", { name: "Utilities" }),
     );
-    await user.click(within(dialog).getByRole("option", { name: /EUR/i }));
-
-    // Operational Budget -> 1250.50 (converts to 125050 minor units)
-    const budgetInput = within(dialog).getByLabelText(/Operational Budget/i);
-    await user.type(budgetInput, "1250.50");
-
-    // Billing Cycle Anchor Day -> 15
-    const anchorInput = within(dialog).getByLabelText(
-      /Billing Cycle Anchor Day/i,
+    await user.click(
+      within(createDialog).getByRole("radio", { name: "Percentage" }),
     );
-    await user.clear(anchorInput);
-    await user.type(anchorInput, "15");
+    await user.click(
+      within(createDialog).getByRole("button", { name: /Currency/i }),
+    );
+    await user.click(within(createDialog).getByRole("option", { name: /EUR/i }));
 
-    // Submit valid form (leaving optional lease_end_date empty)
-    await user.click(within(dialog).getByRole("button", { name: "Create Group" }));
+    await user.type(
+      within(createDialog).getByLabelText("Add member by email"),
+      "alex@example.com",
+    );
+    await user.click(within(createDialog).getByRole("button", { name: "Add" }));
+    expect(within(createDialog).getByText("alex@example.com")).toBeInTheDocument();
+
+    await user.click(
+      within(createDialog).getByRole("button", { name: "Create Group" }),
+    );
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
-    const [fetchUrl, fetchInit] = fetchSpy.mock.calls[0];
-    expect(fetchUrl).toBe("/api/groups");
-    expect(JSON.parse(String(fetchInit?.body))).toEqual({
-      name: "Berlin Studio",
-      group_type: "RECURRING",
+    expect(JSON.parse(String(fetchSpy.mock.calls[0][1]?.body))).toEqual({
+      name: "Shared Utilities",
+      category: "UTILITIES",
+      default_split_mode: "PERCENTAGE",
       base_currency: "EUR",
-      operational_budget_cents: 125050,
-      billing_cycle_anchor_day: 15,
-      lease_end_date: null,
+      member_emails: ["alex@example.com"],
     });
 
-    // Modal closes and new group appears immediately
-    expect(
-      screen.queryByRole("dialog", { name: "Create New Group" }),
-    ).not.toBeInTheDocument();
+    const newCard = screen.getByTestId("group-card-grp-utilities");
+    expect(within(newCard).getByText("Shared Utilities")).toBeInTheDocument();
+    expect(within(newCard).getByText("Utilities")).toBeInTheDocument();
 
-    const newCard = screen.getByTestId("group-card-grp-berlin");
-    expect(within(newCard).getByText("Berlin Studio")).toBeInTheDocument();
-    expect(within(newCard).getByText("Recurring Flat")).toBeInTheDocument();
-
-    // Sidebar Split Groups badge increments from 2 to 3 & Active Group switches to Berlin Studio
-    const nav = screen.getByRole("navigation", { name: "Primary" });
-    const splitGroupsLink = within(nav).getByRole("link", {
-      name: /Split Groups/i,
-    });
-    expect(within(splitGroupsLink).getByText("3")).toBeInTheDocument();
-
-    expect(
-      screen.getByRole("button", { name: /Active Group/i }),
-    ).toHaveTextContent("Berlin Studio");
-
-    expect(replaceMock).toHaveBeenCalledWith(
-      "/split-groups?cycle=2026-11&group=grp-berlin",
-      { scroll: false },
+    // 2. Edit the newly created group via card ⋮ menu -> Edit Group
+    await user.click(
+      screen.getByRole("button", { name: "Actions for Shared Utilities" }),
     );
-    expect(refreshMock).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole("menuitem", { name: "Edit Group" }));
+
+    const editDialog = screen.getByRole("dialog", {
+      name: "Edit Group · Shared Utilities",
+    });
+    const editNameInput = within(editDialog).getByLabelText(/Group Name/i);
+    await user.clear(editNameInput);
+    await user.type(editNameInput, "Utilities & Fiber");
+    await user.click(within(editDialog).getByRole("radio", { name: "Other" }));
+    await user.click(within(editDialog).getByRole("radio", { name: "Custom" }));
+
+    await user.click(
+      within(editDialog).getByRole("button", { name: "Save Group" }),
+    );
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(fetchSpy.mock.calls[1][0]).toBe("/api/groups/grp-utilities");
+    expect(fetchSpy.mock.calls[1][1]?.method).toBe("PATCH");
+    expect(within(newCard).getByText("Utilities & Fiber")).toBeInTheDocument();
+    expect(within(newCard).getByText("Other")).toBeInTheDocument();
   });
 
   it("renders empty state and error state with retry action", async () => {
@@ -377,7 +478,7 @@ describe("Split Groups Page, Create Modal & Active Group Sync", () => {
       screen.getByText("No active split groups yet"),
     ).toBeInTheDocument();
     expect(
-      screen.getAllByRole("button", { name: "Create New Group" }).length,
+      screen.getAllByRole("button", { name: "Create Group" }).length,
     ).toBeGreaterThanOrEqual(1);
 
     cleanup();
