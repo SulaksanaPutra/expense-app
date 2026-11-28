@@ -53,6 +53,7 @@ export default async function SettingsPage() {
       createdAt: new Date().toISOString(),
     },
     groupCount: 0,
+    settlementHandles: [],
     loadError: null,
   };
 
@@ -91,6 +92,7 @@ export default async function SettingsPage() {
   return (
     <SettingsClient
       initialProfile={settingsData.profile}
+      initialSettlementHandles={settingsData.settlementHandles}
       groupCount={settingsData.groupCount}
       balances={balances}
       initialSecurity={securityData}

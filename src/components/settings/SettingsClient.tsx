@@ -25,11 +25,18 @@ import {
 } from "@/lib/money";
 import type { SettingsUserProfile } from "@/lib/settings/service";
 import type { SecuritySessionsData } from "@/lib/settings/security";
+import {
+  PROVIDER_LABELS,
+  type SettlementHandleItem,
+} from "@/lib/settings/settlement-handles";
 import { AccountDangerZone } from "./AccountDangerZone";
 import { SecuritySessionsCard } from "./SecuritySessionsCard";
+import { SettlementHandleModal } from "./SettlementHandleModal";
+import { SettlementHandlesCard } from "./SettlementHandlesCard";
 
 export interface SettingsClientProps {
   initialProfile: SettingsUserProfile;
+  initialSettlementHandles?: SettlementHandleItem[];
   groupCount?: number;
   balances: UserGroupBalanceSummary[];
   initialSecurity?: SecuritySessionsData;
@@ -109,6 +116,7 @@ async function compressAvatarFile(file: File): Promise<string> {
 
 export function SettingsClient({
   initialProfile,
+  initialSettlementHandles = [],
   groupCount = 0,
   balances,
   initialSecurity,
@@ -159,6 +167,21 @@ export function SettingsClient({
   const [monthlySummaryDigest, setMonthlySummaryDigest] = React.useState(
     initialProfile.notificationPrefs.monthly_summary_digest,
   );
+
+  // Settlement Handles state
+  const [settlementHandles, setSettlementHandles] = React.useState<
+    SettlementHandleItem[]
+  >(initialSettlementHandles);
+  const [busyHandleId, setBusyHandleId] = React.useState<string | null>(null);
+  const [handleModal, setHandleModal] = React.useState<{
+    open: boolean;
+    mode: "add" | "edit";
+    handle: SettlementHandleItem | null;
+  }>({
+    open: false,
+    mode: "add",
+    handle: null,
+  });
 
   // Form submission & validation state
   const [touched, setTouched] = React.useState<Record<string, boolean>>({});
@@ -470,9 +493,137 @@ export function SettingsClient({
     }
   };
 
+  const handleOpenAddHandle = () => {
+    setHandleModal({ open: true, mode: "add", handle: null });
+  };
+
+  const handleOpenEditHandle = (item: SettlementHandleItem) => {
+    setHandleModal({ open: true, mode: "edit", handle: item });
+  };
+
+  const handleCloseHandleModal = () => {
+    setHandleModal((prev) => ({ ...prev, open: false }));
+  };
+
+  const handleHandleSaved = (
+    nextHandles: SettlementHandleItem[],
+    saved: SettlementHandleItem,
+    mode: "add" | "edit",
+  ) => {
+    setSettlementHandles(nextHandles);
+    setHandleModal((prev) => ({ ...prev, open: false }));
+    pushToast({
+      tone: "success",
+      title:
+        mode === "add" ? "Settlement handle added" : "Settlement handle updated",
+      description: `${PROVIDER_LABELS[saved.provider]} (${saved.handle})${saved.isDefault ? " is now your default payout handle." : " has been saved."}`,
+    });
+    router.refresh();
+  };
+
+  const handleHandleDeletedFromModal = (
+    nextHandles: SettlementHandleItem[],
+  ) => {
+    setSettlementHandles(nextHandles);
+    setHandleModal((prev) => ({ ...prev, open: false }));
+    pushToast({
+      tone: "info",
+      title: "Settlement handle deleted",
+      description: "The payout handle has been removed from your settings.",
+    });
+    router.refresh();
+  };
+
+  const handleSetDefaultHandle = async (item: SettlementHandleItem) => {
+    if (item.isDefault || busyHandleId) return;
+    setBusyHandleId(item.id);
+    try {
+      const response = await fetch(
+        `/api/settings/settlement-handles/${encodeURIComponent(item.id)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ is_default: true }),
+        },
+      );
+      const payload = (await response.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+        handles?: SettlementHandleItem[];
+      };
+      if (!response.ok || !Array.isArray(payload.handles)) {
+        pushToast({
+          tone: "error",
+          title: "Could not update default handle",
+          description:
+            payload.error || "Unable to set default handle. Please try again.",
+        });
+        setBusyHandleId(null);
+        return;
+      }
+      setSettlementHandles(payload.handles);
+      setBusyHandleId(null);
+      pushToast({
+        tone: "success",
+        title: "Default handle updated",
+        description: `${PROVIDER_LABELS[item.provider]} (${item.handle}) is now your default settlement handle.`,
+      });
+      router.refresh();
+    } catch {
+      pushToast({
+        tone: "error",
+        title: "Network error",
+        description: "Unable to update default handle. Please try again.",
+      });
+      setBusyHandleId(null);
+    }
+  };
+
+  const handleDeleteHandleFromMenu = async (item: SettlementHandleItem) => {
+    if (busyHandleId) return;
+    setBusyHandleId(item.id);
+    try {
+      const response = await fetch(
+        `/api/settings/settlement-handles/${encodeURIComponent(item.id)}`,
+        { method: "DELETE" },
+      );
+      const payload = (await response.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+        handles?: SettlementHandleItem[];
+      };
+      if (!response.ok || !Array.isArray(payload.handles)) {
+        pushToast({
+          tone: "error",
+          title: "Could not delete handle",
+          description:
+            payload.error || "Unable to delete handle. Please try again.",
+        });
+        setBusyHandleId(null);
+        return;
+      }
+      setSettlementHandles(payload.handles);
+      setBusyHandleId(null);
+      pushToast({
+        tone: "info",
+        title: "Settlement handle deleted",
+        description: `Removed ${PROVIDER_LABELS[item.provider]} (${item.handle}).`,
+      });
+      router.refresh();
+    } catch {
+      pushToast({
+        tone: "error",
+        title: "Network error",
+        description: "Unable to delete settlement handle. Please try again.",
+      });
+      setBusyHandleId(null);
+    }
+  };
+
   const currencySymbol = getCurrencySymbol(displayCurrency);
 
   return (
+    <>
     <form
       onSubmit={handleSaveChanges}
       noValidate
@@ -733,7 +884,17 @@ export function SettingsClient({
 
         {/* RIGHT COLUMN (5 cols) */}
         <div className="flex flex-col gap-6 lg:col-span-5">
-          {/* Card 3: Notifications */}
+          {/* Card 3: Settlement Handles */}
+          <SettlementHandlesCard
+            handles={settlementHandles}
+            busyHandleId={busyHandleId}
+            onAddHandle={handleOpenAddHandle}
+            onEditHandle={handleOpenEditHandle}
+            onSetDefault={handleSetDefaultHandle}
+            onDeleteHandle={handleDeleteHandleFromMenu}
+          />
+
+          {/* Card 4: Notifications */}
           <Card variant="section" padding="md" className="space-y-4">
             <div>
               <h2 className="font-display text-[17px] font-semibold tracking-[-0.015em] text-on-surface">
@@ -830,5 +991,16 @@ export function SettingsClient({
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </form>
+
+    <SettlementHandleModal
+      open={handleModal.open}
+      mode={handleModal.mode}
+      initialHandle={handleModal.handle}
+      defaultIsDefault={settlementHandles.length === 0}
+      onClose={handleCloseHandleModal}
+      onSaved={handleHandleSaved}
+      onDeleted={handleHandleDeletedFromModal}
+    />
+    </>
   );
 }

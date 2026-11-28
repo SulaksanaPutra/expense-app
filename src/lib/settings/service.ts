@@ -18,6 +18,10 @@ import type {
   NotificationPrefs,
   SplitBreakdownItem,
 } from "@/types/database";
+import {
+  listSettlementHandles,
+  type SettlementHandleItem,
+} from "./settlement-handles";
 
 export interface SettingsAuthUser {
   id: string;
@@ -50,6 +54,7 @@ export interface SettingsUserProfile {
 export interface SettingsPageData {
   profile: SettingsUserProfile;
   groupCount: number;
+  settlementHandles: SettlementHandleItem[];
   loadError: string | null;
 }
 
@@ -264,6 +269,7 @@ export async function getSettingsPageData(
     const [
       { data: userRow, error: userErr },
       { data: membershipRows, error: memErr },
+      handlesRes,
     ] = await Promise.all([
       supabase
         .from("users")
@@ -277,7 +283,12 @@ export async function getSettingsPageData(
         .select("group_id")
         .eq("user_id", authUser.id)
         .eq("status", "ACTIVE"),
+      Promise.resolve()
+        .then(() => listSettlementHandles(supabase, authUser.id))
+        .catch(() => ({ ok: true as const, handles: [] as SettlementHandleItem[] })),
     ]);
+
+    const settlementHandles = handlesRes.ok ? handlesRes.handles : [];
 
     let resolvedUserRow: SettingsUserRow | null = userRow as SettingsUserRow | null;
     if (userErr && isMissingColumnError(userErr)) {
@@ -292,6 +303,7 @@ export async function getSettingsPageData(
         return {
           profile: fallbackProfile,
           groupCount: 0,
+          settlementHandles: [],
           loadError: fb.error.message || "Unable to load profile settings.",
         };
       }
@@ -309,6 +321,7 @@ export async function getSettingsPageData(
       return {
         profile: fallbackProfile,
         groupCount: 0,
+        settlementHandles: [],
         loadError: userErr.message || "Unable to load profile settings.",
       };
     }
@@ -350,12 +363,14 @@ export async function getSettingsPageData(
     return {
       profile,
       groupCount,
+      settlementHandles,
       loadError: memErr ? memErr.message : null,
     };
   } catch (err) {
     return {
       profile: fallbackProfile,
       groupCount: 0,
+      settlementHandles: [],
       loadError:
         err instanceof Error ? err.message : "Unable to load settings.",
     };
