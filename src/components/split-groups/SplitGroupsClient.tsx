@@ -52,6 +52,14 @@ import type {
   SplitGroupMemberDetail,
   SplitGroupsPageData,
 } from "@/lib/groups/types";
+import {
+  getSettlementDebtKey,
+  RecordSettlementModal,
+} from "@/components/expenses/RecordSettlementModal";
+import {
+  simplifyBipartiteGroupDebts,
+  type SimplifiedDebtEdge,
+} from "@/lib/expenses/debt-simplification";
 import { formatMinorUnits } from "@/lib/money";
 import type { GroupStatus, MemberStatus, SplitMode } from "@/types/database";
 import { AuditLogDrawer } from "./AuditLogDrawer";
@@ -86,39 +94,36 @@ function buildInvitePath(group: SplitGroupDetail): string {
 }
 
 function computeSimplifiedTransfers(
-  members: readonly SplitGroupMemberDetail[],
+  group: SplitGroupDetail,
 ): SimplifiedTransfer[] {
-  const debtors = members
-    .filter((m) => m.netBalanceCents < 0)
-    .map((m) => ({ member: m, remaining: Math.abs(Math.trunc(m.netBalanceCents)) }))
-    .sort((a, b) => b.remaining - a.remaining);
-
-  const creditors = members
-    .filter((m) => m.netBalanceCents > 0)
-    .map((m) => ({ member: m, remaining: Math.trunc(m.netBalanceCents) }))
-    .sort((a, b) => b.remaining - a.remaining);
+  const memberById = new Map(group.members.map((m) => [m.userId, m]));
+  const netByUser = new Map<string, number>();
+  for (const m of group.members) {
+    netByUser.set(m.userId, Math.trunc(m.netBalanceCents));
+  }
+  const edges = simplifyBipartiteGroupDebts({
+    group: {
+      id: group.id,
+      name: group.name,
+      baseCurrency: group.baseCurrency,
+      simplifyDebts: true,
+      members: group.members.map((m) => ({
+        userId: m.userId,
+        name: m.name,
+        instantSettlementTag: null,
+      })),
+    },
+    netByUser,
+  });
 
   const transfers: SimplifiedTransfer[] = [];
-  let di = 0;
-  let ci = 0;
-
-  while (di < debtors.length && ci < creditors.length) {
-    const debtor = debtors[di];
-    const creditor = creditors[ci];
-    const amount = Math.min(debtor.remaining, creditor.remaining);
-    if (amount > 0) {
-      transfers.push({
-        payer: debtor.member,
-        recipient: creditor.member,
-        amountCents: amount,
-      });
+  for (const edge of edges) {
+    const payer = memberById.get(edge.payerId);
+    const recipient = memberById.get(edge.recipientId);
+    if (payer && recipient) {
+      transfers.push({ payer, recipient, amountCents: edge.amountCents });
     }
-    debtor.remaining -= amount;
-    creditor.remaining -= amount;
-    if (debtor.remaining === 0) di += 1;
-    if (creditor.remaining === 0) ci += 1;
   }
-
   return transfers;
 }
 
@@ -155,6 +160,9 @@ export function SplitGroupsClient({
 
   const [editRatiosModalOpen, setEditRatiosModalOpen] = React.useState(false);
   const [auditDrawerOpen, setAuditDrawerOpen] = React.useState(false);
+  const [settlementModalDebtKey, setSettlementModalDebtKey] = React.useState<
+    string | null
+  >(null);
   const [inspectedArchivedId, setInspectedArchivedId] = React.useState<
     string | null
   >(null);
@@ -989,8 +997,96 @@ export function SplitGroupsClient({
   );
 
   const simplifiedTransfers = React.useMemo(
-    () => (selectedGroup ? computeSimplifiedTransfers(selectedGroup.members) : []),
+    () => (selectedGroup ? computeSimplifiedTransfers(selectedGroup) : []),
     [selectedGroup],
+  );
+
+  const settlementDebts = React.useMemo<SimplifiedDebtEdge[]>(() => {
+    if (!selectedGroup) return [];
+    return simplifiedTransfers.map((t) => ({
+      groupId: selectedGroup.id,
+      groupName: selectedGroup.name,
+      currency: selectedGroup.baseCurrency,
+      payerId: t.payer.userId,
+      payerName: t.payer.name,
+      recipientId: t.recipient.userId,
+      recipientName: t.recipient.name,
+      recipientInstantTag: null,
+      amountCents: t.amountCents,
+    }));
+  }, [selectedGroup, simplifiedTransfers]);
+
+  const handleSettlementRecorded = React.useCallback(
+    (settlement: {
+      id: string;
+      group_id: string;
+      payer_id: string;
+      recipient_id: string;
+      amount_cents: number;
+      currency: string;
+      payment_rail: string;
+      settled_at: string;
+    }) => {
+      setGroupOverrides((prev) => {
+        const target = allGroups.find((g) => g.id === settlement.group_id);
+        if (!target) return prev;
+        const currentMembers = prev[target.id]?.members ?? target.members;
+        const updatedMembers = currentMembers.map((m) => {
+          if (m.userId === settlement.payer_id) {
+            return {
+              ...m,
+              netBalanceCents: m.netBalanceCents + settlement.amount_cents,
+            };
+          }
+          if (m.userId === settlement.recipient_id) {
+            return {
+              ...m,
+              netBalanceCents: m.netBalanceCents - settlement.amount_cents,
+            };
+          }
+          return m;
+        });
+        const payer = updatedMembers.find(
+          (m) => m.userId === settlement.payer_id,
+        );
+        const recipient = updatedMembers.find(
+          (m) => m.userId === settlement.recipient_id,
+        );
+        const selfMember = updatedMembers.find((m) => m.isCurrentUser);
+        const existingLogs = prev[target.id]?.auditLogs ?? target.auditLogs ?? [];
+        const newAuditEntry: GroupAuditLogEntry = {
+          id: `settlement-${settlement.id}`,
+          groupId: target.id,
+          category: "LEDGER",
+          eventType: "SETTLEMENT_RECORDED",
+          actorId: settlement.payer_id,
+          actorName: payer?.name ?? "Member",
+          summary: `${payer?.name ?? "Member"} settled ${formatMinorUnits(settlement.amount_cents, settlement.currency || target.baseCurrency)} with ${recipient?.name ?? "Member"}`,
+          details: [`Payment rail: ${settlement.payment_rail}`],
+          createdAt: settlement.settled_at,
+        };
+        return {
+          ...prev,
+          [target.id]: {
+            ...prev[target.id],
+            members: updatedMembers,
+            userNetLedgerCents:
+              selfMember?.netBalanceCents ?? target.userNetLedgerCents,
+            isFullySettled: updatedMembers.every(
+              (m) => m.netBalanceCents === 0,
+            ),
+            auditLogs: [newAuditEntry, ...existingLogs],
+          },
+        };
+      });
+      pushToast({
+        tone: "success",
+        title: "Settlement recorded",
+        description: `Logged ${formatMinorUnits(settlement.amount_cents, settlement.currency)} settlement.`,
+      });
+      router.refresh();
+    },
+    [allGroups, pushToast, router],
   );
 
   const cycleLabel = formatCycleLabel(cycle);
@@ -1301,11 +1397,13 @@ export function SplitGroupsClient({
                 </div>
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-3 tabular-nums">
                   {selectedGroup.members.map((member) => {
-                    const memberShareCents = Math.round(
-                      (selectedGroup.cycleTurnoverCents *
-                        member.sharePercentage) /
-                        100,
-                    );
+                    const memberShareCents =
+                      member.shareThisPeriodCents ??
+                      Math.round(
+                        (selectedGroup.cycleTurnoverCents *
+                          member.sharePercentage) /
+                          100,
+                      );
                     const roleSubtitle =
                       member.status === "FORMER_MEMBER"
                         ? "Former Member"
@@ -1570,6 +1668,26 @@ export function SplitGroupsClient({
                                     : "Remind"}
                                 </Button>
                               )}
+                            {selectedGroup.status !== "ARCHIVED" && (
+                              <Button
+                                type="button"
+                                variant="primary"
+                                size="sm"
+                                data-testid={`who-owes-settle-${transfer.payer.userId}-${transfer.recipient.userId}`}
+                                onClick={() =>
+                                  setSettlementModalDebtKey(
+                                    getSettlementDebtKey({
+                                      groupId: selectedGroup.id,
+                                      payerId: transfer.payer.userId,
+                                      recipientId: transfer.recipient.userId,
+                                    }),
+                                  )
+                                }
+                                className="h-8 px-3.5 text-[12px]"
+                              >
+                                Mark Settled
+                              </Button>
+                            )}
                           </div>
                         </div>
                       );
@@ -1801,6 +1919,17 @@ export function SplitGroupsClient({
           open={auditDrawerOpen}
           onClose={() => setAuditDrawerOpen(false)}
           group={selectedGroup}
+        />
+      )}
+
+      {selectedGroup && (
+        <RecordSettlementModal
+          open={Boolean(settlementModalDebtKey)}
+          onClose={() => setSettlementModalDebtKey(null)}
+          debts={settlementDebts}
+          currentUserId={currentUser?.id ?? ""}
+          initialDebtKey={settlementModalDebtKey}
+          onSettled={handleSettlementRecorded}
         />
       )}
 

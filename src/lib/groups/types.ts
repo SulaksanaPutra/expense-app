@@ -38,6 +38,7 @@ export interface SplitGroupMemberDetail {
   status: MemberStatus;
   sharePercentage: number;
   paidThisPeriodCents: number;
+  shareThisPeriodCents?: number;
   netBalanceCents: number;
   isCurrentUser: boolean;
 }
