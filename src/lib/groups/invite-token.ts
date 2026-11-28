@@ -1,5 +1,8 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
+export const INVITE_TOKEN_TTL_DAYS = 14;
+export const INVITE_TOKEN_TTL_MS = INVITE_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000;
+
 export interface SignedInvitePayload {
   g: string;
   s: string;
@@ -57,7 +60,12 @@ export function createSignedInviteToken(params: {
   secret?: string;
 }): string {
   const version = Math.trunc(params.version);
-  if (!params.groupId || !params.slug || !Number.isInteger(version) || version < 1) {
+  if (
+    !params.groupId ||
+    !params.slug ||
+    !Number.isInteger(version) ||
+    version < 1
+  ) {
     throw new Error("Invalid invite token parameters.");
   }
 
@@ -93,6 +101,7 @@ export function verifySignedInviteToken(params: {
   expectedSlug: string;
   currentVersion?: number;
   nowMs?: number;
+  maxAgeMs?: number;
   secret?: string;
 }): VerifySignedInviteResult {
   const rawToken = typeof params.token === "string" ? params.token.trim() : "";
@@ -192,6 +201,21 @@ export function verifySignedInviteToken(params: {
       ok: false,
       code: "EXPIRED",
       message: "This invite link has expired. Ask a group admin for a new link.",
+    };
+  }
+
+  if (
+    typeof candidate.exp !== "number" &&
+    typeof params.maxAgeMs === "number" &&
+    Number.isFinite(params.maxAgeMs) &&
+    params.maxAgeMs > 0 &&
+    nowMs - candidate.iat > params.maxAgeMs
+  ) {
+    return {
+      ok: false,
+      code: "EXPIRED",
+      message:
+        "This 14-day invite link has expired. Ask a group admin for a new link.",
     };
   }
 

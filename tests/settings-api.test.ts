@@ -10,11 +10,11 @@ interface InMemoryUserRow {
   full_name: string;
   email: string;
   phone_number: string | null;
-  phone_verified: boolean;
-  instant_settlement_tag: string | null;
+  timezone: string;
   base_currency: string;
+  display_currency: string;
   personal_share_cap_cents: number | null;
-  receipt_storage_used_bytes: number;
+  auto_include_in_expenses: boolean;
   notification_prefs: NotificationPrefs;
   created_at: string;
 }
@@ -27,7 +27,6 @@ interface InMemoryGroupRow {
   status: "ACTIVE" | "NEEDS_RATIO_UPDATE" | "ARCHIVED";
   base_currency: string;
   default_split_mode: "EQUAL" | "CUSTOM_RATIOS";
-  simplify_debts: boolean;
   billing_cycle_anchor_day: number;
   created_at: string;
 }
@@ -51,10 +50,6 @@ interface InMemoryExpenseRow {
   expense_date: string;
   amount_cents: number;
   currency: string;
-  original_amount_cents: number | null;
-  original_currency: string | null;
-  exchange_rate: number | null;
-  exchange_rate_source: "API" | "MANUAL_OVERRIDE" | null;
   split_method: "EQUAL" | "PERCENTAGE" | "EXACT";
   split_breakdown: Array<{
     user_id: string;
@@ -62,8 +57,6 @@ interface InMemoryExpenseRow {
     percentage?: number;
   }>;
   receipt_url: string | null;
-  is_recurring_generated: boolean;
-  recurring_rule_id: string | null;
   adjustment_for_expense_id: string | null;
   is_locked: boolean;
   deleted_at: string | null;
@@ -76,7 +69,7 @@ interface InMemorySettlementRow {
   recipient_id: string;
   amount_cents: number;
   currency: string;
-  payment_rail: "VENMO" | "APPLE_CARD" | "CASH" | "OTHER";
+  payment_rail: "VENMO" | "ZELLE" | "CASH_APP" | "CASH" | "OTHER";
   settled_at: string;
 }
 
@@ -147,11 +140,16 @@ function createInMemorySupabase(db: InMemoryDb) {
           },
           then<TResult1 = { data: T[]; error: null }>(
             onfulfilled?:
-              | ((value: { data: T[]; error: null }) => TResult1 | PromiseLike<TResult1>)
+              | ((value: {
+                  data: T[];
+                  error: null;
+                }) => TResult1 | PromiseLike<TResult1>)
               | null,
           ) {
             const matched = filterRows(rows, filters);
-            return Promise.resolve({ data: matched, error: null }).then(onfulfilled);
+            return Promise.resolve({ data: matched, error: null }).then(
+              onfulfilled,
+            );
           },
         };
         return builder;
@@ -181,11 +179,46 @@ function createInMemorySupabase(db: InMemoryDb) {
           },
           then<TResult1 = { data: T[]; error: null }>(
             onfulfilled?:
-              | ((value: { data: T[]; error: null }) => TResult1 | PromiseLike<TResult1>)
+              | ((value: {
+                  data: T[];
+                  error: null;
+                }) => TResult1 | PromiseLike<TResult1>)
               | null,
           ) {
             const matched = applyUpdate();
-            return Promise.resolve({ data: matched, error: null }).then(onfulfilled);
+            return Promise.resolve({ data: matched, error: null }).then(
+              onfulfilled,
+            );
+          },
+        };
+        return builder;
+      },
+      delete() {
+        const filters: Filter[] = [];
+        const applyDelete = () => {
+          const matched = filterRows(rows, filters);
+          const matchedSet = new Set(matched);
+          const remaining = rows.filter((r) => !matchedSet.has(r));
+          rows.splice(0, rows.length, ...remaining);
+          return matched;
+        };
+        const builder = {
+          eq(col: string, val: unknown) {
+            filters.push({ col, val, op: "eq" });
+            return builder;
+          },
+          then<TResult1 = { data: T[]; error: null }>(
+            onfulfilled?:
+              | ((value: {
+                  data: T[];
+                  error: null;
+                }) => TResult1 | PromiseLike<TResult1>)
+              | null,
+          ) {
+            const matched = applyDelete();
+            return Promise.resolve({ data: matched, error: null }).then(
+              onfulfilled,
+            );
           },
         };
         return builder;
@@ -197,6 +230,7 @@ function createInMemorySupabase(db: InMemoryDb) {
     auth: {
       getUser: getUserMock,
       updateUser: updateUserAuthMock,
+      signOut: vi.fn().mockResolvedValue({ error: null }),
     },
     from(table: keyof InMemoryDb) {
       return makeTable(db[table] as unknown as object[]);
@@ -214,10 +248,19 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => createInMemorySupabase(activeDb),
 }));
 
-import { GET as getSettings, PATCH as patchSettings } from "@/app/api/settings/route";
-import { GET as exportLedger } from "@/app/api/settings/export/route";
+vi.mock("@/lib/supabase/admin", () => ({
+  hasSupabaseAdminEnv: () => false,
+  createAdminClient: () => null,
+}));
 
-describe("Settings API & Consumer Persistence Integration", () => {
+import {
+  GET as getSettings,
+  PATCH as patchSettings,
+} from "@/app/api/settings/route";
+import { GET as exportLedger } from "@/app/api/settings/export/route";
+import { DELETE as deleteAccount } from "@/app/api/account/route";
+
+describe("Settings v2 API & Account Guard Integration", () => {
   beforeEach(() => {
     activeDb = {
       users: [
@@ -225,35 +268,35 @@ describe("Settings API & Consumer Persistence Integration", () => {
           id: "u-alex",
           full_name: "Alex Rivera",
           email: "alex@example.com",
-          phone_number: null,
-          phone_verified: false,
-          instant_settlement_tag: null,
+          phone_number: "+1 (415) 890-3412",
+          timezone: "America/Los_Angeles",
           base_currency: "USD",
-          personal_share_cap_cents: null,
-          receipt_storage_used_bytes: 94_371_840, // 90 MB (18% of 500 MB)
+          display_currency: "USD",
+          personal_share_cap_cents: 160000,
+          auto_include_in_expenses: true,
           notification_prefs: {
-            new_expense: true,
-            settlement_confirmation: true,
-            monthly_recap: true,
-            sms_nudges_opt_in: false,
+            new_expense_added: true,
+            settlement_recorded: true,
+            cycle_close_reminder: true,
+            monthly_summary_digest: false,
           },
-          created_at: "2024-01-15T10:00:00.000Z",
+          created_at: "2024-03-15T10:00:00.000Z",
         },
         {
           id: "u-elena",
           full_name: "Elena Rostova",
           email: "elena@example.com",
           phone_number: null,
-          phone_verified: false,
-          instant_settlement_tag: "@elena-r",
+          timezone: "UTC",
           base_currency: "USD",
+          display_currency: "USD",
           personal_share_cap_cents: null,
-          receipt_storage_used_bytes: 0,
+          auto_include_in_expenses: true,
           notification_prefs: {
-            new_expense: true,
-            settlement_confirmation: true,
-            monthly_recap: true,
-            sms_nudges_opt_in: false,
+            new_expense_added: true,
+            settlement_recorded: true,
+            cycle_close_reminder: true,
+            monthly_summary_digest: false,
           },
           created_at: "2024-02-01T10:00:00.000Z",
         },
@@ -267,7 +310,6 @@ describe("Settings API & Consumer Persistence Integration", () => {
           status: "ACTIVE",
           base_currency: "USD",
           default_split_mode: "EQUAL",
-          simplify_debts: true,
           billing_cycle_anchor_day: 1,
           created_at: "2024-01-15T10:00:00.000Z",
         },
@@ -279,7 +321,6 @@ describe("Settings API & Consumer Persistence Integration", () => {
           status: "ACTIVE",
           base_currency: "USD",
           default_split_mode: "EQUAL",
-          simplify_debts: true,
           billing_cycle_anchor_day: 1,
           created_at: "2024-03-01T10:00:00.000Z",
         },
@@ -329,18 +370,12 @@ describe("Settings API & Consumer Persistence Integration", () => {
           expense_date: "2026-11-10T12:00:00.000Z",
           amount_cents: 12000,
           currency: "USD",
-          original_amount_cents: null,
-          original_currency: null,
-          exchange_rate: null,
-          exchange_rate_source: null,
           split_method: "EQUAL",
           split_breakdown: [
             { user_id: "u-alex", share_cents: 6000 },
             { user_id: "u-elena", share_cents: 6000 },
           ],
           receipt_url: null,
-          is_recurring_generated: false,
-          recurring_rule_id: null,
           adjustment_for_expense_id: null,
           is_locked: false,
           deleted_at: null,
@@ -367,122 +402,140 @@ describe("Settings API & Consumer Persistence Integration", () => {
     vi.clearAllMocks();
   });
 
-  it("loads profile, storage quota, and active groups with role via GET /api/settings", async () => {
+  it("loads v2 profile fields and active group count via GET /api/settings", async () => {
     const res = await getSettings();
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       ok: boolean;
       profile: {
-        receiptStorageUsedBytes: number;
-        receiptStorageQuotaBytes: number;
-        baseCurrency: string;
+        fullName: string;
+        phoneNumber: string | null;
+        timezone: string;
+        displayCurrency: string;
+        personalShareCapCents: number | null;
+        autoIncludeInExpenses: boolean;
+        notificationPrefs: {
+          new_expense_added: boolean;
+          settlement_recorded: boolean;
+          cycle_close_reminder: boolean;
+          monthly_summary_digest: boolean;
+        };
       };
-      groups: Array<{ id: string; currentUserRole: string }>;
+      groupCount: number;
     };
 
     expect(body.ok).toBe(true);
-    expect(body.profile.receiptStorageUsedBytes).toBe(0);
-    expect(body.profile.receiptStorageQuotaBytes).toBe(524_288_000);
-    expect(body.profile.baseCurrency).toBe("USD");
-    expect(body.groups).toHaveLength(2);
-    expect(body.groups.find((g) => g.id === "grp-apt4b")?.currentUserRole).toBe(
-      "ADMIN",
-    );
-    expect(body.groups.find((g) => g.id === "grp-trip")?.currentUserRole).toBe(
-      "MEMBER",
-    );
+    expect(body.profile.fullName).toBe("Alex Rivera");
+    expect(body.profile.phoneNumber).toBe("+1 (415) 890-3412");
+    expect(body.profile.timezone).toBe("America/Los_Angeles");
+    expect(body.profile.displayCurrency).toBe("USD");
+    expect(body.profile.personalShareCapCents).toBe(160000);
+    expect(body.profile.autoIncludeInExpenses).toBe(true);
+    expect(body.profile.notificationPrefs).toEqual({
+      new_expense_added: true,
+      settlement_recorded: true,
+      cycle_close_reminder: true,
+      monthly_summary_digest: false,
+    });
+    expect(body.groupCount).toBe(2);
   });
 
-  it("persists @instant_settlement_tag, personal_share_cap_cents, default split mode, and ADMIN group rules via PATCH /api/settings", async () => {
+  it("persists all v2 settings fields via PATCH /api/settings and reloads cleanly via GET", async () => {
     const req = new NextRequest("http://localhost:3000/api/settings", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        full_name: "Alex M. Rivera",
-        instant_settlement_tag: "alex-rivera-99",
-        base_currency: "EUR",
-        personal_share_cap_cents: 160000,
+        full_name: "Jordan Doe",
+        phone_number: "+1 (415) 555-0199",
+        timezone: "America/New_York",
+        display_currency: "EUR",
+        personal_share_cap_cents: 245000,
+        auto_include_in_expenses: false,
         notification_prefs: {
-          new_expense: false,
-          settlement_confirmation: true,
-          monthly_recap: false,
-          auto_settlement_reminders: false,
-          default_split_method: "PERCENTAGE",
-          payment_methods: [
-            {
-              id: "pm-apple",
-              label: "Apple Card / Debit",
-              rail: "APPLE_CARD",
-              handle: "•••• 4281",
-              is_default: true,
-            },
-          ],
+          new_expense_added: false,
+          settlement_recorded: true,
+          cycle_close_reminder: false,
+          monthly_summary_digest: true,
         },
-        active_group_id: "grp-apt4b",
-        group_simplify_debts: false,
-        group_default_split_mode: "CUSTOM_RATIOS",
       }),
     });
 
-    const res = await patchSettings(req);
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
+    const patchRes = await patchSettings(req);
+    expect(patchRes.status).toBe(200);
+    const patchBody = (await patchRes.json()) as {
       ok: boolean;
       profile: {
         fullName: string;
-        instantSettlementTag: string;
-        baseCurrency: string;
-        personalShareCapCents: number;
+        phoneNumber: string | null;
+        timezone: string;
+        displayCurrency: string;
+        personalShareCapCents: number | null;
+        autoIncludeInExpenses: boolean;
         notificationPrefs: {
-          default_split_method: string;
-          auto_settlement_reminders: boolean;
-          payment_methods: Array<{ id: string; handle: string }>;
+          new_expense_added: boolean;
+          settlement_recorded: boolean;
+          cycle_close_reminder: boolean;
+          monthly_summary_digest: boolean;
         };
-      };
-      updatedGroup: {
-        id: string;
-        defaultSplitMode: string;
-        simplifyDebts: boolean;
       };
     };
 
-    expect(body.ok).toBe(true);
-    expect(body.profile.fullName).toBe("Alex M. Rivera");
-    expect(body.profile.instantSettlementTag).toBe("@alex-rivera-99");
-    expect(body.profile.baseCurrency).toBe("EUR");
-    expect(body.profile.personalShareCapCents).toBe(160000);
-    expect(body.profile.notificationPrefs.default_split_method).toBe(
-      "PERCENTAGE",
-    );
-    expect(body.profile.notificationPrefs.auto_settlement_reminders).toBe(false);
-    expect(
-      body.profile.notificationPrefs.payment_methods.some(
-        (pm) => pm.handle === "@alex-rivera-99",
-      ),
-    ).toBe(true);
-
-    // Verify DB state updated
-    expect(activeDb.users[0].personal_share_cap_cents).toBe(160000);
-    expect(activeDb.groups[0].default_split_mode).toBe("CUSTOM_RATIOS");
-    expect(body.updatedGroup).toEqual({
-      id: "grp-apt4b",
-      defaultSplitMode: "CUSTOM_RATIOS",
-      simplifyDebts: true,
+    expect(patchBody.ok).toBe(true);
+    expect(patchBody.profile).toMatchObject({
+      fullName: "Jordan Doe",
+      phoneNumber: "+1 (415) 555-0199",
+      timezone: "America/New_York",
+      displayCurrency: "EUR",
+      personalShareCapCents: 245000,
+      autoIncludeInExpenses: false,
+      notificationPrefs: {
+        new_expense_added: false,
+        settlement_recorded: true,
+        cycle_close_reminder: false,
+        monthly_summary_digest: true,
+      },
     });
+
+    // Reload via GET /api/settings and confirm persisted state matches
+    const getRes = await getSettings();
+    expect(getRes.status).toBe(200);
+    const reloaded = (await getRes.json()) as {
+      ok: boolean;
+      profile: typeof patchBody.profile;
+    };
+    expect(reloaded.profile).toMatchObject(patchBody.profile);
+    expect(activeDb.users[0].display_currency).toBe("EUR");
+    expect(activeDb.users[0].auto_include_in_expenses).toBe(false);
+    expect(activeDb.users[0].timezone).toBe("America/New_York");
   });
 
-  it("blocks non-ADMIN MEMBER from updating group_default_split_mode (403)", async () => {
-    const req = new NextRequest("http://localhost:3000/api/settings", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        active_group_id: "grp-trip",
-        group_default_split_mode: "CUSTOM_RATIOS",
+  it("rejects invalid timezone, currency, and personal_share_cap_cents on PATCH /api/settings", async () => {
+    const badTz = await patchSettings(
+      new NextRequest("http://localhost:3000/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ timezone: "Mars/Olympus_Mons" }),
       }),
-    });
+    );
+    expect(badTz.status).toBe(400);
 
-    const res = await patchSettings(req);
-    expect(res.status).toBe(403);
+    const badCur = await patchSettings(
+      new NextRequest("http://localhost:3000/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ display_currency: "ZZ" }),
+      }),
+    );
+    expect(badCur.status).toBe(400);
+
+    const badCap = await patchSettings(
+      new NextRequest("http://localhost:3000/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ personal_share_cap_cents: -500 }),
+      }),
+    );
+    expect(badCap.status).toBe(400);
   });
 
   it("exports full ledger history across all groups in CSV and JSON", async () => {
@@ -508,5 +561,18 @@ describe("Settings API & Consumer Persistence Integration", () => {
     };
     expect(jsonBody.groups).toHaveLength(2);
     expect(jsonBody.expenses).toHaveLength(1);
+  });
+
+  it("blocks DELETE /api/account when user has a non-zero net balance in any group", async () => {
+    // u-alex paid $120.00 split 50/50 -> +$60.00 net balance in grp-apt4b
+    const blockedRes = await deleteAccount();
+    expect(blockedRes.status).toBe(409);
+    const blockedBody = (await blockedRes.json()) as {
+      code?: string;
+      unsettledGroups?: Array<{ groupId: string; netBalanceCents: number }>;
+    };
+    expect(blockedBody.code).toBe("UNSETTLED_BALANCES");
+    expect(blockedBody.unsettledGroups).toHaveLength(1);
+    expect(blockedBody.unsettledGroups?.[0]?.netBalanceCents).toBe(6000);
   });
 });

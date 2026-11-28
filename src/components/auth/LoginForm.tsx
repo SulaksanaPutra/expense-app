@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Mail } from "lucide-react";
+import { KeyRound, Mail } from "lucide-react";
 import { AlertBanner, Button, Card, Input } from "@/components/ui";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -70,6 +70,7 @@ export function LoginForm({ nextPath, initialError }: LoginFormProps) {
     () => sanitizeRedirectPath(nextPath, DEFAULT_AUTH_REDIRECT),
     [nextPath],
   );
+  const isInviteRedirect = safeNext.startsWith("/join/");
 
   const emailInputRef = React.useRef<HTMLInputElement>(null);
   const [email, setEmail] = React.useState("");
@@ -83,6 +84,9 @@ export function LoginForm({ nextPath, initialError }: LoginFormProps) {
   >();
   const [isSendingMagicLink, setIsSendingMagicLink] = React.useState(false);
   const [isSendingGoogle, setIsSendingGoogle] = React.useState(false);
+  const [isSigningInPasskey, setIsSigningInPasskey] = React.useState(false);
+
+  const isBusy = isSendingMagicLink || isSendingGoogle || isSigningInPasskey;
 
   const handleEmailChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const nextValue = event.target.value;
@@ -175,6 +179,65 @@ export function LoginForm({ nextPath, initialError }: LoginFormProps) {
     }
   };
 
+  const handlePasskeySignIn = async () => {
+    setAuthError(undefined);
+
+    if (
+      typeof window === "undefined" ||
+      !("PublicKeyCredential" in window)
+    ) {
+      setAuthError(
+        "Passkeys are not supported in this browser. Sign in with Magic Link or Google instead.",
+      );
+      return;
+    }
+
+    setIsSigningInPasskey(true);
+    try {
+      const supabase = createClient() as unknown as {
+        auth?: {
+          signInWithPasskey?: () => Promise<{
+            data?: { session?: unknown; user?: unknown } | null;
+            error?: { message?: string } | null;
+          }>;
+        };
+      };
+
+      if (typeof supabase?.auth?.signInWithPasskey !== "function") {
+        setAuthError(
+          "Passkey sign-in is not configured in this environment. Use Magic Link or Google instead.",
+        );
+        setIsSigningInPasskey(false);
+        return;
+      }
+
+      const { error } = await supabase.auth.signInWithPasskey();
+      if (error) {
+        setAuthError(
+          error.message || "Passkey sign-in failed. Please try again.",
+        );
+        setIsSigningInPasskey(false);
+        return;
+      }
+
+      window.location.assign(safeNext);
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        (error.name === "NotAllowedError" || error.name === "AbortError")
+      ) {
+        setAuthError("Passkey sign-in was cancelled or timed out.");
+      } else {
+        setAuthError(
+          error instanceof Error
+            ? error.message
+            : "Unable to sign in with passkey. Please try again.",
+        );
+      }
+      setIsSigningInPasskey(false);
+    }
+  };
+
   return (
     <Card padding="lg" className="w-full max-w-[440px]">
       <div className="mb-6">
@@ -185,7 +248,9 @@ export function LoginForm({ nextPath, initialError }: LoginFormProps) {
           Sign in to your ledger
         </h1>
         <p className="mt-2 text-[15px] leading-[1.47] text-ink-muted-48">
-          Track shared household expenses and settle up with your group.
+          {isInviteRedirect
+            ? "Sign in with Email, Google, or a Passkey to accept your group invitation."
+            : "Track shared household expenses and settle up with your group."}
         </p>
       </div>
 
@@ -232,7 +297,7 @@ export function LoginForm({ nextPath, initialError }: LoginFormProps) {
           onChange={handleEmailChange}
           onBlur={handleEmailBlur}
           error={emailError}
-          disabled={isSendingMagicLink || isSendingGoogle}
+          disabled={isBusy}
         />
 
         <Button
@@ -241,7 +306,7 @@ export function LoginForm({ nextPath, initialError }: LoginFormProps) {
           size="lg"
           fullWidth
           loading={isSendingMagicLink}
-          disabled={isSendingGoogle}
+          disabled={isSendingGoogle || isSigningInPasskey}
           leftIcon={<Mail className="h-4 w-4" />}
         >
           {isSendingMagicLink ? "Sending Magic Link..." : "Send Magic Link"}
@@ -258,18 +323,33 @@ export function LoginForm({ nextPath, initialError }: LoginFormProps) {
         <span className="h-px flex-1 bg-hairline" aria-hidden="true" />
       </div>
 
-      <Button
-        type="button"
-        variant="secondary"
-        size="lg"
-        fullWidth
-        loading={isSendingGoogle}
-        disabled={isSendingMagicLink}
-        onClick={handleGoogleSignIn}
-        leftIcon={<GoogleMark />}
-      >
-        {isSendingGoogle ? "Connecting to Google..." : "Continue with Google"}
-      </Button>
+      <div className="flex flex-col gap-3">
+        <Button
+          type="button"
+          variant="secondary"
+          size="lg"
+          fullWidth
+          loading={isSendingGoogle}
+          disabled={isSendingMagicLink || isSigningInPasskey}
+          onClick={handleGoogleSignIn}
+          leftIcon={<GoogleMark />}
+        >
+          {isSendingGoogle ? "Connecting to Google..." : "Continue with Google"}
+        </Button>
+
+        <Button
+          type="button"
+          variant="secondary"
+          size="lg"
+          fullWidth
+          loading={isSigningInPasskey}
+          disabled={isSendingMagicLink || isSendingGoogle}
+          onClick={handlePasskeySignIn}
+          leftIcon={<KeyRound className="h-4 w-4 text-[#0066cc]" />}
+        >
+          {isSigningInPasskey ? "Verifying Passkey..." : "Sign in with Passkey"}
+        </Button>
+      </div>
     </Card>
   );
 }

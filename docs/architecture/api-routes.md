@@ -3,7 +3,7 @@
 Deterministically generated from `src/app/api/**/route.ts` via `npm run docs:api`.
 
 - **OpenAPI Spec:** [`docs/architecture/openapi.json`](./openapi.json)
-- **Total Endpoints:** 35 operations across 25 paths
+- **Total Endpoints:** 44 operations across 29 paths
 
 | Path | Method | Tag | Path Params | Status Codes | Summary | Source |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -42,3 +42,12 @@ Deterministically generated from `src/app/api/**/route.ts` via `npm run docs:api
 | `/api/settings` | `GET` | `settings` | - | 200, 401, 500, 503 | GET /api/settings | `src/app/api/settings/route.ts` |
 | `/api/settings` | `PATCH` | `settings` | - | 200, 400, 401, 503 | PATCH /api/settings | `src/app/api/settings/route.ts` |
 | `/api/settings/export` | `GET` | `settings` | - | 200, 400, 401, 500, 503 | Export full ledger history across all user groups in RFC-4180 CSV or JSON. | `src/app/api/settings/export/route.ts` |
+| `/api/settings/passkeys` | `GET` | `settings` | - | 200, 401, 503 | GET /api/settings/passkeys | `src/app/api/settings/passkeys/route.ts` |
+| `/api/settings/passkeys` | `POST` | `settings` | - | 201, 400, 401, 503 | POST /api/settings/passkeys | `src/app/api/settings/passkeys/route.ts` |
+| `/api/settings/passkeys` | `DELETE` | `settings` | - | 200, 400, 401, 503 | DELETE /api/settings/passkeys | `src/app/api/settings/passkeys/route.ts` |
+| `/api/settings/sessions` | `GET` | `settings` | - | 200, 401, 503 | GET /api/settings/sessions | `src/app/api/settings/sessions/route.ts` |
+| `/api/settings/sessions` | `DELETE` | `settings` | - | 200, 400, 401, 503 | DELETE /api/settings/sessions | `src/app/api/settings/sessions/route.ts` |
+| `/api/settings/settlement-handles` | `GET` | `settings` | - | 200, 401, 503 | GET /api/settings/settlement-handles | `src/app/api/settings/settlement-handles/route.ts` |
+| `/api/settings/settlement-handles` | `POST` | `settings` | - | 201, 400, 401, 503 | POST /api/settings/settlement-handles | `src/app/api/settings/settlement-handles/route.ts` |
+| `/api/settings/settlement-handles/{handleId}` | `PATCH` | `settings` | `handleId` | 200, 400, 401, 503 | PATCH /api/settings/settlement-handles/{handleId} | `src/app/api/settings/settlement-handles/[handleId]/route.ts` |
+| `/api/settings/settlement-handles/{handleId}` | `DELETE` | `settings` | `handleId` | 200, 401, 503 | DELETE /api/settings/settlement-handles/{handleId} | `src/app/api/settings/settlement-handles/[handleId]/route.ts` |

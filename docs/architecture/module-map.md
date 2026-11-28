@@ -64,7 +64,7 @@ flowchart LR
     app__app__settings -->|1| components_settings
     app__app__settings -->|1| lib_auth
     app__app__settings -->|1| lib_groups
-    app__app__settings -->|1| lib_settings
+    app__app__settings -->|2| lib_settings
     app__app__settings -->|1| lib_supabase
     app__app__split_groups -->|1| components_shell
     app__app__split_groups -->|1| components_split_groups
@@ -94,9 +94,9 @@ flowchart LR
     app_api_search -->|1| lib_auth
     app_api_search -->|1| lib_expenses
     app_api_search -->|1| lib_supabase
-    app_api_settings -->|2| lib_auth
-    app_api_settings -->|2| lib_settings
-    app_api_settings -->|2| lib_supabase
+    app_api_settings -->|6| lib_auth
+    app_api_settings -->|6| lib_settings
+    app_api_settings -->|6| lib_supabase
     app_auth_callback -->|1| lib_auth
     app_auth_callback -->|1| lib_supabase
     app_auth_signout -->|1| lib_auth
@@ -123,13 +123,13 @@ flowchart LR
     components_expenses -->|5| lib_expenses
     components_expenses -->|1| lib_groups
     components_expenses -->|3| types
-    components_settings -->|2| components_shell
-    components_settings -->|3| components_ui
-    components_settings -->|2| lib
-    components_settings -->|1| lib_expenses
+    components_settings -->|1| components_shell
+    components_settings -->|9| components_ui
+    components_settings -->|3| lib
     components_settings -->|2| lib_groups
-    components_settings -->|1| lib_settings
-    components_settings -->|1| types
+    components_settings -->|6| lib_settings
+    components_settings -->|1| lib_supabase
+    components_settings -->|2| types
     components_shell -->|1| components_expenses
     components_shell -->|4| components_ui
     components_shell -->|3| lib
@@ -141,6 +141,7 @@ flowchart LR
     components_split_groups -->|8| lib
     components_split_groups -->|1| lib_expenses
     components_split_groups -->|20| lib_groups
+    components_split_groups -->|1| lib_supabase
     components_split_groups -->|6| types
     components_ui -->|15| lib
     lib_auth -->|1| lib_supabase
@@ -154,9 +155,8 @@ flowchart LR
     lib_groups -->|1| lib_supabase
     lib_groups -->|9| types
     lib_settings -->|1| lib
-    lib_settings -->|2| lib_expenses
-    lib_settings -->|2| lib_groups
-    lib_settings -->|1| types
+    lib_settings -->|1| lib_expenses
+    lib_settings -->|3| types
     lib_supabase -->|1| lib_auth
     lib_supabase -->|4| types
     proxy_ts -->|1| lib_supabase
@@ -170,7 +170,7 @@ flowchart LR
 | `src/app/(app)` | 1 | 5 | `src/components/shell`, `src/lib/auth`, `src/lib/supabase` | - |
 | `src/app/(app)/dashboard` | 1 | 4 | `src/components/dashboard`, `src/lib/auth`, `src/lib/expenses`, `src/lib/supabase` | - |
 | `src/app/(app)/expenses` | 1 | 4 | `src/components/expenses`, `src/lib/auth`, `src/lib/expenses`, `src/lib/supabase` | - |
-| `src/app/(app)/settings` | 1 | 5 | `src/components/settings`, `src/lib/auth`, `src/lib/groups`, `src/lib/settings`, `src/lib/supabase` | - |
+| `src/app/(app)/settings` | 1 | 6 | `src/components/settings`, `src/lib/auth`, `src/lib/groups`, `src/lib/settings`, `src/lib/supabase` | - |
 | `src/app/(app)/split-groups` | 2 | 7 | `src/components/shell`, `src/components/split-groups`, `src/components/ui`, `src/lib/auth`, `src/lib/groups`, `src/lib/supabase` | - |
 | `src/app/api/account` | 1 | 4 | `src/lib/auth`, `src/lib/groups`, `src/lib/supabase` | - |
 | `src/app/api/expenses` | 1 | 3 | `src/lib/auth`, `src/lib/expenses`, `src/lib/supabase` | - |
@@ -180,7 +180,7 @@ flowchart LR
 | `src/app/api/receipts` | 1 | 3 | `src/lib/auth`, `src/lib/groups`, `src/lib/supabase` | - |
 | `src/app/api/reminders` | 1 | 3 | `src/lib/auth`, `src/lib/groups`, `src/lib/supabase` | - |
 | `src/app/api/search` | 1 | 3 | `src/lib/auth`, `src/lib/expenses`, `src/lib/supabase` | - |
-| `src/app/api/settings` | 2 | 6 | `src/lib/auth`, `src/lib/settings`, `src/lib/supabase` | - |
+| `src/app/api/settings` | 6 | 18 | `src/lib/auth`, `src/lib/settings`, `src/lib/supabase` | - |
 | `src/app/auth/callback` | 1 | 2 | `src/lib/auth`, `src/lib/supabase` | - |
 | `src/app/auth/signout` | 1 | 2 | `src/lib/auth`, `src/lib/supabase` | - |
 | `src/app/join` | 1 | 5 | `src/components/split-groups`, `src/lib/auth`, `src/lib/groups`, `src/lib/supabase` | - |
@@ -188,16 +188,16 @@ flowchart LR
 | `src/components/auth` | 2 | 4 | `src/components/ui`, `src/lib/auth`, `src/lib/supabase` | `src/app/login` |
 | `src/components/dashboard` | 1 | 12 | `src/components/expenses`, `src/components/shell`, `src/components/ui`, `src/lib`, `src/lib/expenses`, `src/lib/groups`, `src/types` | `src/app/(app)/dashboard` |
 | `src/components/expenses` | 4 | 32 | `src/components/shell`, `src/components/ui`, `src/lib`, `src/lib/expenses`, `src/lib/groups`, `src/types` | `src/app/(app)/expenses`, `src/components/dashboard`, `src/components/shell`, `src/components/split-groups` |
-| `src/components/settings` | 3 | 17 | `src/components/shell`, `src/components/ui`, `src/lib`, `src/lib/expenses`, `src/lib/groups`, `src/lib/settings`, `src/types` | `src/app/(app)/settings` |
+| `src/components/settings` | 6 | 38 | `src/components/shell`, `src/components/ui`, `src/lib`, `src/lib/groups`, `src/lib/settings`, `src/lib/supabase`, `src/types` | `src/app/(app)/settings` |
 | `src/components/shell` | 8 | 38 | `src/components/expenses`, `src/components/ui`, `src/lib`, `src/lib/supabase`, `src/types` | `src/app/(app)`, `src/app/(app)/split-groups`, `src/components/dashboard`, `src/components/expenses`, `src/components/settings`, `src/components/split-groups`, `src/lib/expenses`, `src/lib/groups` |
-| `src/components/split-groups` | 9 | 78 | `src/components/expenses`, `src/components/shell`, `src/components/ui`, `src/lib`, `src/lib/expenses`, `src/lib/groups`, `src/types` | `src/app/(app)/split-groups`, `src/app/join` |
+| `src/components/split-groups` | 9 | 79 | `src/components/expenses`, `src/components/shell`, `src/components/ui`, `src/lib`, `src/lib/expenses`, `src/lib/groups`, `src/lib/supabase`, `src/types` | `src/app/(app)/split-groups`, `src/app/join` |
 | `src/components/ui` | 17 | 50 | `src/lib` | `src/app/(app)/split-groups`, `src/components/auth`, `src/components/dashboard`, `src/components/expenses`, `src/components/settings`, `src/components/shell`, `src/components/split-groups` |
 | `src/lib` | 3 | 0 | - | `src/app/api/fx`, `src/components/dashboard`, `src/components/expenses`, `src/components/settings`, `src/components/shell`, `src/components/split-groups`, `src/components/ui`, `src/lib/expenses`, `src/lib/groups`, `src/lib/settings` |
 | `src/lib/auth` | 2 | 2 | `src/lib/supabase` | `src/app`, `src/app/(app)`, `src/app/(app)/dashboard`, `src/app/(app)/expenses`, `src/app/(app)/settings`, `src/app/(app)/split-groups`, `src/app/api/account`, `src/app/api/expenses`, `src/app/api/groups`, `src/app/api/notifications`, `src/app/api/receipts`, `src/app/api/reminders`, `src/app/api/search`, `src/app/api/settings`, `src/app/auth/callback`, `src/app/auth/signout`, `src/app/join`, `src/app/login`, `src/components/auth`, `src/lib/supabase` |
-| `src/lib/expenses` | 5 | 14 | `src/components/shell`, `src/lib`, `src/lib/groups`, `src/types` | `src/app/(app)/dashboard`, `src/app/(app)/expenses`, `src/app/api/expenses`, `src/app/api/search`, `src/components/dashboard`, `src/components/expenses`, `src/components/settings`, `src/components/split-groups`, `src/lib/groups`, `src/lib/settings` |
-| `src/lib/groups` | 10 | 40 | `src/components/shell`, `src/lib`, `src/lib/expenses`, `src/lib/supabase`, `src/types` | `src/app/(app)/settings`, `src/app/(app)/split-groups`, `src/app/api/account`, `src/app/api/groups`, `src/app/api/receipts`, `src/app/api/reminders`, `src/app/join`, `src/components/dashboard`, `src/components/expenses`, `src/components/settings`, `src/components/split-groups`, `src/lib/expenses`, `src/lib/settings` |
-| `src/lib/settings` | 1 | 6 | `src/lib`, `src/lib/expenses`, `src/lib/groups`, `src/types` | `src/app/(app)/settings`, `src/app/api/settings`, `src/components/settings` |
-| `src/lib/supabase` | 5 | 7 | `src/lib/auth`, `src/types` | `src/app/(app)`, `src/app/(app)/dashboard`, `src/app/(app)/expenses`, `src/app/(app)/settings`, `src/app/(app)/split-groups`, `src/app/api/account`, `src/app/api/expenses`, `src/app/api/groups`, `src/app/api/notifications`, `src/app/api/receipts`, `src/app/api/reminders`, `src/app/api/search`, `src/app/api/settings`, `src/app/auth/callback`, `src/app/auth/signout`, `src/app/join`, `src/components/auth`, `src/components/shell`, `src/lib/auth`, `src/lib/groups`, `src/proxy.ts` |
+| `src/lib/expenses` | 5 | 14 | `src/components/shell`, `src/lib`, `src/lib/groups`, `src/types` | `src/app/(app)/dashboard`, `src/app/(app)/expenses`, `src/app/api/expenses`, `src/app/api/search`, `src/components/dashboard`, `src/components/expenses`, `src/components/split-groups`, `src/lib/groups`, `src/lib/settings` |
+| `src/lib/groups` | 10 | 40 | `src/components/shell`, `src/lib`, `src/lib/expenses`, `src/lib/supabase`, `src/types` | `src/app/(app)/settings`, `src/app/(app)/split-groups`, `src/app/api/account`, `src/app/api/groups`, `src/app/api/receipts`, `src/app/api/reminders`, `src/app/join`, `src/components/dashboard`, `src/components/expenses`, `src/components/settings`, `src/components/split-groups`, `src/lib/expenses` |
+| `src/lib/settings` | 3 | 6 | `src/lib`, `src/lib/expenses`, `src/types` | `src/app/(app)/settings`, `src/app/api/settings`, `src/components/settings` |
+| `src/lib/supabase` | 5 | 7 | `src/lib/auth`, `src/types` | `src/app/(app)`, `src/app/(app)/dashboard`, `src/app/(app)/expenses`, `src/app/(app)/settings`, `src/app/(app)/split-groups`, `src/app/api/account`, `src/app/api/expenses`, `src/app/api/groups`, `src/app/api/notifications`, `src/app/api/receipts`, `src/app/api/reminders`, `src/app/api/search`, `src/app/api/settings`, `src/app/auth/callback`, `src/app/auth/signout`, `src/app/join`, `src/components/auth`, `src/components/settings`, `src/components/shell`, `src/components/split-groups`, `src/lib/auth`, `src/lib/groups`, `src/proxy.ts` |
 | `src/proxy.ts` | 1 | 1 | `src/lib/supabase` | - |
 | `src/types` | 1 | 0 | - | `src/app/api/groups`, `src/components/dashboard`, `src/components/expenses`, `src/components/settings`, `src/components/shell`, `src/components/split-groups`, `src/lib/expenses`, `src/lib/groups`, `src/lib/settings`, `src/lib/supabase` |
 
@@ -220,7 +220,7 @@ flowchart LR
 | `src/app/(app)/settings` | `src/components/settings` | 1 |
 | `src/app/(app)/settings` | `src/lib/auth` | 1 |
 | `src/app/(app)/settings` | `src/lib/groups` | 1 |
-| `src/app/(app)/settings` | `src/lib/settings` | 1 |
+| `src/app/(app)/settings` | `src/lib/settings` | 2 |
 | `src/app/(app)/settings` | `src/lib/supabase` | 1 |
 | `src/app/(app)/split-groups` | `src/components/shell` | 1 |
 | `src/app/(app)/split-groups` | `src/components/split-groups` | 1 |
@@ -250,9 +250,9 @@ flowchart LR
 | `src/app/api/search` | `src/lib/auth` | 1 |
 | `src/app/api/search` | `src/lib/expenses` | 1 |
 | `src/app/api/search` | `src/lib/supabase` | 1 |
-| `src/app/api/settings` | `src/lib/auth` | 2 |
-| `src/app/api/settings` | `src/lib/settings` | 2 |
-| `src/app/api/settings` | `src/lib/supabase` | 2 |
+| `src/app/api/settings` | `src/lib/auth` | 6 |
+| `src/app/api/settings` | `src/lib/settings` | 6 |
+| `src/app/api/settings` | `src/lib/supabase` | 6 |
 | `src/app/auth/callback` | `src/lib/auth` | 1 |
 | `src/app/auth/callback` | `src/lib/supabase` | 1 |
 | `src/app/auth/signout` | `src/lib/auth` | 1 |
@@ -279,13 +279,13 @@ flowchart LR
 | `src/components/expenses` | `src/lib/expenses` | 5 |
 | `src/components/expenses` | `src/lib/groups` | 1 |
 | `src/components/expenses` | `src/types` | 3 |
-| `src/components/settings` | `src/components/shell` | 2 |
-| `src/components/settings` | `src/components/ui` | 3 |
-| `src/components/settings` | `src/lib` | 2 |
-| `src/components/settings` | `src/lib/expenses` | 1 |
+| `src/components/settings` | `src/components/shell` | 1 |
+| `src/components/settings` | `src/components/ui` | 9 |
+| `src/components/settings` | `src/lib` | 3 |
 | `src/components/settings` | `src/lib/groups` | 2 |
-| `src/components/settings` | `src/lib/settings` | 1 |
-| `src/components/settings` | `src/types` | 1 |
+| `src/components/settings` | `src/lib/settings` | 6 |
+| `src/components/settings` | `src/lib/supabase` | 1 |
+| `src/components/settings` | `src/types` | 2 |
 | `src/components/shell` | `src/components/expenses` | 1 |
 | `src/components/shell` | `src/components/ui` | 4 |
 | `src/components/shell` | `src/lib` | 3 |
@@ -297,6 +297,7 @@ flowchart LR
 | `src/components/split-groups` | `src/lib` | 8 |
 | `src/components/split-groups` | `src/lib/expenses` | 1 |
 | `src/components/split-groups` | `src/lib/groups` | 20 |
+| `src/components/split-groups` | `src/lib/supabase` | 1 |
 | `src/components/split-groups` | `src/types` | 6 |
 | `src/components/ui` | `src/lib` | 15 |
 | `src/lib/auth` | `src/lib/supabase` | 1 |
@@ -310,16 +311,15 @@ flowchart LR
 | `src/lib/groups` | `src/lib/supabase` | 1 |
 | `src/lib/groups` | `src/types` | 9 |
 | `src/lib/settings` | `src/lib` | 1 |
-| `src/lib/settings` | `src/lib/expenses` | 2 |
-| `src/lib/settings` | `src/lib/groups` | 2 |
-| `src/lib/settings` | `src/types` | 1 |
+| `src/lib/settings` | `src/lib/expenses` | 1 |
+| `src/lib/settings` | `src/types` | 3 |
 | `src/lib/supabase` | `src/lib/auth` | 1 |
 | `src/lib/supabase` | `src/types` | 4 |
 | `src/proxy.ts` | `src/lib/supabase` | 1 |
 
 ## Dependency Cruiser Diagnostics
 
-- **Cruised Modules:** 110
+- **Cruised Modules:** 119
 - **Errors:** 0
 - **Warnings:** 3
 

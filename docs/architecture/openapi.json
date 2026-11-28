@@ -969,6 +969,201 @@
           }
         }
       }
+    },
+    "/api/settings/passkeys": {
+      "get": {
+        "operationId": "get_settings_passkeys",
+        "tags": [
+          "settings"
+        ],
+        "summary": "GET /api/settings/passkeys",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_settings_passkeys",
+        "tags": [
+          "settings"
+        ],
+        "summary": "POST /api/settings/passkeys",
+        "responses": {
+          "201": {
+            "description": "Created"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_settings_passkeys",
+        "tags": [
+          "settings"
+        ],
+        "summary": "DELETE /api/settings/passkeys",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/settings/sessions": {
+      "get": {
+        "operationId": "get_settings_sessions",
+        "tags": [
+          "settings"
+        ],
+        "summary": "GET /api/settings/sessions",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_settings_sessions",
+        "tags": [
+          "settings"
+        ],
+        "summary": "DELETE /api/settings/sessions",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/settings/settlement-handles": {
+      "get": {
+        "operationId": "get_settings_settlement_handles",
+        "tags": [
+          "settings"
+        ],
+        "summary": "GET /api/settings/settlement-handles",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_settings_settlement_handles",
+        "tags": [
+          "settings"
+        ],
+        "summary": "POST /api/settings/settlement-handles",
+        "responses": {
+          "201": {
+            "description": "Created"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/settings/settlement-handles/{handleId}": {
+      "parameters": [
+        {
+          "name": "handleId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "patch": {
+        "operationId": "patch_settings_settlement_handles_handleId",
+        "tags": [
+          "settings"
+        ],
+        "summary": "PATCH /api/settings/settlement-handles/{handleId}",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_settings_settlement_handles_handleId",
+        "tags": [
+          "settings"
+        ],
+        "summary": "DELETE /api/settings/settlement-handles/{handleId}",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        }
+      }
     }
   }
 }

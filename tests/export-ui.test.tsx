@@ -85,20 +85,15 @@ const SETTINGS_PROFILE: SettingsUserProfile = {
   email: "alex@example.com",
   avatarUrl: null,
   phoneNumber: null,
-  phoneVerified: false,
-  instantSettlementTag: null,
-  baseCurrency: "USD",
+  timezone: "America/Los_Angeles",
+  displayCurrency: "USD",
   personalShareCapCents: null,
-  receiptStorageUsedBytes: 0,
-  receiptStorageQuotaBytes: 524_288_000,
+  autoIncludeInExpenses: true,
   notificationPrefs: {
-    new_expense: true,
-    settlement_confirmation: true,
-    monthly_recap: true,
-    sms_nudges_opt_in: false,
-    auto_settlement_reminders: true,
-    default_split_method: "EQUAL",
-    payment_methods: [],
+    new_expense_added: true,
+    settlement_recorded: true,
+    cycle_close_reminder: true,
+    monthly_summary_digest: false,
   },
   createdAt: "2024-01-15T10:00:00.000Z",
 };
@@ -193,7 +188,7 @@ describe("Issue #89 — Export UI Triggers across Dashboard, Expenses, and Setti
       >
         <SettingsClient
           initialProfile={SETTINGS_PROFILE}
-          groups={[]}
+          groupCount={1}
           balances={[]}
         />
       </AppShell>,
