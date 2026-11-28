@@ -131,7 +131,7 @@ flowchart LR
     components_settings -->|1| lib_settings
     components_settings -->|1| types
     components_shell -->|1| components_expenses
-    components_shell -->|5| components_ui
+    components_shell -->|4| components_ui
     components_shell -->|3| lib
     components_shell -->|2| lib_supabase
     components_shell -->|2| types
@@ -140,7 +140,7 @@ flowchart LR
     components_split_groups -->|6| lib
     components_split_groups -->|15| lib_groups
     components_split_groups -->|6| types
-    components_ui -->|14| lib
+    components_ui -->|15| lib
     lib_auth -->|1| lib_supabase
     lib_expenses -->|2| components_shell
     lib_expenses -->|3| lib
@@ -187,9 +187,9 @@ flowchart LR
 | `src/components/dashboard` | 1 | 12 | `src/components/expenses`, `src/components/shell`, `src/components/ui`, `src/lib`, `src/lib/expenses`, `src/lib/groups`, `src/types` | `src/app/(app)/dashboard` |
 | `src/components/expenses` | 4 | 32 | `src/components/shell`, `src/components/ui`, `src/lib`, `src/lib/expenses`, `src/lib/groups`, `src/types` | `src/app/(app)/expenses`, `src/components/dashboard`, `src/components/shell` |
 | `src/components/settings` | 3 | 17 | `src/components/shell`, `src/components/ui`, `src/lib`, `src/lib/expenses`, `src/lib/groups`, `src/lib/settings`, `src/types` | `src/app/(app)/settings` |
-| `src/components/shell` | 9 | 41 | `src/components/expenses`, `src/components/ui`, `src/lib`, `src/lib/supabase`, `src/types` | `src/app/(app)`, `src/app/(app)/split-groups`, `src/components/dashboard`, `src/components/expenses`, `src/components/settings`, `src/components/split-groups`, `src/lib/expenses`, `src/lib/groups` |
+| `src/components/shell` | 8 | 38 | `src/components/expenses`, `src/components/ui`, `src/lib`, `src/lib/supabase`, `src/types` | `src/app/(app)`, `src/app/(app)/split-groups`, `src/components/dashboard`, `src/components/expenses`, `src/components/settings`, `src/components/split-groups`, `src/lib/expenses`, `src/lib/groups` |
 | `src/components/split-groups` | 8 | 64 | `src/components/shell`, `src/components/ui`, `src/lib`, `src/lib/groups`, `src/types` | `src/app/(app)/split-groups`, `src/app/join` |
-| `src/components/ui` | 16 | 47 | `src/lib` | `src/app/(app)/split-groups`, `src/components/auth`, `src/components/dashboard`, `src/components/expenses`, `src/components/settings`, `src/components/shell`, `src/components/split-groups` |
+| `src/components/ui` | 17 | 50 | `src/lib` | `src/app/(app)/split-groups`, `src/components/auth`, `src/components/dashboard`, `src/components/expenses`, `src/components/settings`, `src/components/shell`, `src/components/split-groups` |
 | `src/lib` | 3 | 0 | - | `src/app/api/fx`, `src/components/dashboard`, `src/components/expenses`, `src/components/settings`, `src/components/shell`, `src/components/split-groups`, `src/components/ui`, `src/lib/expenses`, `src/lib/groups`, `src/lib/settings` |
 | `src/lib/auth` | 2 | 2 | `src/lib/supabase` | `src/app`, `src/app/(app)`, `src/app/(app)/dashboard`, `src/app/(app)/expenses`, `src/app/(app)/settings`, `src/app/(app)/split-groups`, `src/app/api/account`, `src/app/api/expenses`, `src/app/api/groups`, `src/app/api/notifications`, `src/app/api/receipts`, `src/app/api/reminders`, `src/app/api/search`, `src/app/api/settings`, `src/app/auth/callback`, `src/app/auth/signout`, `src/app/join`, `src/app/login`, `src/components/auth`, `src/lib/supabase` |
 | `src/lib/expenses` | 5 | 14 | `src/components/shell`, `src/lib`, `src/lib/groups`, `src/types` | `src/app/(app)/dashboard`, `src/app/(app)/expenses`, `src/app/api/expenses`, `src/app/api/search`, `src/components/dashboard`, `src/components/expenses`, `src/components/settings`, `src/lib/groups`, `src/lib/settings` |
@@ -285,7 +285,7 @@ flowchart LR
 | `src/components/settings` | `src/lib/settings` | 1 |
 | `src/components/settings` | `src/types` | 1 |
 | `src/components/shell` | `src/components/expenses` | 1 |
-| `src/components/shell` | `src/components/ui` | 5 |
+| `src/components/shell` | `src/components/ui` | 4 |
 | `src/components/shell` | `src/lib` | 3 |
 | `src/components/shell` | `src/lib/supabase` | 2 |
 | `src/components/shell` | `src/types` | 2 |
@@ -294,7 +294,7 @@ flowchart LR
 | `src/components/split-groups` | `src/lib` | 6 |
 | `src/components/split-groups` | `src/lib/groups` | 15 |
 | `src/components/split-groups` | `src/types` | 6 |
-| `src/components/ui` | `src/lib` | 14 |
+| `src/components/ui` | `src/lib` | 15 |
 | `src/lib/auth` | `src/lib/supabase` | 1 |
 | `src/lib/expenses` | `src/components/shell` | 2 |
 | `src/lib/expenses` | `src/lib` | 3 |
