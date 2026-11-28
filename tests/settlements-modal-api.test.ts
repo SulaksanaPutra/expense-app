@@ -66,7 +66,8 @@ interface InMemorySettlementRow {
   recipient_id: string;
   amount_cents: number;
   currency: string;
-  payment_rail: "VENMO" | "APPLE_CARD" | "CASH" | "OTHER";
+  payment_rail: "VENMO" | "ZELLE" | "CASH_APP" | "BANK_SETTLEMENT" | "APPLE_CARD" | "CASH" | "OTHER";
+  settlement_handle_id?: string | null;
   settled_at: string;
 }
 
@@ -75,6 +76,7 @@ interface InMemoryDb {
   group_members: InMemoryMemberRow[];
   expenses: InMemoryExpenseRow[];
   settlements: InMemorySettlementRow[];
+  settlement_handles: Array<{ id: string; user_id: string; provider: string; handle: string }>;
 }
 
 function createInMemorySupabase(db: InMemoryDb) {
@@ -199,6 +201,8 @@ function createInMemorySupabase(db: InMemoryDb) {
           return makeTable(db.expenses, "exp");
         case "settlements":
           return makeTable(db.settlements, "set");
+        case "settlement_handles":
+          return makeTable(db.settlement_handles, "hdl");
         default:
           return {};
       }
@@ -347,6 +351,10 @@ describe("Issue #82 — Settlement API, partial/full math, watermark locking & F
         },
       ],
       settlements: [],
+      settlement_handles: [
+        { id: "hdl-alex-zelle", user_id: "u-alex", provider: "ZELLE", handle: "alex@example.com" },
+        { id: "hdl-elena-venmo", user_id: "u-elena", provider: "VENMO", handle: "@elena-r" },
+      ],
     };
   });
 
@@ -665,5 +673,51 @@ describe("Issue #82 — Settlement API, partial/full math, watermark locking & F
     );
     expect(archivedRes.status).toBe(409);
     expect((await archivedRes.json()).code).toBe("GROUP_ARCHIVED");
+  });
+
+  it("persists verified recipient settlement_handle_id with ZELLE/CASH_APP rails and rejects handles belonging to another user", async () => {
+    // 1. Valid recipient handle persists settlement_handle_id
+    getUserMock.mockResolvedValueOnce({
+      data: { user: { id: "u-elena", email: "elena@example.com" } },
+      error: null,
+    });
+    const okRes = await settlementPost(
+      new NextRequest("http://localhost:3000/api/groups/grp-usd/settlements", {
+        method: "POST",
+        body: JSON.stringify({
+          payer_id: "u-elena",
+          recipient_id: "u-alex",
+          amount_cents: 5000,
+          payment_rail: "ZELLE",
+          settlement_handle_id: "hdl-alex-zelle",
+        }),
+      }),
+      { params: Promise.resolve({ groupId: "grp-usd" }) },
+    );
+    expect(okRes.status).toBe(201);
+    const okJson = await okRes.json();
+    expect(okJson.settlement.payment_rail).toBe("ZELLE");
+    expect(okJson.settlement.settlement_handle_id).toBe("hdl-alex-zelle");
+
+    // 2. Handle belonging to someone other than recipient is rejected with 400 INVALID_SETTLEMENT_HANDLE
+    getUserMock.mockResolvedValueOnce({
+      data: { user: { id: "u-elena", email: "elena@example.com" } },
+      error: null,
+    });
+    const badRes = await settlementPost(
+      new NextRequest("http://localhost:3000/api/groups/grp-usd/settlements", {
+        method: "POST",
+        body: JSON.stringify({
+          payer_id: "u-elena",
+          recipient_id: "u-alex",
+          amount_cents: 5000,
+          payment_rail: "VENMO",
+          settlement_handle_id: "hdl-elena-venmo",
+        }),
+      }),
+      { params: Promise.resolve({ groupId: "grp-usd" }) },
+    );
+    expect(badRes.status).toBe(400);
+    expect((await badRes.json()).code).toBe("INVALID_SETTLEMENT_HANDLE");
   });
 });

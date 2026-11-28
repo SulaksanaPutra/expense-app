@@ -386,4 +386,141 @@ describe("RecordSettlementModal & ExpensesClient FORMER_MEMBER settlement UI", (
       expect(screen.getByText("LOCKED")).toBeInTheDocument();
     },
   );
+
+  it(
+    "pre-selects the creditor default SettlementHandle, supports switching handles (Venmo/Zelle/Cash App), and records settlement_handle_id on partial payment",
+    { timeout: 15000 },
+    async () => {
+      const user = userEvent.setup();
+      const onSettled = vi.fn();
+      const onClose = vi.fn();
+
+      const multiHandleDebts: SimplifiedDebtEdge[] = [
+        {
+          groupId: "grp-cabin",
+          groupName: "Weekend Cabin Crew",
+          currency: "USD",
+          payerId: "u-jordan",
+          payerName: "Jordan Doe",
+          recipientId: "u-sarah",
+          recipientName: "Sarah Chen",
+          recipientInstantTag: "@sarah-chen",
+          recipientSettlementHandles: [
+            {
+              id: "hdl-cashapp",
+              provider: "CASH_APP",
+              handle: "$sarahchen",
+              displayNote: "Backup Cash App",
+              isDefault: false,
+            },
+            {
+              id: "hdl-venmo-default",
+              provider: "VENMO",
+              handle: "@sarah-chen",
+              displayNote: "Primary Venmo",
+              isDefault: true,
+            },
+            {
+              id: "hdl-zelle",
+              provider: "ZELLE",
+              handle: "sarah@example.com",
+              displayNote: "Chase Zelle",
+              isDefault: false,
+            },
+          ],
+          amountCents: 21540,
+        },
+      ];
+
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          settlement: {
+            id: "set-mh-1",
+            group_id: "grp-cabin",
+            payer_id: "u-jordan",
+            recipient_id: "u-sarah",
+            amount_cents: 10000,
+            currency: "USD",
+            payment_rail: "CASH_APP",
+            settlement_handle_id: "hdl-cashapp",
+            settled_at: "2026-11-28T12:00:00.000Z",
+          },
+        }),
+      } as Response);
+
+      render(
+        <RecordSettlementModal
+          open={true}
+          onClose={onClose}
+          debts={multiHandleDebts}
+          currentUserId="u-jordan"
+          onSettled={onSettled}
+        />,
+      );
+
+      const dialog = screen.getByRole("dialog", { name: "Record Settlement" });
+
+      // Default handle (Venmo @sarah-chen) is pre-selected even though Cash App was first in array
+      expect(within(dialog).getByTestId("recipient-settlement-tag")).toHaveTextContent(
+        "@sarah-chen",
+      );
+      expect(within(dialog).getByText("Primary Venmo")).toBeInTheDocument();
+      expect(within(dialog).getByRole("link", { name: /Open Venmo/i })).toHaveAttribute(
+        "href",
+        expect.stringContaining("recipients=sarah-chen&amount=215.40"),
+      );
+
+      // Switch to Cash App handle via Settlement Handle switcher
+      await user.click(within(dialog).getByRole("button", { name: /Settlement Handle/i }));
+      await user.click(
+        within(dialog).getByRole("option", { name: /Cash App · \$sarahchen/i }),
+      );
+      expect(within(dialog).getByTestId("recipient-settlement-tag")).toHaveTextContent(
+        "$sarahchen",
+      );
+      expect(within(dialog).getByRole("link", { name: /Open Cash App/i })).toHaveAttribute(
+        "href",
+        "https://cash.app/$sarahchen/215.40",
+      );
+
+      // Partial payment validation: 0 disables submit, $100.00 shows remaining $115.40
+      const amountInput = within(dialog).getByLabelText(
+        /Settlement Amount \(USD\)/i,
+      ) as HTMLInputElement;
+      await user.clear(amountInput);
+      await user.type(amountInput, "0.00");
+      expect(
+        within(dialog).getByRole("button", { name: /Mark as Settled/i }),
+      ).toBeDisabled();
+
+      await user.clear(amountInput);
+      await user.type(amountInput, "100.00");
+      expect(
+        within(dialog).getByTestId("settlement-progress-hint"),
+      ).toHaveTextContent(/Partial payment: \$115\.40 will remain unsettled/i);
+
+      await user.click(
+        within(dialog).getByRole("button", { name: /Mark as Settled/i }),
+      );
+
+      await waitFor(() => {
+        expect(fetchSpy).toHaveBeenCalledWith(
+          "/api/groups/grp-cabin/settlements",
+          expect.objectContaining({
+            method: "POST",
+            body: JSON.stringify({
+              payer_id: "u-jordan",
+              recipient_id: "u-sarah",
+              amount_cents: 10000,
+              payment_rail: "CASH_APP",
+              settlement_handle_id: "hdl-cashapp",
+            }),
+          }),
+        );
+      });
+      expect(onSettled).toHaveBeenCalledTimes(1);
+    },
+  );
 });

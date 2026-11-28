@@ -11,6 +11,7 @@ import {
   computePairwiseGroupDebtEdges,
   computePerGroupDebtEdges,
   simplifyBipartiteGroupDebts,
+  type MemberSettlementHandle,
   type SimplifiedDebtEdge,
 } from "./debt-simplification";
 
@@ -21,6 +22,7 @@ export {
   computePairwiseGroupDebtEdges,
   computePerGroupDebtEdges,
   simplifyBipartiteGroupDebts,
+  type MemberSettlementHandle,
   type SimplifiedDebtEdge,
 };
 
@@ -66,6 +68,7 @@ export interface ExpenseGroupMemberInfo {
   name: string;
   status: MemberStatus;
   instantSettlementTag: string | null;
+  settlementHandles?: MemberSettlementHandle[];
 }
 
 export interface ExpenseGroupInfo {
