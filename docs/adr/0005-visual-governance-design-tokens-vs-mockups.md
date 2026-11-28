@@ -1,6 +1,6 @@
 # ADR-0005: Visual Governance — Screen Mockups vs. DESIGN.md Tokens
 
-- **Status:** Accepted
+- **Status:** Superseded by ADR-0007 (Unified `.stitch/ledgersplit/` DESIGN.md and 16 screen/modal mockups govern)
 - **Date:** 2026-11-26
 
 ## Context

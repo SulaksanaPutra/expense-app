@@ -1,6 +1,6 @@
 # ADR-0002: Integer Minor-Unit Money Representation and FX Audit Trail
 
-- **Status:** Accepted
+- **Status:** Superseded by ADR-0007 (FX audit trail removed; integer minor-unit & rounding rules carried forward in ADR-0007)
 - **Date:** 2026-11-26
 
 ## Context

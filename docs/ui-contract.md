@@ -2,33 +2,36 @@
 
 ## 1. Visual Source Precedence & Resolved Contradictions
 
-- **Governing Layout & Theme Sources:** `.stitch/dashboard.png` (`.stitch/dashboard.html`), `.stitch/expenses.png` (`.stitch/expenses.html`), `.stitch/split-groups.png` (`.stitch/split-groups.html`), `.stitch/add-expense-modal.png` (`.stitch/add-expense-modal.html`), and `.stitch/settings.png` (`.stitch/settings.html`). *(Note: `.stitch/prototype.html` is an identical copy of `.stitch/dashboard.html`.)*
-- **Governing Token Source:** `.stitch/DESIGN.md` supplies foundational tokens only: Action Blue (`#0066cc`), focus blue (`#0071e3`), light canvas parchment (`#f5f5f7`), card surface (`#ffffff`), hairlines (`#e0e0e0`), ink hierarchy (`#1d1d1f`, `#333333`, `#7a7a7a`), SF Pro / system-ui typography scale, and radii (`18px` cards, `9999px` pills).
-- **Resolved Contradiction (`docs/adr/0005-visual-governance-design-tokens-vs-mockups.md`):** Marketing-specific dark museum-gallery tiles and 80px-padded hero sections in `.stitch/DESIGN.md` are **excluded**. All application views use the light-mode two-column SaaS workspace defined in the five `.stitch/*.png` / `.html` prototypes.
-- **Real vs. Simulated / Decorative Chrome:**
-  - **Wired:** Group/cycle filtering, expense CRUD + FX conversion + split calculations, per-group debt simplification, `SETTLEMENT` ("Log & Link" + Mark as Settled), Cycle Close locking, Offsetting Adjustments, invite link generation/joining, Web Push / opt-in SMS reminders (24h cooldown), 500 MB per-user receipt upload/quota, and CSV/JSON export.
-  - **Simulated / Decorative:** Payment rails (`Venmo`, `Apple Card`) do not transfer funds; they open deep links or show `@instant_settlement_tag` and log a `SETTLEMENT` event. Decorative status labels such as `Shared Encrypted Ledger`, `100% Verified`, and `Auto-ingestion active` are replaced or backed by real group-isolation / RLS / recurring-rule status indicators.
+- **Governing Token & App-Shell Source:** `.stitch/ledgersplit/DESIGN.md` defines the canonical color tokens (`#f9f9fb` canvas, `#ffffff` cards/shell, `#f3f3f5` nested sub-cards/inputs, `#0066cc` primary accent, `#1a1c1d` / `#414753` / `#727784` ink), `Inter` typography scale (`tabular-nums` on all amounts/counts/percentages), Material Symbols Outlined iconography, radii (`18px` cards, `9999px` pills), and the static App Shell (`Sidebar` + `TopBar`).
+- **Governing Screen & Modal Layout Sources:** The 15 `.stitch/ledgersplit_*/` screen, modal, and popover mockups (`screen.png` and `code.html`) govern exact spatial placement, visible controls, and feature scope:
+  - Dashboard: `.stitch/ledgersplit_dashboard_overview/screen.png`
+  - Expenses: `.stitch/ledgersplit_expenses_ledger/screen.png`
+  - Split Groups (Active, Split Rules & Invite, Archived): `.stitch/ledgersplit_split_groups/screen.png`, `.stitch/ledgersplit_split_groups_split_rules_invite/screen.png`, `.stitch/ledgersplit_split_groups_archived_view/screen.png`
+  - Settings: `.stitch/ledgersplit_settings/screen.png`
+  - Modals & Popovers: `.stitch/ledgersplit_topbar_add_expense_modal_standalone/screen.png`, `.stitch/ledgersplit_split_groups_create_edit_group_modal_standalone/screen.png`, `.stitch/ledgersplit_split_groups_audit_log_modal_standalone/screen.png`, `.stitch/ledgersplit_split_groups_archive_group_confirmation_standalone/screen.png`, `.stitch/ledgersplit_settings_add_edit_settlement_handle_modal_standalone/screen.png`, `.stitch/ledgersplit_topbar_notifications_popover_standalone/screen.png`, `.stitch/ledgersplit_topbar_user_account_menu_standalone/screen.png`, `.stitch/ledgersplit_split_groups_group_card_menu_open_standalone/screen.png`, `.stitch/ledgersplit_settings_settlement_handle_menu_open_standalone/screen.png`
+- **Strict Scope & Clean Removal Rule (`docs/adr/0007-v2-product-pivot-and-unified-stitch-spec.md`):** Features absent from the new `.stitch/ledgersplit_*/` screens are **removed** rather than hidden or kept for backward compatibility. Specifically omitted/removed: `LiveSyncPill`, Dashboard `Simplify` switch, `Recurring` tab/rules, per-expense FX rate overrides, `500 MB` receipt quota ring, and `Archive Rules` modal.
+- **Real vs. Simulated Rails:** Payment handles (`Venmo`, `Zelle`, `Cash App`) display the recipient's configured handle/deep-link for "Log & Link" and record a manual `SETTLEMENT` event on `Mark Settled`; no real funds move through LedgerSplit servers.
 
 ---
 
 ## 2. Shared UI Primitive Inventory
 
-All feature views and modals must consume these shared primitives rather than hand-rolling raw HTML `<button>`, `<input>`, `<select>`, `<dialog>`, or `role="switch"` markup.
+All `(app)` pages, modals, and popovers must consume these shared primitives rather than hand-rolling raw HTML `<button>`, `<input>`, `<select>`, `<dialog>`, or `role="switch"` elements.
 
 | Primitive | Mechanism / Base | Required Variants & Accessibility | Anti-Duplication Rule |
 | --- | --- | --- | --- |
-| `Button` | Accessible `<button>` / link-button wrapper | Variants: `primary` (`#0066cc` pill), `secondary` (white pill + `#e0e0e0` hairline), `danger-soft` (red tint pill), `ghost`, `icon-circle` (`44px` / `36px`). States: `disabled`, `loading` (`aria-busy`), focus-visible ring. | No raw `<button className="...">` styling in feature screens. |
-| `Input` / `SearchInput` | Styled `<input>` with label, error, and optional prefix/suffix | Variants: `text`, `number` (minor-unit currency input), `search` (with leading icon + `⌘K` / `/` shortcut badge + clear button). `aria-invalid`, `aria-describedby` for errors. | All form fields and search bars use `Input` / `SearchInput`. |
-| `Select` / `Dropdown` | Accessible headless menu / select primitive | Variants: `pill-select` (group filter, sort order, currency), `action-menu` (`⋮` row/card kebab menu), `searchable-select` (payer/category). Full keyboard nav (`ArrowUp/Down`, `Escape`). | No raw `<select>` elements in styled UI. |
-| `Dialog` / `Modal` | Accessible headless dialog / native `<dialog>` wrapper | Focus trap, `Escape` & backdrop-click close, `aria-labelledby`, sticky header & footer (`Cancel` + primary CTA), scrollable body on small viewports. | All modals (`AddEditExpenseModal`, `RecordSettlementModal`, `ConfirmDialog`, etc.) use `Dialog`. |
-| `Switch` / `Toggle` | Accessible button with `role="switch"` and `aria-checked` | Variants: `default` (green `#22c55e` / blue `#0066cc` active track), `disabled` (with tooltip reason). Keyboard `Space`/`Enter` toggle. | No raw checkbox hacks for switches (`Simplify`, `Notifications`, `SMS opt-in`). |
-| `SegmentedControl` / `Tabs` | Accessible `tablist` / `tab` or `radiogroup` | Variants: `pill-tabs` (`All Expenses`, `Paid by Me`, `Split with Me`, `Recurring`) and `split-method` (`Split Evenly`, `By Percentage`, `Exact Amounts`). Arrow-key navigation. | All multi-mode selectors use `SegmentedControl`. |
-| `Card` | Container primitive (`rounded-[18px]`, `#ffffff`, `1px solid #e0e0e0`) | Variants: `kpi`, `section`, `sub-card` (`#f5f5f7` inset), `spotlight`. Consistent `24px` desktop / `16px` mobile padding. | No ad-hoc card border/radius classes across pages. |
-| `Badge` / `StatusPill` | Inline pill (`rounded-full`) | Semantic tones: `neutral`, `info` (`#0066cc`), `success` (green), `warning` (amber), `danger` (red), `category` (tinted dot + label). | Category chips, `LOCKED`/`CLOSED` badges, and `Live Sync` use `Badge`. |
-| `Avatar` / `AvatarStack` | Circular user badge (image or 2-letter initials) | Sizes: `sm` (`24px`), `md` (`32px`), `lg` (`48px`). `AvatarStack` overlaps with `+N` overflow pill and `aria-label` member list. | Member chips in sidebar, tables, and group cards use `Avatar`. |
-| `Table` / `Pagination` | Semantic `<table>` inside `overflow-x-auto` wrapper + `Pagination` | Sortable column headers (`aria-sort`), empty state slot, row action slot, `Previous` / page numbers / `Next`. | Both Dashboard `Recent Shared Transactions` and Expenses `Itemized Transactions` share `Table` + `Pagination`. |
-| `ProgressBar` / `ProgressRing` | Semantic `role="progressbar"` (`aria-valuenow`, `aria-valuemax`) | `ProgressBar`: multi-segment category bar & personal cap bar. `ProgressRing`: circular storage quota indicator (`18%` of `500 MB`). | Budget, personal cap, and 500 MB quota meters use `ProgressBar` / `ProgressRing`. |
-| `Toast` / `AlertBanner` | `aria-live="polite"` toast stack + inline `AlertBanner` | Tones: `info`, `warning` (e.g., `NEEDS_RATIO_UPDATE`, `500 MB quota full`), `error`, `success`. | All async mutation feedback, cooldown notices, and quota warnings use `Toast` / `AlertBanner`. |
+| `Button` | Accessible `<button>` / link-button wrapper (`rounded-full`) | Variants: `primary` (`#0066cc` fill), `secondary` (`#ffffff` + hairline), `danger-soft`, `danger`, `ghost`, `icon-circle` (`36px`/`40px`/`44px`). Sizes: `sm` (`h-8`), `md` (`h-10`), `lg` (`h-11`). States: `disabled`, `loading` (`aria-busy`), focus-visible ring. | Zero raw `<button>` elements in `(app)` views or modals. |
+| `Input` / `SearchInput` | Styled `<input>` with `label`, `hint`, `error`, `prefix`, `suffix` | `Input`: `h-11`, `11px` radius (or `9999px` pill per screen), `#ffffff` / `#f3f3f5` disabled, `aria-invalid`, `aria-describedby`. `SearchInput`: pill search bar with leading `search` icon, `⌘K` kbd badge, and clear button. | All form fields and search bars use `Input` / `SearchInput`. |
+| `Select` / `Dropdown` | Accessible headless select & menu primitive | `Select`: `default`, `pill-select` (toolbars/headers), `searchable-select`. `Dropdown`: `⋮` action menus supporting `danger` items and keyboard nav (`ArrowUp/Down`, `Escape`). | Zero raw `<select>` elements in styled UI. |
+| `Dialog` / `ConfirmDialog` | Accessible modal dialog wrapper | Focus trap, `Escape` & backdrop-click close, `aria-labelledby`, sticky header & footer (`Cancel` + primary/danger CTA), scrollable body. | Zero raw `<dialog>` elements; all modals & confirmations use `Dialog` / `ConfirmDialog`. |
+| `Switch` | Accessible button with `role="switch"` and `aria-checked` | Tones: `success` (`#22c55e`) and `primary` (`#0066cc`); inactive `#d2d2d7`; sizes `sm` (`h-5 w-9`), `md` (`h-6 w-11`). | No raw checkbox hacks for policy or notification switches. |
+| `SegmentedControl` | Accessible `tablist` / `radiogroup` (`rounded-full`) | Variants: `pill-tabs` (`Active (4)` \| `Archived (2)`, `Members & Balances` \| `Split Rules & Invite`, `All` \| `Unread (2)`) and `split-method` (`Equal`, `Percentage`, `Exact`, `Shares`). | All multi-mode toggles use `SegmentedControl`. |
+| `Card` | Container primitive (`rounded-[18px]`, `1px solid` hairline) | Variants: `kpi`, `section`, `spotlight` (`#ffffff`), `sub-card` (`#f3f3f5` inset—never ad-hoc `rounded-[14px]` divs). | No ad-hoc card container styling across pages. |
+| `Badge` / `StatusPill` | Inline pill (`rounded-full`) | Tones: `neutral`, `info`, `success`, `warning`, `danger`, `category` (with `dot` / `dotColor`). Sizes: `sm`, `md`. | Statuses (`Settled`, `Pending`, `Default`, `Owner`, `Verified User`) use `Badge`. |
+| `Avatar` / `AvatarStack` | Circular user badge (photo or 2-letter initials) | Sizes: `sm` (`24px`), `md` (`32px`), `lg` (`48px`). `AvatarStack`: overlapping `-space-x-2` with `2px` ring and `+N` overflow. | Member chips in sidebar, tables, and cards use `Avatar` / `AvatarStack`. |
+| `Table` / `Pagination` | Semantic `<table>` in `rounded-[14px] border overflow-hidden` + pill `Pagination` | Sortable `TableHead` (`aria-sort`), `TableEmpty`, row-click handler support, action slot, `Pagination` (`< 1 2 3 4 >`). | Dashboard and Expenses tables share `Table` + `Pagination`. |
+| `ProgressBar` | Semantic `role="progressbar"` | Tones: `primary`, `success`, `warning`, `danger`, `auto` (`>=75%` amber, `>=90%` red); supports multi-segment category bar. | Budget utilization, category breakdown, and Monthly Cap meters use `ProgressBar`. |
+| `AlertBanner` / `Toast` | `AlertBanner` + `aria-live="polite"` `Toast` stack | Tones: `info`, `warning`, `error`, `success`. | Archived read-only banners, policy warnings, and mutation feedback use `AlertBanner` / `Toast`. |
 
 ---
 
@@ -36,108 +39,89 @@ All feature views and modals must consume these shared primitives rather than ha
 
 | Shell / Shared Element | Status (`Wired` / `Omit`) | State Source (URL / Context / API) | Cross-Route Behavior |
 | --- | --- | --- | --- |
-| Brand Logo (`LedgerSplit` + `SHARED` pill) | `Wired` | Static link to `/dashboard` | Navigates to `/dashboard` preserving active group/cycle query params. |
-| Sidebar Nav (`Dashboard`, `Expenses`, `Split Groups`, `Settings`) | `Wired` | Next.js App Router pathname | Highlights active route in `#0066cc` pill. `Split Groups` badge displays live count of user's non-archived groups. |
-| Sidebar `Active Group` Switcher | `Wired` | URL `?group=<id|all>` + synced `ActiveGroupContext` | Switches active group across routes. Displays group name, active split count, and `AvatarStack`. |
-| Sidebar `Collapse Sidebar` Toggle | `Wired` | `localStorage` + `SidebarContext` | Collapses desktop sidebar to compact icon rail (`72px`); hidden on mobile (replaced by drawer). |
-| Top Bar Month / Cycle Picker (`< October 2024 >`) | `Wired` | URL `?cycle=YYYY-MM` (or group billing anchor) | Steps backward/forward across `BillingCycle` windows. Filters spend, category breakdown, and transaction lists; **never** alters cumulative `Peer Balances`. |
-| Top Bar Global Search (`⌘K`) | `Wired` | Client modal/command palette + `/api/search` | `⌘K` (or click) opens quick search across Expenses (merchant/note/tag) and Groups; selecting a result navigates to `/expenses?q=...` or `/split-groups`. |
-| Top Bar Notification Bell | `Wired` | Supabase Realtime + `Notification` query | Red dot indicates unread items (new expense, share revision, settlement confirmation, reminder nudge, lease archive prompt). Clicking opens notification popover with "Mark all read". |
-| Top Bar `+ Add Expense` CTA | `Wired` | Global `ModalContext` | Opens `AddEditExpenseModal` from any route, pre-selected to the current `Active Group` (or prompts group selection if `All Groups` is active). |
-| Top Bar User Profile Menu | `Wired` | Supabase Auth session (`User`) | Displays user avatar/initials. Dropdown links to `/settings` and `Sign Out`. |
-| Page Header `Live Sync` Pill (`LiveSyncPill`) | `Wired` | Supabase Realtime channel status | Rendered in the page headers of `/dashboard` and `/expenses` only (per `.stitch/dashboard.png` and `.stitch/expenses.png`; omitted from Top Bar, `/split-groups`, and `/settings`). Green dot when subscribed (`Live Sync`), amber when reconnecting (`Syncing...`), muted when offline. |
+| Brand Header (`LedgerSplit`, `28x28px` blue icon + title; **no** `SHARED` badge) | `Wired` | Static link to `/dashboard` | Navigates to `/dashboard` preserving active group/cycle query params. |
+| Sidebar Nav (`Dashboard`, `Expenses`, `Split Groups` + live count pill, `Settings`) | `Wired` | Next.js App Router pathname + active groups query | Highlights active route with `#0066cc` pill (`h-10 rounded-full`). Count pill shows live count of `ACTIVE` groups. |
+| Sidebar `ACTIVE GROUP` Sub-Card (`All Groups` / selected group, `N splits` pill, `AvatarStack`) | `Wired` | URL `?group=<id\|all>` + `ActiveGroupContext` | Scopes Dashboard & Expenses across routes; selecting a group card on `/split-groups` updates `Active Group`. |
+| Sidebar `Collapse Sidebar` Toggle | `Wired` | `localStorage` + `SidebarContext` | Collapses desktop sidebar (`248px` → `72px`); hidden on mobile (replaced by drawer). |
+| TopBar Cycle Picker (`< November 2026 >`) | `Wired` | URL `?cycle=YYYY-MM` | Steps backward/forward across `BillingCycle` windows. Filters period spend, category breakdown, and transaction rows; never alters cumulative `Peer Balances`. |
+| TopBar Global Search (`Search transactions...` + `⌘K`) | `Wired` | Command palette / `/api/search` | `⌘K` (or click) searches Expenses and Groups; selecting a result navigates to `/expenses?q=...` or `/split-groups`. |
+| TopBar Notification Bell + Popover | `Wired` | Supabase Realtime + `/api/notifications` | Red dot indicates unread items (`All` \| `Unread (N)`, `Mark all read`). |
+| TopBar `+ Add Expense` Primary CTA | `Wired` | Global `ModalContext` | Opens `AddEditExpenseModal` from any route, pre-selected to `Active Group` (or prompts selection if `All Groups`). |
+| TopBar User Avatar (`JD`) + Account Menu | `Wired` | Supabase Auth session (`User`) | Opens popover showing name, email, `Default Currency`, `Account & Profile`, `Settings`, `Keyboard Shortcuts (⌘K)`, `Export Monthly Ledger`, and `Sign Out`. |
 
 ### Canonical Shared Modals
-- **`AddEditExpenseModal`**:
-  - **Triggers:** Top Bar `+ Add Expense`, Dashboard `Quick Add`, Expenses row `Edit` (if unlocked) or `Log Adjustment` (if locked).
-  - **Modes:** `create` | `edit` (records `ExpenseRevision`, disabled if `is_locked`) | `adjustment` (creates Offsetting Adjustment referencing `adjustment_for_expense_id`).
-  - **Behavior:** Single `Paid by` selector; currency selector defaulting to `Group.base_currency` with live FX spot-rate fetch + editable `Exchange Rate` override; `SegmentedControl` for `Split Evenly` / `By Percentage` / `Exact Amounts` using deterministic penny-rounding (`docs/adr/0002-money-representation-and-fx-audit.md`); live balance check (`$120.00 of $120.00 assigned (100%)`); receipt attachment checked against 500 MB per-user quota (non-blocking if full).
+- **`AddEditExpenseModal`** (ref: `.stitch/ledgersplit_topbar_add_expense_modal_standalone/screen.png`):
+  - **Triggers:** TopBar `+ Add Expense`, Expenses row `⋮` (`Edit`), Dashboard row click (`View / Edit` when unlocked).
+  - **Behavior:** Fields for `Merchant / Description`, `Amount` (in selected group's `base_currency`), `Date`, `Split Group`, `Category`, `Paid By`, and `Split Method` (`Equal`, `Percentage`, `Exact`, `Shares`) with live `SPLIT DISTRIBUTION` member list using integer-cent rounding.
+  - **Policy Gates:** When `Group.allow_any_member_add_expense == false`, non-Admin members are blocked from creating expenses. When `Group.require_receipt_over_100 == true` and `amount_cents > 10000`, displays a required receipt upload field and blocks submit until attached. Respects `User.auto_include_in_expenses` on creation.
 - **`RecordSettlementModal`**:
-  - **Triggers:** Dashboard `Quick Settle` / `Settle Up` / `Settle`, Expenses `Settle now →`, Split Groups `Request` / `Remind` context.
-  - **Behavior:** Scoped to a single `group_id` and `(payer_id, recipient_id)` pair. Pre-fills full owed balance in minor units; editable numeric input allows partial payments (`> 0`). Displays Venmo deep-link (`venmo://paycharge?...`) + recipient `@instant_settlement_tag` ("Log & Link"), and commits immutable `SETTLEMENT` event on `Mark as Settled`.
+  - **Triggers:** Dashboard `Peer Balances` `Settle now`, Split Groups `WHO OWES WHOM` `Mark Settled`.
+  - **Behavior:** Scoped to a single `group_id` and `(payer_id, recipient_id)` pair. Pre-fills owed balance in minor units (allows partial payments `> 0`), pre-selects creditor's `Default` `SettlementHandle` (`Venmo`, `Zelle`, `Cash App`) with handle switcher & "Log & Link" info, and records an immutable `SETTLEMENT` on `Mark Settled`.
 - **`ConfirmDialog`**:
-  - **Triggers:** Close & Lock Billing Cycle (`ADMIN`), Remove Member (`ADMIN`, warns on `FORMER_MEMBER` transition if `net_balance != 0`), Self-Leave / Delete Account blocked modal (`net_balance != 0`), Archive Group, Soft-Delete Unlocked Expense.
+  - **Triggers:** `Archive Group` (shows `Current Net Ledger` and unsettled balance count), permanent `Delete` of archived group (blocked if any balance != `$0.00`), `Remove` member (`FORMER_MEMBER` warning if balance != `$0.00`), `Leave Group` / `Delete Account` (blocked if balance != `$0.00`), `Revoke` active device session, and soft-delete unlocked expense.
 
 ### Responsive Rules
-- **Desktop (`>= 1024px`):** Fixed left sidebar (`248px` expanded / `72px` collapsed), sticky `64px` top bar, 3-column KPI grids, 2-column Dashboard mid-row (`Monthly Category Breakdown` + `Peer Balances`), 3-column `Split Groups` grid.
-- **Tablet & Mobile (`< 1024px`):**
-  - Left sidebar converts to an off-canvas slide-over `Drawer` opened via a top-left menu button; `Active Group` switcher remains accessible inside the drawer.
-  - Top bar wraps/condenses cleanly: search collapses to icon button, `+ Add Expense` stays visible, cycle picker remains centered/accessible.
-  - Multi-column KPI, Bento, and `Settings` grids stack to `1` column (`grid-cols-1`).
-  - All data tables (`Recent Shared Transactions`, `Itemized Transactions`) sit inside `overflow-x-auto` containers so `document.documentElement.scrollWidth <= window.innerWidth` (zero horizontal page overflow).
+- **Desktop (`>= 1024px`):** Fixed left sidebar (`248px` expanded / `72px` collapsed), sticky `64px` TopBar (`left-[248px]`), 3-column KPI grids, 2-column Dashboard mid-row (`Monthly Category Breakdown` + `Peer Balances`), 4-column `Split Groups` card grid, 2-column `Settings` grid.
+- **Tablet & Mobile (`< 1024px`):** Sidebar converts to an off-canvas slide-over `Drawer` opened from TopBar; TopBar search collapses to icon button while `+ Add Expense` and cycle picker remain accessible; multi-column grids stack to `1` column; all tables sit inside `overflow-x-auto` containers with `document.documentElement.scrollWidth <= window.innerWidth` (zero horizontal page overflow).
 
 ---
 
 ## 4. Screen & Modal Parity Checklists
 
-### Dashboard (ref: `.stitch/dashboard.png`, `.stitch/dashboard.html`)
-- **Layout:** Page header (`Dashboard Overview` + `Live Sync` + Group Filter dropdown `All Groups` / specific group + `Export CSV` + Refresh button) → 3-column KPI row (`Total Spent This Month`, `You Are Owed`, `You Owe`) → 2-column mid-row (`Monthly Category Breakdown` + `Peer Balances`) → full-width `Recent Shared Transactions` table.
+### Dashboard Overview (ref: `.stitch/ledgersplit_dashboard_overview/screen.png`, `.stitch/ledgersplit_dashboard_overview/code.html`)
+- **Layout:** `<PageHeader />` (`Dashboard Overview`, subtitle `All active groups · November 2026`, `Export CSV`, Refresh icon button) → 3-column KPI row (`NET SETTLEMENT BALANCE`, `TOTAL SPENT (NOV 2026)`, `YOU OWE`) → 2-column mid-row (`Monthly Category Breakdown` + `Peer Balances`) → full-width `Recent Shared Transactions` card.
 - **Required Widgets & Interactions:**
-  - Group Filter switches between `All Groups` aggregate and single-group view (syncing with `Active Group` when a specific group is chosen).
-  - `Total Spent This Month` shows cycle total, MoM delta pill, user's share, and transaction count.
-  - `You Are Owed` / `You Owe` show **cumulative** unsettled balances; `Send N reminders` / `Quick Settle` trigger reminder batch (respecting 24h cooldown) or `RecordSettlementModal`.
-  - `Monthly Category Breakdown` shows cycle spend vs. `Group.operational_budget_cents`, segmented multi-color `ProgressBar`, up to 6 category tiles + `Budget Buffer`, and `Edit Default Ratios` link (`/split-groups`).
-  - `Peer Balances` has `Simplify` `Switch` (wired to per-group `simplify_debts` when single group selected; per-group breakdown when `All Groups` is active), per-person `Remind` (disabled with remaining hours during 24h cooldown) / `Settle Up` / `Settle` pills, and `Overall Net Settlement`.
-  - `Recent Shared Transactions` includes merchant search input, category `Select`, `Quick Add` button, receipt/note icon, `⋮` row action menu (`Edit`, `Log Adjustment`, `Delete`), and `Pagination`.
-  - **Closed Period State:** Viewing a closed historical cycle displays a `Settled / Closed Period` `Badge` in the header while `Peer Balances` remain live cumulative.
-- **Intentional Prototype Omissions / Replacements:**
-  - `View Full Report →` navigates to `/expenses` with the current group & cycle filters preserved.
+  - When `All Groups` is active, KPIs and `TOTAL SPENT` roll up into `User.display_currency` (display-only FX conversion); `NET SETTLEMENT BALANCE` shows `You are owed $X · You owe $Y` and verified group count.
+  - `TOTAL SPENT` shows cycle total, MoM delta pill, `Your share`, expense count, and `BUDGET UTILIZATION: X%`.
+  - `YOU OWE` shows pending balance total, pending count + peer count, and `Next auto-reconciliation` date (from next active group `cycle_reset_day`).
+  - `Monthly Category Breakdown` shows `Cycle: Nov 1-30` pill, spend vs. target progress bar, and up to 6 category rows with dot, label, amount, and `%`.
+  - `Peer Balances` lists active peers across groups with `Remind` (24h cooldown) for positive balances, `Settle now` (opens `RecordSettlementModal`) for negative balances, and `Overall Net Settlement` footer.
+  - `Recent Shared Transactions` displays the latest 5 expenses; clicking a row opens split details (`AddEditExpenseModal` / detail view); `View all N in Expenses →` preserves active group & cycle filters.
+- **Intentional Prototype Omissions / Replacements:** `LiveSyncPill`, header group-filter dropdown, and `Simplify` switch are omitted per v2 spec (per-group simplification is always-on; group switching lives in Sidebar `ACTIVE GROUP`).
 
-### Expenses (ref: `.stitch/expenses.png`, `.stitch/expenses.html`)
-- **Layout:** Header (`Expenses Ledger` + `Live Sync` + `SegmentedControl` [`All Expenses`, `Paid by Me`, `Split with Me`, `Recurring`] + `Export CSV`) → 3-column KPI row (`Total Group Expenses`, `Your Personal Share`, `Unsettled / Pending`) → Filter toolbar (search input, `All` + category quick-filter pills, sort `Select`) → `Itemized Transactions` table → 2-column bottom insight cards (`Household Run-Rate Analysis`, `Smart Split Recommendation`).
+### Expenses Ledger (ref: `.stitch/ledgersplit_expenses_ledger/screen.png`, `.stitch/ledgersplit_expenses_ledger/code.html`)
+- **Layout:** `<PageHeader />` (`Expenses Ledger`, subtitle `N shared expenses · All active groups · November 2026`, `Export CSV`) → 3-column KPI row (`TOTAL GROUP EXPENSES`, `YOUR PERSONAL SHARE`, `UNSETTLED / PENDING`) → Filter toolbar (Category quick-filter pills `All (N)`, `Groceries`, `Utilities`, `Dining`, `Travel` + `Ownership` `Select`, `Status` `Select`, `Sort` `Select`) → 8-column `Table` + `Pagination`.
 - **Required Widgets & Interactions:**
-  - Scoped to `Active Group` (or `All Groups` if selected) and selected `BillingCycle`.
-  - `Your Personal Share` tracks user's cycle liability against `User.personal_share_cap_cents` using `ProgressBar`.
-  - `Unsettled / Pending` shows `Next group settlement` date (derived from `billing_cycle_anchor_day`) and `Settle now →` action opening `RecordSettlementModal`.
-  - `Recurring` tab lists active `RecurringRule` templates for the group with create/pause/delete controls (Admin or creator).
-  - Table rows show lock badge (`LOCKED`) when covered by Cycle Close or Pairwise Watermark; `⋮` menu enforces lock & role rules (unlocked → `Edit` / `Delete`; locked → `Log Adjustment`).
-  - `Export CSV` downloads cycle transactions in `Group.base_currency`.
-- **Intentional Prototype Omissions / Replacements:**
-  - `Shared Encrypted Ledger` decorative badge is replaced by an informative group-isolation / cycle-status `Badge` (`Open Cycle` / `Closed Period`).
+  - `YOUR PERSONAL SHARE` displays `% of total` pill and `Monthly Cap ($X)` `ProgressBar` wired to `User.personal_share_cap_cents`.
+  - `UNSETTLED / PENDING` shows pending total, item/peer count, and `Action needed` badge.
+  - Table columns: `DATE`, `MERCHANT & GROUP`, `CATEGORY`, `PAID BY`, `SPLIT`, `YOUR SHARE`, `STATUS` (`Settled` / `Pending`), `ACTION` (`⋮` menu for `Edit` / `Delete` when unlocked, or view details when locked).
+  - `Export CSV` downloads filtered cycle transactions.
+- **Intentional Prototype Omissions / Replacements:** `Recurring` tab and bottom insight cards from v1 are omitted.
 
-### Split Groups (ref: `.stitch/split-groups.png`, `.stitch/split-groups.html`)
-- **Layout:** Header (`Split Groups` + `Archive Rules` button + `+ Create New Group` primary CTA) → 3-column active group cards → `Spotlight Partition: Household Split Rules & Ratios` panel for the selected group → 3-column summary strip (`Monthly Logged Vouchers`, `Auto-Debit / Recurring Rules`, `Ledger Consensus`).
+### Split Groups — Active, Split Rules & Invite, Archived (ref: `.stitch/ledgersplit_split_groups/screen.png`, `.stitch/ledgersplit_split_groups_split_rules_invite/screen.png`, `.stitch/ledgersplit_split_groups_archived_view/screen.png`)
+- **Layout:** `<PageHeader />` (`Split Groups`, `Active (N) | Archived (M)` `SegmentedControl`, `+ Create Group` primary CTA) → 4-column active group cards → Selected group Spotlight (`Members & Balances` \| `Split Rules & Invite`, `Audit Log` button, `Edit Group` button).
 - **Required Widgets & Interactions:**
-  - Group cards show type badge (`PRIMARY RESIDENCE`, `SEASONAL TRIP`, `RECURRING FLAT`), `⋮` menu, member `AvatarStack`, cycle turnover, user's net ledger, `Manage Group >` (selects group into Spotlight & sets `Active Group`), and `Quick Split` (opens `AddEditExpenseModal` for that group).
-  - Collapsible `Archived Ledgers` section below active groups for `ARCHIVED` read-only groups.
-  - Spotlight panel shows `Edit Ratios` (`ADMIN` only; view-only for `MEMBER`) + `Log` (revision/settlement audit drawer), per-member cards (`Paid This Period`, `Owed`/`Due`, `Remind` / `Request` actions, `FORMER_MEMBER` badge if removed with debt), `Assigned Habitat` / `Lease ends` info, and `Member Invitation Gateway` (`Copy` link for all members; `Regenerate Link` for `ADMIN` only).
-  - Banner warning when group status is `NEEDS_RATIO_UPDATE` (5th member joined in `CUSTOM_RATIOS` mode).
-  - `Archive Rules` opens modal configuring Trip 14-day zero-balance auto-archive and Residential lease-end prompt; Admin can also trigger `Close & Lock Billing Cycle` from Spotlight/Manage Group.
-- **Intentional Prototype Omissions / Replacements:**
-  - `Auto-ingestion active` / `Auto-Debit Routing` / `100% Verified` labels map directly to active `RecurringRule` count and verified/settled ledger status rather than simulated bank auto-debit.
+  - **Active Cards:** Category badge (`Home`, `Trip`, `Dining`, `Utilities`, `Other`), `⋮` menu (`Edit Group`, `Split Rules & Invite`, `Audit Log`, `Archive Group`), split rule summary, `AvatarStack`, `Cycle Spend`, and `Your Net`. Clicking a card selects it into Spotlight and syncs `Active Group`.
+  - **`Members & Balances` Tab:** `GROUP MEMBERS` cards (`Paid`, `Share`, `Net Position`, `Owed to you` / `Owes group` badge, `Remind` button) + `WHO OWES WHOM` always-on simplified transfer list with `Remind` and `Mark Settled`.
+  - **`Split Rules & Invite` Tab (`Save Rules` CTA for Admin):**
+    - Left: `SPLIT CALCULATION METHOD` (`Equal`, `Percentage (%)`, `Shares`, `Custom`) with per-member weights/percentages, `GROUP CURRENCY` `Select`, `CYCLE RESET DAY` `Select` (`1st of month (Auto-settle)` vs. manual), and `AUTOMATION & POLICIES` switches (`Allow any member to add expenses`, `Require receipt for expenses over $100`, `Send reminders when cycle closes`).
+    - Right: `SHAREABLE INVITE LINK` (`Copy Link` + regenerate icon, 14-day expiry), `INVITE BY EMAIL` input + `Send Invite` button, `GROUP MEMBERS` list with `Owner` / `Member` badge + `Remove` action, and `GROUP MAINTENANCE` (`Archive Group`, `Leave Group`).
+  - **Modals:** `Create / Edit Group` (`Group Name`, `Category` pills, `Default Split Method`, `Currency`, `Members` email add/remove), `Audit Log` (`All Events | Expenses | Rules | Settlements`, filter input, `Export Log`), and `Archive Group` confirmation (shows `Current Net Ledger`).
+  - **`Archived` View:** Info `AlertBanner`, archived group cards (`TOTAL SETTLED`, `FINAL BALANCE`, `Restore Group`, `View Final Ledger`, `Delete`), and `Final Settlement History` table.
+- **Intentional Prototype Omissions / Replacements:** `Archive Rules` modal and `Auto-ingestion` labels are omitted.
 
-### Add / Edit Expense Modal (ref: `.stitch/add-expense-modal.png`, `.stitch/add-expense-modal.html`)
-- **Layout:** Centered `Dialog` with amount & currency header, `Description`, `Category` + `Date` 2-column row, `Paid by` card with `Change payer`, `Split Method` `SegmentedControl` (`Split Evenly`, `By Percentage`, `Exact Amounts`), `Split Breakdown` member checklist with live per-person minor-unit preview, balance validation bar, and sticky footer (`Attach Receipt`, `Cancel`, `Save Expense ($X)`).
+### Settings (ref: `.stitch/ledgersplit_settings/screen.png`, `.stitch/ledgersplit_settings/code.html`)
+- **Layout:** `<PageHeader />` (`Settings`, `Discard Changes` + `Save Changes` CTAs) → 2-column grid: Left (`Profile & Identity`, `Display Currency & Personal Budget`, `Security & Active Sessions`) and Right (`Settlement Handles`, `Notifications`, `Data & Account`).
 - **Required Widgets & Interactions:**
-  - Selecting a foreign currency displays live FX spot rate + editable `Exchange Rate` override input and previews converted `Group.base_currency` total.
-  - Toggling member checkboxes recalculates shares in real time using deterministic penny-rounding (`docs/adr/0002-money-representation-and-fx-audit.md`).
-  - `Save Expense` is disabled until `SUM(split_breakdown) == amount_cents` and required fields are valid.
-  - `Attach Receipt` checks `User.receipt_storage_used_bytes` against `500 MB`; if full, displays non-blocking `AlertBanner` ("Receipt storage full (500 MB). Expense will be logged without receipt.") and allows saving without attachment.
-- **Intentional Prototype Omissions / Replacements:**
-  - None; all visible controls are wired.
-
-### Settings (ref: `.stitch/settings.png`, `.stitch/settings.html`)
-- **Layout:** Header (`Settings` + `Auto-sync active` / connected tag badge) → 2-column grid: Left (`Profile & Identity`, `Default Split & Settlement Rules` + sticky `Reset to Defaults` / `Save Changes` bar) and Right (`Payment Methods`, `Notifications`, `Storage & Sync Quota`).
-- **Required Widgets & Interactions:**
-  - `Profile & Identity`: Avatar upload, `Legal Full Name`, `Primary Email` (read-only/verified), `Phone Number` (verification flow for SMS), `Instant Settlement Tag` (`@handle`).
-  - `Default Split & Settlement Rules`: `Default Split Mode` `SegmentedControl`, `Base Currency` `Select`, `Simplify Group Debts` `Switch` (scoped to active group for `ADMIN`), `Automatic Settlement Reminders` `Switch`, `Personal Share Cap` input.
-  - `Payment Methods`: Lists saved settlement tags/handles (`Venmo Settlement Rail`, `Apple Card / Debit` label) for "Log & Link" deep-linking; `Add` opens handle modal.
-  - `Notifications`: `New Expense Logged`, `Settlement Confirmation`, `Monthly Recap & Digest`, and explicit `Allow SMS settlement nudges` opt-in `Switch`. `Export Ledger History` (`CSV / JSON`) triggers full-history download.
-  - `Storage & Sync Quota`: `ProgressRing` showing `X MB of 500 MB` used across all user receipts.
-- **Intentional Prototype Omissions / Replacements:**
-  - `Payment Methods` stores settlement handles/preferences for "Log & Link" rather than real card tokenization or ACH debiting.
+  - `Profile & Identity`: Avatar + `Change Photo`, `Full Name`, `Primary Email` (read-only, `Managed via Google SSO`), `Phone Number`, `Timezone` `Select`.
+  - `Display Currency & Personal Budget`: `Display Currency` `Select`, `Personal Monthly Share Cap` input, `Auto-include me in new expenses` `Switch`.
+  - `Security & Active Sessions`: `+ Add Passkey` (WebAuthn enrollment), `Google Workspace SSO` status, `ACTIVE DEVICES` list with `This device` badge and `Revoke` action.
+  - `Settlement Handles`: `+ Add Handle` + list of handles (`Venmo`, `Zelle`, `Cash App`) with `Default` badge and `⋮` menu (`Set as Default`, `Edit Handle`, `Delete`) + `Add / Edit Settlement Handle` modal (`Provider`, `Handle / Account Tag`, `Display Note`, `Set as default handle` `Switch`, `Delete`).
+  - `Notifications`: `New expense added`, `Settlement recorded`, `Cycle close reminder`, `Monthly summary digest` switches.
+  - `Data & Account`: `Export Ledger Archive` (`CSV`, `JSON`) + `DANGER ZONE` `Delete Account` (blocked if net balance != `$0.00` across any group).
+- **Intentional Prototype Omissions / Replacements:** `500 MB` receipt storage quota ring, `Simplify Group Debts` toggle, and `Allow SMS settlement nudges` toggle are omitted.
 
 ### Auth & Group Invite Onboarding (`/login`, `/join/[slug]?token=...`)
-- **Layout:** Clean centered `Card` on `#f5f5f7` canvas using `#0066cc` primary pill CTA (no sidebar chrome).
+- **Layout:** Centered `Card` on `#f9f9fb` canvas using `#0066cc` primary pill CTA (no sidebar/topbar chrome).
 - **Required Widgets & Interactions:**
-  - `/login`: Passwordless Magic Link email input + Google OAuth button via Supabase Auth.
-  - `/join/[slug]?token=...`: Validates signed invite token, shows group name & current split mode (`EQUAL` or `CUSTOM_RATIOS`), authenticates user if needed, and binds membership (`100/N%` in `EQUAL` mode, or `0%` + `NEEDS_RATIO_UPDATE` in `CUSTOM_RATIOS` mode).
+  - `/login`: Google SSO button, Email/Magic Link input, and Passkey sign-in option via Supabase Auth.
+  - `/join/[slug]?token=...`: Validates 14-day signed invite token, supports single-passkey registration/auth, and binds membership (`EQUAL` / `SHARES` auto-join, or `0%` + `NEEDS_RATIO_UPDATE` in `PERCENTAGE` / `CUSTOM` mode).
 
 ---
 
 ## 5. Enduring UI & Integration Invariants
 
-1. **Primitives & Shell First:** Shared UI primitives (Section 2) and the responsive App Shell (Section 3) must be implemented before feature views so no screen duplicates raw controls or navigation chrome.
-2. **End-to-End Preference Wiring:** Every persisted setting (`Group.base_currency`, `Group.default_split_mode`, `Group.simplify_debts`, `User.personal_share_cap_cents`, `User.instant_settlement_tag`, `User.notification_prefs.sms_nudges_opt_in`) must visibly drive every consuming screen, calculation, and modal.
-3. **Minor-Unit UI Formatting & Validation:** All UI inputs and displays format `BIGINT` minor units via a single shared currency formatter; client-side split math uses integer cents exclusively so UI previews match server invariants to the exact cent.
-4. **Interactive Desktop & Mobile Verification:** Verification must exercise live interactive flows (switching groups/cycles, opening modals, toggling splits/switches, submitting forms, checking `scrollWidth <= innerWidth`) across both desktop (`>= 1280px`) and mobile (`375px`) viewports.
+1. **Primitives & Shell First:** Shared UI primitives (Section 2) and the static App Shell (Section 3) must be implemented before feature views so zero raw `<button>`, `<input>`, `<select>`, or `<dialog>` elements exist in `(app)` pages or modals.
+2. **End-to-End Preference & Policy Wiring:** Every persisted setting (`User.display_currency`, `User.personal_share_cap_cents`, `User.auto_include_in_expenses`, `SettlementHandle.is_default`, `Group.base_currency`, `Group.default_split_mode`, `Group.cycle_reset_day`, `Group.auto_settle_on_reset`, `Group.allow_any_member_add_expense`, `Group.require_receipt_over_100`, `Group.send_cycle_close_reminders`) must visibly drive every consuming screen, calculation, and modal.
+3. **Minor-Unit UI Formatting & Validation:** All UI inputs and displays format `BIGINT` minor units via a single shared currency formatter with `tabular-nums`; client-side split math (`EQUAL`, `PERCENTAGE`, `EXACT`, `SHARES`) uses integer cents exclusively so UI previews match server invariants to the exact cent.
+4. **Interactive Desktop & Mobile Verification:** Verification must exercise live interactive flows (switching groups/cycles, opening modals/popovers, toggling switches, submitting forms, checking `scrollWidth <= innerWidth`) across both desktop (`>= 1280px`) and mobile (`375px`) viewports.

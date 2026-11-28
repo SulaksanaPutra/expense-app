@@ -1,6 +1,6 @@
 # ADR-0004: Simulated Payment Rails, Notification Cooldowns, and Receipt Quota
 
-- **Status:** Accepted
+- **Status:** Superseded by ADR-0007 (Multi-handle settlements, Auto-settle cycle reset, and updated notification/receipt policies defined in ADR-0007)
 - **Date:** 2026-11-26
 
 ## Context
