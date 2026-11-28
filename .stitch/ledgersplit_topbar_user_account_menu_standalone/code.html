@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LedgerSplit TopBar — User Account Menu (Standalone)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              DEFAULT: '#0066cc',
+              focus: '#0071e3',
+              dark: '#0052a3',
+              light: '#e6f0fa',
+            },
+            surface: {
+              canvas: '#f5f5f7',
+              card: '#ffffff',
+              pearl: '#fafafc',
+              dim: '#d9dadc',
+            },
+            ink: {
+              DEFAULT: '#1d1d1f',
+              muted80: '#333333',
+              muted48: '#7a7a7a',
+            },
+            borderLine: {
+              hairline: '#e0e0e0',
+              divider: '#f0f0f0',
+            },
+            semantic: {
+              success: '#22c55e',
+              successBg: '#edfbf2',
+              warning: '#f59e0b',
+              warningBg: '#fef8ea',
+              danger: '#dc2626',
+              dangerBg: '#fef2f2',
+              info: '#0066cc',
+              infoBg: '#f0f7ff',
+            }
+          },
+          fontFamily: {
+            sans: ['-apple-system', 'BlinkMacSystemFont', '"SF Pro Display"', '"SF Pro Text"', 'Inter', 'Helvetica Neue', 'sans-serif'],
+            mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace'],
+          },
+          borderRadius: {
+            'card': '18px',
+            'pill': '9999px',
+          },
+          boxShadow: {
+            'overlay': '0 16px 40px rgba(0, 0, 0, 0.08), 0 4px 12px rgba(0, 0, 0, 0.04)',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      background-color: #f5f5f7;
+      color: #1d1d1f;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    }
+    .tabular-nums {
+      font-variant-numeric: tabular-nums;
+    }
+  </style>
+</head>
+<body class="bg-[#f5f5f7] font-sans antialiased text-[#1d1d1f] min-h-screen flex items-center justify-center p-10">
+
+  <!-- Standalone User Account Popover -->
+  <div class="w-72 bg-[#ffffff] rounded-2xl border border-borderLine-hairline shadow-overlay overflow-hidden transition-all duration-200">
+    
+    <!-- User Identity Header -->
+    <div class="p-4 border-b border-[#f0f0f0] flex items-center gap-3">
+      <div class="w-10 h-10 rounded-full bg-[#0066cc] text-white text-sm font-semibold flex items-center justify-center shrink-0 tracking-tight select-none">
+        JD
+      </div>
+      <div class="min-w-0 flex-1">
+        <p class="text-[14px] font-semibold text-[#1d1d1f] truncate leading-tight">Jordan Doe</p>
+        <p class="text-[12px] text-[#7a7a7a] truncate leading-tight mt-0.5">jordan.doe@ledgersplit.app</p>
+      </div>
+    </div>
+
+    <!-- Active Workspace / Currency Summary -->
+    <div class="mx-3 mt-3 px-3 py-2.5 rounded-[14px] bg-surface-canvas border border-borderLine-hairline flex items-center justify-between text-xs">
+      <span class="text-[#7a7a7a] font-medium">Default Currency</span>
+      <span class="font-semibold text-[#1d1d1f] tabular-nums">USD ($)</span>
+    </div>
+
+    <!-- Menu Items -->
+    <div class="p-2 space-y-0.5 text-sm text-[#1d1d1f] mt-1">
+      <!-- Account & Profile -->
+      <a href="#" class="w-full rounded-lg hover:bg-surface-pearl px-2.5 py-1.5 flex items-center gap-2.5 text-xs font-medium transition-colors group">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" data-lucide="user" class="w-3.5 h-3.5 text-ink-muted48 group-hover:text-ink shrink-0"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        <span class="truncate">Account & Profile</span>
+      </a>
+
+      <!-- Settings -->
+      <a href="#" class="w-full rounded-lg hover:bg-surface-pearl px-2.5 py-1.5 flex items-center gap-2.5 text-xs font-medium transition-colors group">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" data-lucide="settings" class="w-3.5 h-3.5 text-ink-muted48 group-hover:text-ink shrink-0"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+        <span class="truncate">Settings</span>
+      </a>
+
+      <!-- Keyboard Shortcuts -->
+      <a href="#" class="w-full rounded-lg hover:bg-surface-pearl px-2.5 py-1.5 flex items-center justify-between text-xs font-medium transition-colors group">
+        <div class="flex items-center gap-2.5 truncate">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" data-lucide="keyboard" class="w-3.5 h-3.5 text-ink-muted48 group-hover:text-ink shrink-0"><path d="M10 8h.01"/><path d="M12 12h.01"/><path d="M14 8h.01"/><path d="M16 12h.01"/><path d="M18 8h.01"/><path d="M6 8h.01"/><path d="M7 16h10"/><path d="M8 12h.01"/><rect width="20" height="16" x="2" y="4" rx="2"/></svg>
+          <span class="truncate">Keyboard Shortcuts</span>
+        </div>
+        <kbd class="px-1.5 py-0.5 text-[11px] font-mono font-medium text-[#7a7a7a] bg-[#ffffff] border border-[#e0e0e0] rounded-md shrink-0 select-none">⌘K</kbd>
+      </a>
+
+      <!-- Export Monthly Ledger -->
+      <a href="#" class="w-full rounded-lg hover:bg-surface-pearl px-2.5 py-1.5 flex items-center gap-2.5 text-xs font-medium transition-colors group">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" data-lucide="download" class="w-3.5 h-3.5 text-ink-muted48 group-hover:text-ink shrink-0"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+        <span class="truncate">Export Monthly Ledger</span>
+      </a>
+    </div>
+
+    <!-- Divider -->
+    <div class="border-t border-[#f0f0f0] mx-2 my-1"></div>
+
+    <!-- Footer Action -->
+    <div class="p-2 pt-1">
+      <button type="button" class="w-full rounded-lg px-2.5 py-1.5 text-xs font-medium text-semantic-danger hover:bg-[#fef2f2] flex items-center gap-2.5 transition-colors group">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" data-lucide="log-out" class="w-3.5 h-3.5 text-semantic-danger shrink-0 transition-transform group-hover:translate-x-0.5"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
+        <span>Sign Out</span>
+      </button>
+    </div>
+
+  </div>
+
+  <script>
+    lucide.createIcons();
+  </script>
+</body>
+</html>

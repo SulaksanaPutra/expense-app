@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LedgerSplit Split Groups — Create &amp; Edit Group Modal</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              DEFAULT: '#0066cc',
+              focus: '#0071e3',
+              dark: '#0052a3',
+              light: '#e6f0fa',
+            },
+            surface: {
+              canvas: '#f5f5f7',
+              card: '#ffffff',
+              pearl: '#fafafc',
+              dim: '#d9dadc',
+            },
+            ink: {
+              DEFAULT: '#1d1d1f',
+              muted80: '#333333',
+              muted48: '#7a7a7a',
+            },
+            borderLine: {
+              hairline: '#e0e0e0',
+              divider: '#f0f0f0',
+            },
+            semantic: {
+              success: '#22c55e',
+              successBg: '#edfbf2',
+              warning: '#f59e0b',
+              warningBg: '#fef8ea',
+              danger: '#dc2626',
+              dangerBg: '#fef2f2',
+              info: '#0066cc',
+              infoBg: '#f0f7ff',
+            }
+          },
+          fontFamily: {
+            sans: ['-apple-system', 'BlinkMacSystemFont', '"SF Pro Display"', '"SF Pro Text"', 'Inter', 'Helvetica Neue', 'sans-serif'],
+            mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace'],
+          },
+          borderRadius: {
+            'card': '18px',
+            'pill': '9999px',
+          },
+          boxShadow: {
+            'overlay': '0 16px 40px rgba(0, 0, 0, 0.08), 0 4px 12px rgba(0, 0, 0, 0.04)',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      background-color: #f5f5f7;
+      color: #1d1d1f;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    }
+    .tabular-nums {
+      font-variant-numeric: tabular-nums;
+    }
+  </style>
+</head>
+<body class="bg-[#f5f5f7] font-sans antialiased text-[#1d1d1f] min-h-screen flex items-center justify-center p-10">
+
+  <!-- Standalone Modal Card Component -->
+  <div class="w-full max-w-lg bg-[#ffffff] rounded-[20px] border border-borderLine-hairline shadow-overlay overflow-hidden">
+    
+    <!-- Modal Header -->
+    <div class="px-6 py-4 border-b border-[#f0f0f0] flex items-center justify-between">
+      <div>
+        <h2 class="text-[18px] font-semibold text-[#1d1d1f] tracking-tight">Edit Group · Apartment 4B Shared</h2>
+        <p class="text-[13px] text-[#7a7a7a] mt-0.5">Configure group name, category, default split method, and members.</p>
+      </div>
+      <button type="button" aria-label="Close modal" class="w-8 h-8 rounded-full bg-[#f5f5f7] hover:bg-[#e0e0e0] text-[#333333] flex items-center justify-center transition-colors">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Modal Form Body -->
+    <div class="p-6 space-y-5">
+      
+      <!-- 1. Group Name -->
+      <div class="space-y-1.5">
+        <label for="group-name" class="block text-[13px] font-medium text-[#1d1d1f]">Group Name <span class="text-[#dc2626]">*</span></label>
+        <input 
+          id="group-name" 
+          type="text" 
+          value="Apartment 4B Shared" 
+          class="h-11 w-full px-4 rounded-full bg-[#ffffff] border border-[#e0e0e0] text-xs text-[#1d1d1f] placeholder-[#7a7a7a] focus:outline-none focus:border-brand transition-all"
+        />
+      </div>
+
+      <!-- 2. Category -->
+      <div class="space-y-1.5">
+        <label class="block text-[13px] font-medium text-[#1d1d1f]">Category</label>
+        <div class="flex flex-wrap gap-2">
+          <!-- Active Pill: Home -->
+          <button type="button" class="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-medium bg-[#0066cc] text-white transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+              <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+              <polyline points="9 22 9 12 15 12 15 22"></polyline>
+            </svg>
+            Home
+          </button>
+          <!-- Inactive Pill: Trip -->
+          <button type="button" class="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-medium bg-[#f5f5f7] border border-[#e0e0e0] text-[#333333] hover:bg-[#e0e0e0] transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+              <path d="m22 2-7 20-4-9-9-4Z"></path>
+              <path d="M22 2 11 13"></path>
+            </svg>
+            Trip
+          </button>
+          <!-- Inactive Pill: Dining -->
+          <button type="button" class="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-medium bg-[#f5f5f7] border border-[#e0e0e0] text-[#333333] hover:bg-[#e0e0e0] transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M18 8h1a4 4 0 0 1 0 8h-1"></path>
+              <path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"></path>
+              <line x1="6" y1="1" x2="6" y2="4"></line>
+              <line x1="10" y1="1" x2="10" y2="4"></line>
+              <line x1="14" y1="1" x2="14" y2="4"></line>
+            </svg>
+            Dining
+          </button>
+          <!-- Inactive Pill: Utilities -->
+          <button type="button" class="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-medium bg-[#f5f5f7] border border-[#e0e0e0] text-[#333333] hover:bg-[#e0e0e0] transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+            </svg>
+            Utilities
+          </button>
+          <!-- Inactive Pill: Other -->
+          <button type="button" class="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-medium bg-[#f5f5f7] border border-[#e0e0e0] text-[#333333] hover:bg-[#e0e0e0] transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="1"></circle>
+              <circle cx="19" cy="12" r="1"></circle>
+              <circle cx="5" cy="12" r="1"></circle>
+            </svg>
+            Other
+          </button>
+        </div>
+      </div>
+
+      <!-- 3. 2-Column Row: Default Split Method & Currency -->
+      <div class="grid grid-cols-2 gap-4">
+        <!-- Default Split Method Segmented Control -->
+        <div class="space-y-1.5">
+          <label class="block text-[13px] font-medium text-[#1d1d1f]">Default Split Method</label>
+          <div class="h-11 p-1 bg-surface-canvas rounded-pill border border-borderLine-hairline flex items-center">
+            <button type="button" class="flex-1 h-full rounded-full bg-brand text-white text-xs font-semibold shadow-none transition-all">
+              Equal
+            </button>
+            <button type="button" class="flex-1 h-full rounded-full text-[#333333] hover:text-[#1d1d1f] text-xs font-medium transition-colors">
+              Percentage
+            </button>
+            <button type="button" class="flex-1 h-full rounded-full text-[#333333] hover:text-[#1d1d1f] text-xs font-medium transition-colors">
+              Custom
+            </button>
+          </div>
+        </div>
+
+        <!-- Currency Select -->
+        <div class="space-y-1.5">
+          <label for="currency-select" class="block text-[13px] font-medium text-[#1d1d1f]">Currency</label>
+          <div class="relative">
+            <select 
+              id="currency-select" 
+              class="h-11 w-full px-4 pr-9 rounded-full bg-[#ffffff] border border-[#e0e0e0] text-xs text-[#1d1d1f] appearance-none focus:outline-none focus:border-brand transition-all"
+            >
+              <option value="USD">USD ($) — US Dollar</option>
+              <option value="EUR">EUR (€) — Euro</option>
+              <option value="GBP">GBP (£) — British Pound</option>
+              <option value="CAD">CAD ($) — Canadian Dollar</option>
+              <option value="JPY">JPY (¥) — Japanese Yen</option>
+            </select>
+            <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3.5 text-[#7a7a7a]">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4. Members (<span class="tabular-nums">3</span>) -->
+      <div class="space-y-2">
+        <label class="block text-[13px] font-medium text-[#1d1d1f]">Members (3)</label>
+        
+        <!-- Add Member Input Row -->
+        <div class="flex items-center gap-2">
+          <input 
+            type="email" 
+            placeholder="Add member by email..." 
+            class="h-11 flex-1 px-4 rounded-full bg-[#ffffff] border border-[#e0e0e0] text-xs text-[#1d1d1f] placeholder-[#7a7a7a] focus:outline-none focus:border-brand transition-all"
+          />
+          <button type="button" class="h-11 px-5 rounded-full bg-[#f5f5f7] border border-[#e0e0e0] hover:bg-[#e0e0e0] text-[#1d1d1f] text-xs font-medium inline-flex items-center gap-1.5 transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+            Add
+          </button>
+        </div>
+
+        <!-- Member Pill Chips -->
+        <div class="flex flex-wrap items-center gap-2 pt-1">
+          <!-- Member 1: Owner -->
+          <div class="inline-flex items-center gap-1.5 rounded-full bg-[#f5f5f7] border border-[#e0e0e0] pl-1.5 pr-3 py-1 text-xs text-[#1d1d1f]">
+            <span class="w-5 h-5 rounded-full bg-[#0066cc] text-white flex items-center justify-center font-semibold text-[10px]">JD</span>
+            <span>Jordan Doe</span>
+            <span class="text-[10px] font-semibold tracking-wide uppercase px-1.5 py-0.5 rounded-full bg-[#ffffff] border border-[#e0e0e0] text-[#7a7a7a]">Owner</span>
+          </div>
+
+          <!-- Member 2: Marcus Kim -->
+          <div class="inline-flex items-center gap-1.5 rounded-full bg-[#f5f5f7] border border-[#e0e0e0] pl-1.5 pr-2 py-1 text-xs text-[#1d1d1f]">
+            <span class="w-5 h-5 rounded-full bg-[#0284c7] text-white flex items-center justify-center font-semibold text-[10px]">MK</span>
+            <span>Marcus Kim</span>
+            <button type="button" class="w-4 h-4 rounded-full hover:bg-[#e0e0e0] flex items-center justify-center text-[#7a7a7a] hover:text-[#1d1d1f] transition-colors ml-0.5">
+              <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+
+          <!-- Member 3: Alex Lee -->
+          <div class="inline-flex items-center gap-1.5 rounded-full bg-[#f5f5f7] border border-[#e0e0e0] pl-1.5 pr-2 py-1 text-xs text-[#1d1d1f]">
+            <span class="w-5 h-5 rounded-full bg-[#ea580c] text-white flex items-center justify-center font-semibold text-[10px]">AL</span>
+            <span>Alex Lee</span>
+            <button type="button" class="w-4 h-4 rounded-full hover:bg-[#e0e0e0] flex items-center justify-center text-[#7a7a7a] hover:text-[#1d1d1f] transition-colors ml-0.5">
+              <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Modal Footer -->
+    <div class="px-6 py-4 bg-white border-t border-borderLine-divider flex items-center justify-end gap-3">
+      <button type="button" class="h-10 px-5 rounded-full bg-[#ffffff] border border-[#e0e0e0] hover:bg-[#f5f5f7] text-xs font-medium text-[#1d1d1f] transition-colors">
+        Cancel
+      </button>
+      <button type="button" class="h-10 px-5 rounded-full bg-[#0066cc] hover:bg-[#0071e3] text-xs font-medium text-white shadow-none transition-colors">
+        Save Group
+      </button>
+    </div>
+
+  </div>
+
+  <script>
+    lucide.createIcons();
+  </script>
+</body>
+</html>

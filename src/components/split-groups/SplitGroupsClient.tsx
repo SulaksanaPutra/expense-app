@@ -14,7 +14,6 @@ import {
   Home,
   Link2,
   Lock,
-  LogOut,
   Plus,
   ReceiptText,
   RefreshCw,
@@ -1241,32 +1240,6 @@ export function SplitGroupsClient({
               >
                 Log
               </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={
-                  selectedGroup.status === "ARCHIVED" ||
-                  selectedGroup.members.some(
-                    (m) => m.isCurrentUser && m.status === "FORMER_MEMBER",
-                  )
-                }
-                onClick={() => handleQuickSplit(selectedGroup.id)}
-              >
-                Log Expense
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() =>
-                  router.push(
-                    `/expenses?group=${encodeURIComponent(selectedGroup.id)}&cycle=${encodeURIComponent(cycle)}`,
-                  )
-                }
-              >
-                View Ledger
-              </Button>
               {selectedGroup.currentUserRole === "ADMIN" &&
                 selectedGroup.status !== "ARCHIVED" &&
                 (selectedGroup.isCurrentCycleClosed ? (
@@ -1284,18 +1257,6 @@ export function SplitGroupsClient({
                     Close &amp; Lock Cycle
                   </Button>
                 ))}
-              {selectedGroup.status !== "ARCHIVED" &&
-                selectedGroup.members.some((m) => m.isCurrentUser) && (
-                  <Button
-                    type="button"
-                    variant="danger-soft"
-                    size="sm"
-                    leftIcon={<LogOut className="h-3.5 w-3.5" />}
-                    onClick={() => setLeaveTargetGroup(selectedGroup)}
-                  >
-                    Leave Group
-                  </Button>
-                )}
             </div>
           </div>
 

@@ -248,9 +248,11 @@ describe("Departure Guards, Archive Rules & Read-Only Archived Ledgers UI", () =
 
     renderSplitGroups();
 
-    // 1. In Apt 4B Roommates (userNetLedgerCents = +10000), Leave Group opens blocking ConfirmDialog
-    const spotlight = screen.getByTestId("spotlight-partition");
-    await user.click(within(spotlight).getByRole("button", { name: "Leave Group" }));
+    // 1. In Apt 4B Roommates (userNetLedgerCents = +10000), Leave Group via card menu opens blocking ConfirmDialog
+    await user.click(
+      screen.getByRole("button", { name: "Actions for Apt 4B Roommates" }),
+    );
+    await user.click(screen.getByRole("menuitem", { name: "Leave Group" }));
 
     const blockedDialog = screen.getByRole("dialog", {
       name: "Leave Apt 4B Roommates",
@@ -270,7 +272,10 @@ describe("Departure Guards, Archive Rules & Read-Only Archived Ledgers UI", () =
     await user.click(
       screen.getByRole("button", { name: "Manage Group Coffee Club" }),
     );
-    await user.click(within(spotlight).getByRole("button", { name: "Leave Group" }));
+    await user.click(
+      screen.getByRole("button", { name: "Actions for Coffee Club" }),
+    );
+    await user.click(screen.getByRole("menuitem", { name: "Leave Group" }));
 
     const allowedDialog = screen.getByRole("dialog", {
       name: "Leave Coffee Club",
@@ -470,8 +475,8 @@ describe("Departure Guards, Archive Rules & Read-Only Archived Ledgers UI", () =
       within(spotlight).getByText("Archived Group — Read-Only"),
     ).toBeInTheDocument();
     expect(
-      within(spotlight).getByRole("button", { name: "Log Expense" }),
-    ).toBeDisabled();
+      within(spotlight).queryByRole("button", { name: "Log Expense" }),
+    ).not.toBeInTheDocument();
     expect(
       within(spotlight).queryByRole("button", { name: "Leave Group" }),
     ).not.toBeInTheDocument();

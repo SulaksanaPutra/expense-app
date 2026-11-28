@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+  <meta charset="utf-8"/>
+  <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+  <meta content="web_dashboard" name="shell-type"/>
+  <title>LedgerSplit — Dashboard Overview</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              DEFAULT: '#0066cc',
+              focus: '#0071e3',
+              dark: '#0052a3',
+              light: '#e6f0fa',
+            },
+            surface: {
+              canvas: '#f5f5f7',
+              card: '#ffffff',
+              pearl: '#fafafc',
+              dim: '#d9dadc',
+            },
+            ink: {
+              DEFAULT: '#1d1d1f',
+              muted80: '#333333',
+              muted48: '#7a7a7a',
+            },
+            borderLine: {
+              hairline: '#e0e0e0',
+              divider: '#f0f0f0',
+            },
+            semantic: {
+              success: '#22c55e',
+              successBg: '#edfbf2',
+              warning: '#f59e0b',
+              warningBg: '#fef8ea',
+              danger: '#dc2626',
+              dangerBg: '#fef2f2',
+              info: '#0066cc',
+              infoBg: '#f0f7ff',
+            }
+          },
+          fontFamily: {
+            sans: ['-apple-system', 'BlinkMacSystemFont', '"SF Pro Display"', '"SF Pro Text"', 'Inter', 'Helvetica Neue', 'sans-serif'],
+            mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace'],
+          },
+          borderRadius: {
+            'card': '18px',
+            'pill': '9999px',
+          },
+          boxShadow: {
+            'overlay': '0 16px 40px rgba(0, 0, 0, 0.08), 0 4px 12px rgba(0, 0, 0, 0.04)',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      background-color: #f5f5f7;
+      color: #1d1d1f;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    }
+    .tabular-nums {
+      font-variant-numeric: tabular-nums;
+    }
+  </style>
+</head><body class="bg-surface-canvas text-[14px] text-ink antialiased"><aside class="w-[248px] fixed inset-y-0 left-0 bg-white border-r border-borderLine-hairline flex flex-col justify-between p-4 select-none z-30">
+    <div class="flex flex-col gap-6">
+      <div class="flex items-center gap-2.5 px-2 py-1">
+        <div class="w-8 h-8 rounded-lg bg-brand text-white flex items-center justify-center shrink-0 shadow-none">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4 shrink-0"><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/></svg>
+        </div>
+        <span class="text-[17px] font-semibold tracking-tight text-ink">LedgerSplit</span>
+      </div>
+      <nav class="flex flex-col gap-1.5">
+        <a aria-current="page" class="h-10 px-3.5 rounded-pill text-[14px] flex items-center gap-3 transition-colors bg-brand text-white font-semibold shadow-none" data-path="dashboard" href="#">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4 shrink-0"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
+          <span>Dashboard</span>
+        </a>
+        <a class="h-10 px-3.5 rounded-pill text-[14px] flex items-center gap-3 transition-colors text-ink-muted80 hover:bg-surface-canvas hover:text-ink font-medium" data-path="expenses" href="#">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4 shrink-0"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 17.5v-11"/></svg>
+          <span>Expenses</span>
+        </a>
+        <a class="h-10 px-3.5 rounded-pill text-[14px] flex items-center justify-between transition-colors text-ink-muted80 hover:bg-surface-canvas hover:text-ink font-medium" data-path="split-groups" href="#">
+          <div class="flex items-center gap-3">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4 shrink-0"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            <span>Split Groups</span>
+          </div>
+          <span class="px-2 py-0.5 text-[11px] font-semibold rounded-pill tabular-nums bg-surface-canvas text-ink-muted80 border border-borderLine-hairline">4</span>
+        </a>
+        <a class="h-10 px-3.5 rounded-pill text-[14px] flex items-center gap-3 transition-colors text-ink-muted80 hover:bg-surface-canvas hover:text-ink font-medium" data-path="settings" href="#">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4 shrink-0"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+          <span>Settings</span>
+        </a>
+      </nav>
+    </div>
+    <div class="flex flex-col gap-3">
+      <div class="bg-surface-canvas border border-borderLine-hairline rounded-[14px] p-3 flex flex-col gap-2">
+        <div class="text-[11px] font-semibold uppercase tracking-wider text-ink-muted48">ACTIVE GROUP</div>
+        <div class="flex items-center justify-between">
+          <span class="text-[15px] font-semibold text-ink">All Groups</span>
+          <span class="px-2 py-0.5 rounded-pill bg-white border border-borderLine-hairline text-brand text-[11px] font-semibold tabular-nums">18 splits</span>
+        </div>
+        <div class="flex items-center -space-x-1.5 pt-0.5">
+          <div class="w-6 h-6 rounded-full bg-emerald-600 text-white text-[10px] font-semibold flex items-center justify-center ring-2 ring-white">MK</div>
+          <div class="w-6 h-6 rounded-full bg-purple-600 text-white text-[10px] font-semibold flex items-center justify-center ring-2 ring-white">AL</div>
+        </div>
+      </div>
+      <button type="button" class="w-full h-9 px-3.5 rounded-pill flex items-center justify-center gap-2 text-[13px] font-medium text-ink-muted48 hover:bg-surface-canvas hover:text-ink transition-colors">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4 shrink-0"><path d="m11 17-5-5 5-5"/><path d="m18 17-5-5 5-5"/></svg>
+        <span>Collapse Sidebar</span>
+      </button>
+    </div>
+  </aside><header class="fixed top-0 left-[248px] right-0 h-16 bg-white/85 backdrop-blur-md border-b border-borderLine-hairline px-6 flex items-center justify-between z-20">
+    <div class="flex items-center">
+      <div class="h-9 px-2 rounded-pill border border-borderLine-hairline bg-white flex items-center gap-2 shadow-none">
+        <button type="button" aria-label="Previous month" class="w-6 h-6 rounded-full hover:bg-surface-canvas text-ink-muted48 hover:text-ink flex items-center justify-center transition-colors">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="w-3.5 h-3.5"><path d="m15 18-6-6 6-6"/></svg>
+        </button>
+        <span class="text-xs font-semibold text-ink tabular-nums select-none px-1">November 2026</span>
+        <button type="button" aria-label="Next month" class="w-6 h-6 rounded-full hover:bg-surface-canvas text-ink-muted48 hover:text-ink flex items-center justify-center transition-colors">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="w-3.5 h-3.5"><path d="m9 18 6-6-6-6"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="flex items-center gap-3">
+      <div class="relative flex items-center w-64">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4 text-ink-muted48 absolute left-3 pointer-events-none"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="text" placeholder="Search transactions..." class="w-full h-9 rounded-pill border border-borderLine-hairline bg-surface-canvas pl-9 pr-11 text-xs text-ink placeholder:text-ink-muted48 focus:outline-none focus:border-brand focus:bg-white transition-all"/>
+        <kbd class="absolute right-2.5 px-1.5 py-0.5 text-[10px] font-mono font-medium text-ink-muted48 bg-white border border-borderLine-hairline rounded shadow-none pointer-events-none">⌘K</kbd>
+      </div>
+      <button type="button" aria-label="Notifications" class="relative w-9 h-9 rounded-full bg-white border border-borderLine-hairline hover:bg-surface-pearl flex items-center justify-center text-ink-muted80 transition-colors">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+        <span class="absolute top-2 right-2 w-2 h-2 rounded-full bg-semantic-danger ring-2 ring-white"></span>
+      </button>
+      <button type="button" class="h-10 px-4 rounded-pill bg-brand hover:bg-brand-focus text-white text-xs font-semibold shadow-none flex items-center gap-1.5 transition-colors">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+        <span>Add Expense</span>
+      </button>
+      <div class="w-9 h-9 rounded-full bg-brand text-white text-xs font-semibold flex items-center justify-center shrink-0 cursor-pointer select-none" title="Jordan Doe">JD</div>
+    </div>
+  </header><main class="ml-[248px] pt-16 bg-surface-canvas min-h-screen">
+<div class="max-w-7xl mx-auto p-6 space-y-6">
+<!-- PAGE HEADER -->
+<section class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+<div class="flex flex-col gap-0.5">
+<h1 class="text-[30px] font-semibold text-ink tracking-tight">Dashboard Overview</h1>
+<p class="text-[14px] text-ink-muted48">All active groups · <span class="tabular-nums">November 2026</span></p>
+</div>
+<div class="flex items-center gap-2.5">
+<button class="h-10 px-4 rounded-pill border border-borderLine-hairline bg-white text-ink hover:bg-surface-pearl text-xs font-medium flex items-center gap-1.5 whitespace-nowrap shadow-none transition-colors" type="button">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" data-lucide="download" class="w-3.5 h-3.5 text-ink-muted48"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+<span>Export CSV</span>
+</button>
+<button aria-label="Refresh dashboard" class="w-9 h-9 rounded-full border border-borderLine-hairline bg-white text-ink-muted80 hover:bg-surface-canvas flex items-center justify-center transition-colors shadow-none" type="button">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" data-lucide="refresh-cw" class="w-4 h-4"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
+</button>
+</div>
+</section>
+<!-- ROW 1: 3 FUNCTIONAL KPI CARDS -->
+<section class="grid grid-cols-1 md:grid-cols-3 gap-6"><!-- Card 1: Net Settlement Balance -->
+<div class="bg-white border border-borderLine-hairline rounded-card p-6 shadow-none flex flex-col justify-between gap-4">
+<div class="flex items-center justify-between">
+<span class="text-[11px] font-semibold uppercase font-semibold text-ink-muted48 tracking-wider">NET SETTLEMENT BALANCE</span>
+<div class="w-9 h-9 rounded-full bg-semantic-successBg border border-[#bbf7d0] text-[#166534] flex items-center justify-center"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" data-lucide="trending-up" class="w-5 h-5"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg></div>
+</div>
+<div class="flex flex-col gap-1">
+<div class="font-headline-xl text-[32px] leading-tight font-bold text-[#166534] tabular-nums tracking-tight">+$624.60</div>
+<p class="text-[13px] text-ink-muted48 tabular-nums">You are owed $840.00 · You owe $215.40</p>
+</div>
+<div class="pt-2 border-t border-borderLine-divider">
+<span class="text-[11px] font-semibold text-ink-muted48 tabular-nums">All settlements verified across 4 groups</span>
+</div>
+</div>
+<!-- Card 2: Total Spent (Nov 2026) -->
+<div class="bg-white border border-borderLine-hairline rounded-card p-6 shadow-none flex flex-col justify-between gap-4">
+<div class="flex items-center justify-between">
+<span class="text-[11px] font-semibold uppercase font-semibold text-ink-muted48 tracking-wider">TOTAL SPENT (NOV 2026)</span>
+<div class="w-9 h-9 rounded-full bg-surface-pearl border border-borderLine-hairline text-ink-muted48 flex items-center justify-center"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" data-lucide="receipt" class="w-5 h-5"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 17.5v-11"/></svg></div>
+</div>
+<div class="flex flex-col gap-1">
+<div class="flex items-baseline gap-3">
+<span class="font-headline-xl text-[32px] leading-tight font-bold text-ink tabular-nums tracking-tight">$3,428.50</span>
+<span class="text-[11px] font-semibold font-semibold px-2.5 py-0.5 rounded-full bg-[#edfbf2] text-[#166534] border border-[#bbf7d0] whitespace-nowrap tabular-nums">-4.2% vs Oct 2026</span>
+</div>
+<p class="text-[13px] text-ink-muted48 tabular-nums">Your share: $1,142.83 · 28 expenses</p>
+</div>
+<div class="pt-2 border-t border-borderLine-divider">
+<span class="text-[11px] font-semibold text-ink-muted48 uppercase tracking-wider"><span class="tabular-nums">Budget Utilization: 85.7%</span>
+</div>
+</div>
+<!-- Card 3: Action Needed (You Owe) -->
+<div class="bg-white border border-borderLine-hairline rounded-card p-6 shadow-none flex flex-col justify-between gap-4">
+<div class="flex items-center justify-between">
+<span class="text-[11px] font-semibold uppercase font-semibold text-ink-muted48 tracking-wider">YOU OWE</span>
+<div class="w-9 h-9 rounded-full bg-semantic-dangerBg border border-[#fecaca] text-semantic-danger flex items-center justify-center"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" data-lucide="arrow-up-right" class="w-5 h-5"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg></div>
+</div>
+<div class="flex flex-col gap-1">
+<div class="font-headline-xl text-[32px] leading-tight font-bold text-semantic-danger tabular-nums tracking-tight">-$215.40</div>
+<p class="text-[13px] text-ink-muted48 tabular-nums">2 pending balances · 1 peer</p>
+</div>
+<div class="pt-2 border-t border-borderLine-divider">
+<span class="text-[11px] font-semibold text-ink-muted48"><span class="tabular-nums">Next auto-reconciliation: Dec 1, 2026</span>
+</div>
+</div></section>
+<!-- ROW 2: CATEGORY BREAKDOWN & PEER BALANCES -->
+<section class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+<!-- Header area -->
+<div class="lg:col-span-7 bg-white border border-borderLine-hairline rounded-card p-6 shadow-none flex flex-col justify-between">
+<div>
+<div class="flex items-start justify-between gap-4 mb-1">
+<div>
+<h2 class="text-[17px] font-semibold text-ink">Monthly Category Breakdown</h2>
+<p class="text-[13px] text-ink-muted48 tabular-nums">$3,428.50 spent of $4,000.00 Nov 2026 target (85.7%)</p>
+</div>
+<span class="px-2.5 py-1 rounded-full bg-surface-canvas border border-borderLine-hairline text-ink-muted48 text-xs font-medium font-medium whitespace-nowrap tabular-nums">
+              Cycle: Nov 1-30
+            </span>
+</div>
+<!-- Multi-segment progress bar -->
+<div class="w-full h-2 rounded-full overflow-hidden flex bg-surface-canvas mt-4 mb-5">
+<div class="bg-[#0066cc] h-full" style="width: 38%;" title="Groceries &amp; Food (38%)"></div>
+<div class="bg-[#22c55e] h-full" style="width: 24%;" title="Housing &amp; Utilities (24%)"></div>
+<div class="bg-[#f59e0b] h-full" style="width: 15%;" title="Dining &amp; Social (15%)"></div>
+<div class="bg-[#8b5cf6] h-full" style="width: 10%;" title="Travel &amp; Fuel (10%)"></div>
+<div class="bg-[#ec4899] h-full" style="width: 8%;" title="Entertainment (8%)"></div>
+<div class="bg-[#64748b] h-full" style="width: 5%;" title="Supplies &amp; Misc (5%)"></div>
+</div>
+<!-- Compact interactive ranked category list -->
+<div class="space-y-1">
+<div class="flex items-center justify-between px-2.5 py-2 rounded-xl hover:bg-surface-pearl transition-colors cursor-pointer">
+<div class="flex items-center gap-2.5">
+<span class="w-1.5 h-1.5 rounded-full bg-[#0066cc]"></span>
+<span class="font-body-sm text-[13px] font-medium text-ink">Groceries &amp; Food</span>
+</div>
+<div class="flex items-center gap-3">
+<span class="font-body-sm text-[13px] font-semibold text-ink tabular-nums">$1,302.83</span>
+<span class="text-xs font-medium text-ink-muted48 tabular-nums w-12 text-right">38%</span>
+</div>
+</div>
+<div class="flex items-center justify-between px-2.5 py-2 rounded-xl hover:bg-surface-pearl transition-colors cursor-pointer">
+<div class="flex items-center gap-2.5">
+<span class="w-1.5 h-1.5 rounded-full bg-[#22c55e]"></span>
+<span class="font-body-sm text-[13px] font-medium text-ink">Housing &amp; Utilities</span>
+</div>
+<div class="flex items-center gap-3">
+<span class="font-body-sm text-[13px] font-semibold text-ink tabular-nums">$822.84</span>
+<span class="text-xs font-medium text-ink-muted48 tabular-nums w-12 text-right">24%</span>
+</div>
+</div>
+<div class="flex items-center justify-between px-2.5 py-2 rounded-xl hover:bg-surface-pearl transition-colors cursor-pointer">
+<div class="flex items-center gap-2.5">
+<span class="w-1.5 h-1.5 rounded-full bg-[#f59e0b]"></span>
+<span class="font-body-sm text-[13px] font-medium text-ink">Dining &amp; Social</span>
+</div>
+<div class="flex items-center gap-3">
+<span class="font-body-sm text-[13px] font-semibold text-ink tabular-nums">$514.27</span>
+<span class="text-xs font-medium text-ink-muted48 tabular-nums w-12 text-right">15%</span>
+</div>
+</div>
+<div class="flex items-center justify-between px-2.5 py-2 rounded-xl hover:bg-surface-pearl transition-colors cursor-pointer">
+<div class="flex items-center gap-2.5">
+<span class="w-1.5 h-1.5 rounded-full bg-[#8b5cf6]"></span>
+<span class="font-body-sm text-[13px] font-medium text-ink">Travel &amp; Fuel</span>
+</div>
+<div class="flex items-center gap-3">
+<span class="font-body-sm text-[13px] font-semibold text-ink tabular-nums">$342.85</span>
+<span class="text-xs font-medium text-ink-muted48 tabular-nums w-12 text-right">10%</span>
+</div>
+</div>
+<div class="flex items-center justify-between px-2.5 py-2 rounded-xl hover:bg-surface-pearl transition-colors cursor-pointer">
+<div class="flex items-center gap-2.5">
+<span class="w-1.5 h-1.5 rounded-full bg-[#ec4899]"></span>
+<span class="font-body-sm text-[13px] font-medium text-ink">Entertainment</span>
+</div>
+<div class="flex items-center gap-3">
+<span class="font-body-sm text-[13px] font-semibold text-ink tabular-nums">$274.28</span>
+<span class="text-xs font-medium text-ink-muted48 tabular-nums w-12 text-right">8%</span>
+</div>
+</div>
+<div class="flex items-center justify-between px-2.5 py-2 rounded-xl hover:bg-surface-pearl transition-colors cursor-pointer">
+<div class="flex items-center gap-2.5">
+<span class="w-1.5 h-1.5 rounded-full bg-[#64748b]"></span>
+<span class="font-body-sm text-[13px] font-medium text-ink">Supplies &amp; Misc</span>
+</div>
+<div class="flex items-center gap-3">
+<span class="font-body-sm text-[13px] font-semibold text-ink tabular-nums">$171.43</span>
+<span class="text-xs font-medium text-ink-muted48 tabular-nums w-12 text-right">5%</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Table Frame -->
+<div class="lg:col-span-5 bg-white border border-borderLine-hairline rounded-card p-6 shadow-none flex flex-col justify-between gap-4">
+<div>
+<!-- Header and Simplify Switch -->
+<div class="flex items-start justify-between gap-4 mb-1"><div>
+<h2 class="text-[17px] font-semibold text-ink">Peer Balances</h2>
+<p class="text-[13px] text-ink-muted48">Active settlements across all groups</p>
+</div></div>
+<!-- Peer List -->
+<div class="space-y-2.5 mt-4">
+<!-- Peer 1: Marcus Kim -->
+<div class="border border-borderLine-hairline bg-surface-pearl rounded-[14px] p-3.5 flex items-center justify-between">
+<div class="flex items-center gap-3 min-w-0">
+<div class="w-8 h-8 rounded-full bg-emerald-600 text-white font-label-md font-bold flex items-center justify-center shrink-0">MK</div>
+<div class="flex flex-col truncate">
+<span class="font-semibold text-[13px] text-ink truncate">Marcus Kim</span>
+<span class="text-[11px] font-semibold text-ink-muted48 truncate">Across 3 expenses · Apt 4B</span>
+</div>
+</div>
+<div class="flex items-center gap-2.5 shrink-0">
+<span class="text-xs font-semibold text-[#166534] tabular-nums font-bold">+$580.00</span>
+<button class="h-8 px-3 rounded-pill border border-borderLine-hairline bg-white hover:bg-surface-canvas text-brand text-xs font-medium font-medium whitespace-nowrap transition-colors" type="button">
+                  Remind
+                </button>
+</div>
+</div>
+<!-- Peer 2: Alex Lee -->
+<div class="border border-borderLine-hairline bg-surface-pearl rounded-[14px] p-3.5 flex items-center justify-between">
+<div class="flex items-center gap-3 min-w-0">
+<div class="w-8 h-8 rounded-full bg-purple-600 text-white font-label-md font-bold flex items-center justify-center shrink-0">AL</div>
+<div class="flex flex-col truncate">
+<span class="font-semibold text-[13px] text-ink truncate">Alex Lee</span>
+<span class="text-[11px] font-semibold text-ink-muted48 truncate">Iceland Roadtrip · 1 unsettled</span>
+</div>
+</div>
+<div class="flex items-center gap-2.5 shrink-0">
+<span class="text-xs font-semibold text-[#166534] tabular-nums font-bold">+$260.00</span>
+<button class="h-8 px-3 rounded-pill border border-borderLine-hairline bg-white hover:bg-surface-canvas text-brand text-xs font-medium font-medium whitespace-nowrap transition-colors" type="button">
+                  Remind
+                </button>
+</div>
+</div>
+<!-- Peer 3: Sarah Chen -->
+<div class="border border-borderLine-hairline bg-surface-pearl rounded-[14px] p-3.5 flex items-center justify-between">
+<div class="flex items-center gap-3 min-w-0">
+<div class="w-8 h-8 rounded-full bg-amber-600 text-white font-label-md font-bold flex items-center justify-center shrink-0">SC</div>
+<div class="flex flex-col truncate">
+<span class="font-semibold text-[13px] text-ink truncate">Sarah Chen</span>
+<span class="text-[11px] font-semibold text-ink-muted48 truncate">Weekend Cabin Crew · Nobu dinner</span>
+</div>
+</div>
+<div class="flex items-center gap-2.5 shrink-0">
+<span class="text-xs font-semibold text-semantic-danger tabular-nums font-bold">-$215.40</span>
+<button class="h-8 px-3 rounded-pill bg-brand hover:bg-brand-focus text-white text-xs font-medium font-medium whitespace-nowrap transition-colors" type="button">
+                  Settle now
+                </button>
+</div>
+</div>
+</div>
+</div>
+<!-- Bottom Net Summary Strip -->
+<div class="bg-surface-pearl rounded-[14px] p-3 flex items-center justify-between border border-borderLine-hairline">
+<span class="text-xs font-medium text-ink-muted48 font-medium">Overall Net Settlement</span>
+<span class="font-semibold text-[13px] font-bold text-[#166534] tabular-nums">+$624.60 in your favor</span>
+</div>
+</div>
+</section>
+<!-- ROW 3: RECENT SHARED TRANSACTIONS -->
+<section class="bg-white border border-borderLine-hairline rounded-card p-6 shadow-none"><div class="flex items-center justify-between mb-4">
+<div>
+<h2 class="text-[17px] font-semibold text-ink">Recent Shared Transactions</h2>
+<p class="text-[13px] text-ink-muted48"><span class="tabular-nums">Latest 5 expenses</span> · Click a row for split details</p>
+</div>
+<button class="h-8 px-3 rounded-full text-[13px] font-medium text-brand hover:bg-surface-canvas flex items-center gap-1 transition-colors" type="button">
+<span class="tabular-nums">View all 28 in Expenses</span>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" data-lucide="arrow-right" class="w-3.5 h-3.5"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+</button>
+</div>
+<div class="border border-borderLine-hairline rounded-[14px] overflow-hidden">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-surface-pearl border-b border-borderLine-hairline font-mono uppercase text-[11px] text-ink-muted48 tracking-wider">
+<th class="px-4 py-3 font-medium">DATE</th>
+<th class="px-4 py-3 font-medium">MERCHANT &amp; GROUP</th>
+<th class="px-4 py-3 font-medium">CATEGORY</th>
+<th class="px-4 py-3 font-medium">PAID BY</th>
+<th class="px-4 py-3 font-medium">SPLIT</th>
+<th class="px-4 py-3 text-right font-medium">YOUR SHARE</th>
+<th class="px-4 py-3 text-center font-medium">STATUS</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-borderLine-divider bg-white text-[13px]">
+<tr class="hover:bg-surface-pearl transition-colors cursor-pointer">
+<td class="px-4 py-3 text-ink-muted48 tabular-nums text-xs whitespace-nowrap">Nov 26, 2026 <span class="text-ink-muted48">7:42 PM</span></td>
+<td class="px-4 py-3 min-w-0">
+<div class="flex flex-col truncate">
+<span class="font-semibold text-[13px] text-ink font-medium truncate">Whole Foods Market</span>
+<span class="text-[11px] font-semibold text-ink-muted48 truncate">Apartment 4B Shared</span>
+</div>
+</td>
+<td class="px-4 py-3 whitespace-nowrap">
+<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-surface-canvas border border-borderLine-hairline text-ink text-[11px] font-semibold font-medium">
+<span class="w-1.5 h-1.5 rounded-full bg-[#0066cc]"></span>
+            Groceries
+          </span>
+</td>
+<td class="px-4 py-3 whitespace-nowrap">
+<div class="inline-flex items-center gap-1.5">
+<div class="w-5 h-5 rounded-full bg-brand text-white font-semibold text-[10px] flex items-center justify-center font-bold">JD</div>
+<span class="text-xs text-ink-muted80 font-medium">You</span>
+</div>
+</td>
+<td class="px-4 py-3 text-xs text-ink-muted80 tabular-nums whitespace-nowrap">3-Way Equal (33.3%)</td>
+<td class="px-4 py-3 text-right font-semibold text-[#166534] tabular-nums whitespace-nowrap">+$122.80</td>
+<td class="px-4 py-3 text-center whitespace-nowrap">
+<span class="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-[#edfbf2] text-[#166534] border border-[#bbf7d0] font-medium">Settled</span>
+</td>
+</tr>
+<tr class="hover:bg-surface-pearl transition-colors cursor-pointer">
+<td class="px-4 py-3 text-ink-muted48 tabular-nums text-xs whitespace-nowrap">Nov 24, 2026 <span class="text-ink-muted48">11:15 AM</span></td>
+<td class="px-4 py-3 min-w-0">
+<div class="flex flex-col truncate">
+<span class="font-semibold text-[13px] text-ink font-medium truncate">ConEdison Electric</span>
+<span class="text-[11px] font-semibold text-ink-muted48 truncate">Apartment 4B Shared</span>
+</div>
+</td>
+<td class="px-4 py-3 whitespace-nowrap">
+<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-surface-canvas border border-borderLine-hairline text-ink text-[11px] font-semibold font-medium">
+<span class="w-1.5 h-1.5 rounded-full bg-[#22c55e]"></span>
+            Utilities
+          </span>
+</td>
+<td class="px-4 py-3 whitespace-nowrap">
+<div class="inline-flex items-center gap-1.5">
+<div class="w-5 h-5 rounded-full bg-emerald-600 text-white font-semibold text-[10px] flex items-center justify-center font-bold">MK</div>
+<span class="text-xs text-ink-muted80 font-medium">Marcus</span>
+</div>
+</td>
+<td class="px-4 py-3 text-xs text-ink-muted80 tabular-nums whitespace-nowrap">2-Way (50/50)</td>
+<td class="px-4 py-3 text-right font-semibold text-semantic-danger tabular-nums whitespace-nowrap">-$70.00</td>
+<td class="px-4 py-3 text-center whitespace-nowrap">
+<span class="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-[#fef8ea] text-[#9a3412] border border-[#fde68a] font-medium">Pending</span>
+</td>
+</tr>
+<tr class="hover:bg-surface-pearl transition-colors cursor-pointer">
+<td class="px-4 py-3 text-ink-muted48 tabular-nums text-xs whitespace-nowrap">Nov 22, 2026 <span class="text-ink-muted48">8:30 PM</span></td>
+<td class="px-4 py-3 min-w-0">
+<div class="flex flex-col truncate">
+<span class="font-semibold text-[13px] text-ink font-medium truncate">Nobu Downtown</span>
+<span class="text-[11px] font-semibold text-ink-muted48 truncate">Weekend Cabin Crew</span>
+</div>
+</td>
+<td class="px-4 py-3 whitespace-nowrap">
+<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-surface-canvas border border-borderLine-hairline text-ink text-[11px] font-semibold font-medium">
+<span class="w-1.5 h-1.5 rounded-full bg-[#f59e0b]"></span>
+            Dining
+          </span>
+</td>
+<td class="px-4 py-3 whitespace-nowrap">
+<div class="inline-flex items-center gap-1.5">
+<div class="w-5 h-5 rounded-full bg-amber-600 text-white font-semibold text-[10px] flex items-center justify-center font-bold">SC</div>
+<span class="text-xs text-ink-muted80 font-medium">Sarah</span>
+</div>
+</td>
+<td class="px-4 py-3 text-xs text-ink-muted80 whitespace-nowrap">Itemized Custom</td>
+<td class="px-4 py-3 text-right font-semibold text-semantic-danger tabular-nums whitespace-nowrap">-$145.40</td>
+<td class="px-4 py-3 text-center whitespace-nowrap">
+<span class="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-[#fef8ea] text-[#9a3412] border border-[#fde68a] font-medium">Pending</span>
+</td>
+</tr>
+<tr class="hover:bg-surface-pearl transition-colors cursor-pointer">
+<td class="px-4 py-3 text-ink-muted48 tabular-nums text-xs whitespace-nowrap">Nov 18, 2026 <span class="text-ink-muted48">3:10 PM</span></td>
+<td class="px-4 py-3 min-w-0">
+<div class="flex flex-col truncate">
+<span class="font-semibold text-[13px] text-ink font-medium truncate">Reykjavik Car Rental</span>
+<span class="text-[11px] font-semibold text-ink-muted48 truncate">Iceland Roadtrip</span>
+</div>
+</td>
+<td class="px-4 py-3 whitespace-nowrap">
+<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-surface-canvas border border-borderLine-hairline text-ink text-[11px] font-semibold font-medium">
+<span class="w-1.5 h-1.5 rounded-full bg-[#8b5cf6]"></span>
+            Travel
+          </span>
+</td>
+<td class="px-4 py-3 whitespace-nowrap">
+<div class="inline-flex items-center gap-1.5">
+<div class="w-5 h-5 rounded-full bg-brand text-white font-semibold text-[10px] flex items-center justify-center font-bold">JD</div>
+<span class="text-xs text-ink-muted80 font-medium">You</span>
+</div>
+</td>
+<td class="px-4 py-3 text-xs text-ink-muted80 tabular-nums whitespace-nowrap">4-Way Equal (25%)</td>
+<td class="px-4 py-3 text-right font-semibold text-[#166534] tabular-nums whitespace-nowrap">+$390.00</td>
+<td class="px-4 py-3 text-center whitespace-nowrap">
+<span class="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-[#edfbf2] text-[#166534] border border-[#bbf7d0] font-medium">Settled</span>
+</td>
+</tr>
+<tr class="hover:bg-surface-pearl transition-colors cursor-pointer">
+<td class="px-4 py-3 text-ink-muted48 tabular-nums text-xs whitespace-nowrap">Nov 15, 2026 <span class="text-ink-muted48">9:20 AM</span></td>
+<td class="px-4 py-3 min-w-0">
+<div class="flex flex-col truncate">
+<span class="font-semibold text-[13px] text-ink font-medium truncate">Blue Bottle Coffee</span>
+<span class="text-[11px] font-semibold text-ink-muted48 truncate">Apartment 4B Shared</span>
+</div>
+</td>
+<td class="px-4 py-3 whitespace-nowrap">
+<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-surface-canvas border border-borderLine-hairline text-ink text-[11px] font-semibold font-medium">
+<span class="w-1.5 h-1.5 rounded-full bg-[#f59e0b]"></span>
+            Dining
+          </span>
+</td>
+<td class="px-4 py-3 whitespace-nowrap">
+<div class="inline-flex items-center gap-1.5">
+<div class="w-5 h-5 rounded-full bg-brand text-white font-semibold text-[10px] flex items-center justify-center font-bold">JD</div>
+<span class="text-xs text-ink-muted80 font-medium">You</span>
+</div>
+</td>
+<td class="px-4 py-3 text-xs text-ink-muted80 tabular-nums whitespace-nowrap">3-Way Equal (33.3%)</td>
+<td class="px-4 py-3 text-right font-semibold text-[#166534] tabular-nums whitespace-nowrap">+$8.40</td>
+<td class="px-4 py-3 text-center whitespace-nowrap">
+<span class="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-[#edfbf2] text-[#166534] border border-[#bbf7d0] font-medium">Settled</span>
+</td>
+</tr>
+</tbody>
+</table>
+</div></section>
+</div>
+<script>
+  // Micro-interaction for Debt Simplification Switch
+  document.addEventListener('DOMContentLoaded', () => {
+    const switchBtn = document.querySelector('[role="switch"]');
+    if (switchBtn) {
+      switchBtn.addEventListener('click', () => {
+        const isChecked = switchBtn.getAttribute('aria-checked') === 'true';
+        switchBtn.setAttribute('aria-checked', !isChecked);
+        if (isChecked) {
+          switchBtn.classList.remove('bg-[#22c55e]', 'justify-end');
+          switchBtn.classList.add('bg-[#d2d2d7]', 'justify-start');
+        } else {
+          switchBtn.classList.remove('bg-[#d2d2d7]', 'justify-start');
+          switchBtn.classList.add('bg-[#22c55e]', 'justify-end');
+        }
+      });
+    }
+  });
+</script></main>  <script>
+    lucide.createIcons();
+  </script>
+</body></html>

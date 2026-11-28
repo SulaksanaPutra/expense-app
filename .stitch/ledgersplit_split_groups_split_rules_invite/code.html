@@ -1,0 +1,627 @@
+<!DOCTYPE html><html lang="en"><head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LedgerSplit Split Groups — Split Rules &amp; Invite</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              DEFAULT: '#0066cc',
+              focus: '#0071e3',
+              dark: '#0052a3',
+              light: '#e6f0fa',
+            },
+            surface: {
+              canvas: '#f5f5f7',
+              card: '#ffffff',
+              pearl: '#fafafc',
+              dim: '#d9dadc',
+            },
+            ink: {
+              DEFAULT: '#1d1d1f',
+              muted80: '#333333',
+              muted48: '#7a7a7a',
+            },
+            borderLine: {
+              hairline: '#e0e0e0',
+              divider: '#f0f0f0',
+            },
+            semantic: {
+              success: '#22c55e',
+              successBg: '#edfbf2',
+              warning: '#f59e0b',
+              warningBg: '#fef8ea',
+              danger: '#dc2626',
+              dangerBg: '#fef2f2',
+              info: '#0066cc',
+              infoBg: '#f0f7ff',
+            }
+          },
+          fontFamily: {
+            sans: ['-apple-system', 'BlinkMacSystemFont', '"SF Pro Display"', '"SF Pro Text"', 'Inter', 'Helvetica Neue', 'sans-serif'],
+            mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace'],
+          },
+          borderRadius: {
+            'card': '18px',
+            'pill': '9999px',
+          },
+          boxShadow: {
+            'overlay': '0 16px 40px rgba(0, 0, 0, 0.08), 0 4px 12px rgba(0, 0, 0, 0.04)',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      background-color: #f5f5f7;
+      color: #1d1d1f;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    }
+    .tabular-nums {
+      font-variant-numeric: tabular-nums;
+    }
+  </style>
+</head>
+<body class="bg-[#f5f5f7] text-[#1d1d1f] antialiased selection:bg-[#0066cc]/10 selection:text-[#0066cc]">
+
+  <!-- FIXED LEFT SIDEBAR (248px) -->
+  <aside class="w-[248px] fixed inset-y-0 left-0 bg-white border-r border-borderLine-hairline flex flex-col justify-between p-4 select-none z-30">
+    <div class="flex flex-col gap-6">
+      <div class="flex items-center gap-2.5 px-2 py-1">
+        <div class="w-8 h-8 rounded-lg bg-brand text-white flex items-center justify-center shrink-0 shadow-none">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4 shrink-0"><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/></svg>
+        </div>
+        <span class="text-[17px] font-semibold tracking-tight text-ink">LedgerSplit</span>
+      </div>
+      <nav class="flex flex-col gap-1.5">
+        <a class="h-10 px-3.5 rounded-pill text-[14px] flex items-center gap-3 transition-colors text-ink-muted80 hover:bg-surface-canvas hover:text-ink font-medium" data-path="dashboard" href="#">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4 shrink-0"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
+          <span>Dashboard</span>
+        </a>
+        <a class="h-10 px-3.5 rounded-pill text-[14px] flex items-center gap-3 transition-colors text-ink-muted80 hover:bg-surface-canvas hover:text-ink font-medium" data-path="expenses" href="#">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4 shrink-0"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 17.5v-11"/></svg>
+          <span>Expenses</span>
+        </a>
+        <a aria-current="page" class="h-10 px-3.5 rounded-pill text-[14px] flex items-center justify-between transition-colors bg-brand text-white font-semibold shadow-none" data-path="split-groups" href="#">
+          <div class="flex items-center gap-3">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4 shrink-0"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            <span>Split Groups</span>
+          </div>
+          <span class="px-2 py-0.5 text-[11px] font-semibold rounded-pill tabular-nums bg-white/20 text-white">4</span>
+        </a>
+        <a class="h-10 px-3.5 rounded-pill text-[14px] flex items-center gap-3 transition-colors text-ink-muted80 hover:bg-surface-canvas hover:text-ink font-medium" data-path="settings" href="#">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4 shrink-0"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+          <span>Settings</span>
+        </a>
+      </nav>
+    </div>
+    <div class="flex flex-col gap-3">
+      <div class="bg-surface-canvas border border-borderLine-hairline rounded-[14px] p-3 flex flex-col gap-2">
+        <div class="text-[11px] font-semibold uppercase tracking-wider text-ink-muted48">ACTIVE GROUP</div>
+        <div class="flex items-center justify-between">
+          <span class="text-[15px] font-semibold text-ink">All Groups</span>
+          <span class="px-2 py-0.5 rounded-pill bg-white border border-borderLine-hairline text-brand text-[11px] font-semibold tabular-nums">18 splits</span>
+        </div>
+        <div class="flex items-center -space-x-1.5 pt-0.5">
+          <div class="w-6 h-6 rounded-full bg-emerald-600 text-white text-[10px] font-semibold flex items-center justify-center ring-2 ring-white">MK</div>
+          <div class="w-6 h-6 rounded-full bg-purple-600 text-white text-[10px] font-semibold flex items-center justify-center ring-2 ring-white">AL</div>
+        </div>
+      </div>
+      <button type="button" class="w-full h-9 px-3.5 rounded-pill flex items-center justify-center gap-2 text-[13px] font-medium text-ink-muted48 hover:bg-surface-canvas hover:text-ink transition-colors">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4 shrink-0"><path d="m11 17-5-5 5-5"/><path d="m18 17-5-5 5-5"/></svg>
+        <span>Collapse Sidebar</span>
+      </button>
+    </div>
+  </aside>
+
+  <!-- STICKY TOPBAR (h-16, fixed top-0 left-[248px] right-0) -->
+  <header class="fixed top-0 left-[248px] right-0 h-16 bg-white/85 backdrop-blur-md border-b border-borderLine-hairline px-6 flex items-center justify-between z-20">
+    <div class="flex items-center">
+      <div class="h-9 px-2 rounded-pill border border-borderLine-hairline bg-white flex items-center gap-2 shadow-none">
+        <button type="button" aria-label="Previous month" class="w-6 h-6 rounded-full hover:bg-surface-canvas text-ink-muted48 hover:text-ink flex items-center justify-center transition-colors">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="w-3.5 h-3.5"><path d="m15 18-6-6 6-6"/></svg>
+        </button>
+        <span class="text-xs font-semibold text-ink tabular-nums select-none px-1">November 2026</span>
+        <button type="button" aria-label="Next month" class="w-6 h-6 rounded-full hover:bg-surface-canvas text-ink-muted48 hover:text-ink flex items-center justify-center transition-colors">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="w-3.5 h-3.5"><path d="m9 18 6-6-6-6"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="flex items-center gap-3">
+      <div class="relative flex items-center w-64">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4 text-ink-muted48 absolute left-3 pointer-events-none"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="text" placeholder="Search transactions..." class="w-full h-9 rounded-pill border border-borderLine-hairline bg-surface-canvas pl-9 pr-11 text-xs text-ink placeholder:text-ink-muted48 focus:outline-none focus:border-brand focus:bg-white transition-all"/>
+        <kbd class="absolute right-2.5 px-1.5 py-0.5 text-[10px] font-mono font-medium text-ink-muted48 bg-white border border-borderLine-hairline rounded shadow-none pointer-events-none">⌘K</kbd>
+      </div>
+      <button type="button" aria-label="Notifications" class="relative w-9 h-9 rounded-full bg-white border border-borderLine-hairline hover:bg-surface-pearl flex items-center justify-center text-ink-muted80 transition-colors">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+        <span class="absolute top-2 right-2 w-2 h-2 rounded-full bg-semantic-danger ring-2 ring-white"></span>
+      </button>
+      <button type="button" class="h-10 px-4 rounded-pill bg-brand hover:bg-brand-focus text-white text-xs font-semibold shadow-none flex items-center gap-1.5 transition-colors">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+        <span>Add Expense</span>
+      </button>
+      <div class="w-9 h-9 rounded-full bg-brand text-white text-xs font-semibold flex items-center justify-center shrink-0 cursor-pointer select-none" title="Jordan Doe">JD</div>
+    </div>
+  </header>
+
+  <!-- MAIN SCROLLABLE CONTENT AREA -->
+  <main class="ml-[248px] pt-16 bg-[#f5f5f7] min-h-screen">
+    <div class="max-w-7xl mx-auto p-6 space-y-6">
+
+      <!-- PAGE HEADER -->
+      <div class="flex items-center justify-between">
+        <div>
+          <h1 class="text-[30px] font-semibold text-ink tracking-tight">Split Groups</h1>
+          <p class="text-sm text-[#7a7a7a] mt-0.5">Shared groups, member splits, and group balances.</p>
+        </div>
+
+        <div class="flex items-center gap-3">
+          <!-- Active / Archived Segmented Switch -->
+          <div class="p-1 bg-surface-canvas rounded-pill border border-borderLine-hairline flex items-center">
+            <button class="px-3.5 py-1.5 rounded-pill bg-brand text-white text-xs font-semibold shadow-none whitespace-nowrap"><span class="tabular-nums">Active (4)</span></button>
+            <button class="px-3.5 py-1.5 rounded-pill text-ink-muted48 hover:text-ink text-xs font-medium transition-colors whitespace-nowrap"><span class="tabular-nums">Archived (2)</span></button>
+          </div>
+
+          <!-- Create Group Button -->
+          <button class="h-10 px-4 rounded-pill bg-brand hover:bg-brand-focus text-white text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-none">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M5 12h14"></path>
+              <path d="M12 5v14"></path>
+            </svg>
+            <span>Create Group</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 4 ACTIVE GROUP CARDS (TOP STRIP) -->
+      <div class="grid grid-cols-4 gap-4">
+        <!-- CARD 1: Apartment 4B Shared (SELECTED / ACTIVE BLUE OUTLINE) -->
+        <div class="bg-white rounded-card p-5 border border-brand ring-2 ring-brand/15 shadow-none relative transition-all">
+          <div class="flex items-center justify-between mb-3">
+            <span class="px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-[#f5f5f7] text-[#7a7a7a] border border-[#e0e0e0]">Home</span>
+            <button class="text-[#7a7a7a] hover:text-[#1d1d1f] p-1 rounded-full hover:bg-[#f5f5f7]">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>
+            </button>
+          </div>
+
+          <h3 class="text-base font-semibold text-[#1d1d1f] tracking-tight">Apartment 4B Shared</h3>
+          <p class="text-xs text-[#7a7a7a] mt-0.5">3-Way Equal (33.3%)</p>
+
+          <!-- Avatar Stack -->
+          <div class="flex items-center -space-x-1.5 mt-3 mb-5">
+            <div class="w-6 h-6 rounded-full bg-[#0066cc] text-white text-[10px] font-bold flex items-center justify-center ring-2 ring-[#ffffff]">JD</div>
+            <div class="w-6 h-6 rounded-full bg-[#0284c7] text-white text-[10px] font-bold flex items-center justify-center ring-2 ring-[#ffffff]">MK</div>
+            <div class="w-6 h-6 rounded-full bg-[#ea580c] text-white text-[10px] font-bold flex items-center justify-center ring-2 ring-[#ffffff]">AL</div>
+          </div>
+
+          <div class="flex items-baseline justify-between pt-3 border-t border-[#f0f0f0]">
+            <div>
+              <span class="text-[11px] text-ink-muted48 block">Cycle Spend</span>
+              <span class="text-sm font-semibold text-[#1d1d1f] tabular-nums">$2,837.70</span>
+            </div>
+            <div class="text-right">
+              <span class="text-[11px] text-ink-muted48 block">Your Net</span>
+              <span class="text-sm font-semibold text-[#166534] tabular-nums">+$580.00</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- CARD 2: Weekend Cabin Crew -->
+        <div class="bg-[#ffffff] rounded-[18px] p-5 border border-[#e0e0e0] hover:border-ink-muted48/50 transition-colors relative">
+          <div class="flex items-center justify-between mb-3">
+            <span class="px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-[#f5f5f7] text-[#7a7a7a] border border-[#e0e0e0]">Trip</span>
+            <button class="text-[#7a7a7a] hover:text-[#1d1d1f] p-1 rounded-full hover:bg-[#f5f5f7]">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>
+            </button>
+          </div>
+
+          <h3 class="text-base font-semibold text-[#1d1d1f] tracking-tight">Weekend Cabin Crew</h3>
+          <p class="text-xs text-[#7a7a7a] mt-0.5">Itemized Custom</p>
+
+          <!-- Avatar Stack -->
+          <div class="flex items-center -space-x-1.5 mt-3 mb-5">
+            <div class="w-6 h-6 rounded-full bg-[#0066cc] text-white text-[10px] font-bold flex items-center justify-center ring-2 ring-[#ffffff]">JD</div>
+            <div class="w-6 h-6 rounded-full bg-[#e11d48] text-white text-[10px] font-bold flex items-center justify-center ring-2 ring-[#ffffff]">SC</div>
+            <div class="w-6 h-6 rounded-full bg-[#0284c7] text-white text-[10px] font-bold flex items-center justify-center ring-2 ring-[#ffffff]">MK</div>
+            <div class="w-6 h-6 rounded-full bg-[#475569] text-white text-[10px] font-bold flex items-center justify-center ring-2 ring-[#ffffff]">ER</div>
+          </div>
+
+          <div class="flex items-baseline justify-between pt-3 border-t border-[#f0f0f0]">
+            <div>
+              <span class="text-[11px] text-ink-muted48 block">Cycle Spend</span>
+              <span class="text-sm font-semibold text-[#1d1d1f] tabular-nums">$1,240.00</span>
+            </div>
+            <div class="text-right">
+              <span class="text-[11px] text-ink-muted48 block">Your Net</span>
+              <span class="text-sm font-semibold text-[#dc2626] tabular-nums">-$145.40</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- CARD 3: Iceland Roadtrip -->
+        <div class="bg-[#ffffff] rounded-[18px] p-5 border border-[#e0e0e0] hover:border-ink-muted48/50 transition-colors relative">
+          <div class="flex items-center justify-between mb-3">
+            <span class="px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-[#f5f5f7] text-[#7a7a7a] border border-[#e0e0e0]">Trip</span>
+            <button class="text-[#7a7a7a] hover:text-[#1d1d1f] p-1 rounded-full hover:bg-[#f5f5f7]">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>
+            </button>
+          </div>
+
+          <h3 class="text-base font-semibold text-[#1d1d1f] tracking-tight">Iceland Roadtrip</h3>
+          <p class="text-xs text-[#7a7a7a] mt-0.5">4-Way Equal (25%)</p>
+
+          <!-- Avatar Stack -->
+          <div class="flex items-center -space-x-1.5 mt-3 mb-5">
+            <div class="w-6 h-6 rounded-full bg-[#0066cc] text-white text-[10px] font-bold flex items-center justify-center ring-2 ring-[#ffffff]">JD</div>
+            <div class="w-6 h-6 rounded-full bg-[#ea580c] text-white text-[10px] font-bold flex items-center justify-center ring-2 ring-[#ffffff]">AL</div>
+            <div class="w-6 h-6 rounded-full bg-[#0284c7] text-white text-[10px] font-bold flex items-center justify-center ring-2 ring-[#ffffff]">MK</div>
+            <div class="w-6 h-6 rounded-full bg-[#475569] text-white text-[10px] font-bold flex items-center justify-center ring-2 ring-[#ffffff]">ER</div>
+          </div>
+
+          <div class="flex items-baseline justify-between pt-3 border-t border-[#f0f0f0]">
+            <div>
+              <span class="text-[11px] text-ink-muted48 block">Cycle Spend</span>
+              <span class="text-sm font-semibold text-[#1d1d1f] tabular-nums">$1,560.00</span>
+            </div>
+            <div class="text-right">
+              <span class="text-[11px] text-ink-muted48 block">Your Net</span>
+              <span class="text-sm font-semibold text-[#166534] tabular-nums">+$260.00</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- CARD 4: Friday Lunch Club -->
+        <div class="bg-[#ffffff] rounded-[18px] p-5 border border-[#e0e0e0] hover:border-ink-muted48/50 transition-colors relative">
+          <div class="flex items-center justify-between mb-3">
+            <span class="px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-[#f5f5f7] text-[#7a7a7a] border border-[#e0e0e0]">Dining</span>
+            <button class="text-[#7a7a7a] hover:text-[#1d1d1f] p-1 rounded-full hover:bg-[#f5f5f7]">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>
+            </button>
+          </div>
+
+          <h3 class="text-base font-semibold text-[#1d1d1f] tracking-tight">Friday Lunch Club</h3>
+          <p class="text-xs text-[#7a7a7a] mt-0.5">2-Way (50/50)</p>
+
+          <!-- Avatar Stack -->
+          <div class="flex items-center -space-x-1.5 mt-3 mb-5">
+            <div class="w-6 h-6 rounded-full bg-[#0066cc] text-white text-[10px] font-bold flex items-center justify-center ring-2 ring-[#ffffff]">JD</div>
+            <div class="w-6 h-6 rounded-full bg-[#0284c7] text-white text-[10px] font-bold flex items-center justify-center ring-2 ring-[#ffffff]">MK</div>
+          </div>
+
+          <div class="flex items-baseline justify-between pt-3 border-t border-[#f0f0f0]">
+            <div>
+              <span class="text-[11px] text-ink-muted48 block">Cycle Spend</span>
+              <span class="text-sm font-semibold text-[#1d1d1f] tabular-nums">$340.00</span>
+            </div>
+            <div class="text-right">
+              <span class="text-[11px] text-ink-muted48 block">Your Net</span>
+              <span class="text-xs font-semibold text-[#7a7a7a] bg-[#f5f5f7] px-2 py-0.5 rounded-full border border-[#e0e0e0]">Settled</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- DETAIL PANEL CONTAINER (18px Radius, #ffffff, 1px #e0e0e0 border) -->
+      <div class="bg-[#ffffff] rounded-[18px] border border-[#e0e0e0] shadow-none p-6 space-y-6">
+
+        <!-- DETAIL PANEL HEADER -->
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-5 border-b border-[#f0f0f0]">
+          <!-- Left Header Info -->
+          <div class="space-y-1">
+            <div class="flex items-center gap-3">
+              <h2 class="text-xl font-bold text-[#1d1d1f] tracking-tight">Apartment 4B Shared</h2>
+              <span class="px-2.5 py-0.5 rounded-full text-xs font-medium bg-[#f5f5f7] text-[#7a7a7a] border border-[#e0e0e0]">3-Way Equal (33.3%)</span>
+            </div>
+            <p class="text-xs text-[#7a7a7a] tabular-nums">$2,837.70 total · $945.90 per member</p>
+          </div>
+
+          <!-- Right Header Action Row (EXACT SPECIFICATION) -->
+          <div class="flex flex-wrap items-center gap-2.5">
+            <!-- 1. SegmentedControl -->
+            <div class="p-1 bg-surface-canvas rounded-pill border border-borderLine-hairline flex items-center text-xs">
+              <button class="px-3.5 py-1 rounded-full text-[#7a7a7a] hover:text-[#1d1d1f] font-medium transition-colors">Members &amp; Balances</button>
+              <button class="px-3.5 py-1 rounded-full bg-brand text-white font-semibold shadow-none">Split Rules &amp; Invite</button>
+            </div>
+
+            <!-- 2. Audit Log Secondary Pill Button -->
+            <button class="h-8 px-3 rounded-full bg-[#ffffff] border border-[#e0e0e0] hover:bg-[#f5f5f7] text-xs font-medium text-[#1d1d1f] flex items-center gap-1.5 transition-colors">
+              
+              <span>Audit Log</span>
+            </button>
+
+            <!-- 3. Edit Group Secondary Pill Button (DIRECTLY ON LEFT SIDE OF SAVE RULES) -->
+            <button class="h-8 px-3 rounded-full bg-[#ffffff] border border-[#e0e0e0] hover:bg-[#f5f5f7] text-xs font-medium text-[#1d1d1f] flex items-center gap-1.5 transition-colors">
+              
+              <span>Edit Group</span>
+            </button>
+
+            <!-- 4. Save Rules Primary Pill Button -->
+            <button class="h-8 px-4 rounded-full bg-[#0066cc] hover:bg-[#0071e3] text-white text-xs font-medium flex items-center gap-1.5 transition-colors">
+              <svg class="w-3.5 h-3.5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="20 6 9 17 4 12"></polyline>
+              </svg>
+              <span>Save Rules</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 2-COLUMN SPLIT RULES & INVITE CONTENT -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+
+          <!-- LEFT COLUMN: DEFAULT SPLIT RULES -->
+          <div class="space-y-6">
+            <div class="flex items-center justify-between">
+              <div>
+                <h3 class="text-sm font-semibold text-[#1d1d1f]">Default Split Rules</h3>
+                <p class="text-xs text-[#7a7a7a] mt-0.5">Applied automatically to new expenses logged in this group.</p>
+              </div>
+              
+            </div>
+
+            <!-- Calculation Method Segmented Control -->
+            <div>
+              <label class="block text-[11px] font-semibold text-[#7a7a7a] uppercase tracking-wider mb-2">Split Calculation Method</label>
+              <div class="grid grid-cols-4 p-1 bg-surface-canvas rounded-pill border border-borderLine-hairline text-xs font-medium">
+                <button class="py-1.5 rounded-full bg-[#0066cc] text-white font-semibold transition-all">Equal</button>
+                <button class="py-1.5 rounded-full text-[#7a7a7a] hover:text-[#1d1d1f] transition-colors">Percentage (%)</button>
+                <button class="py-1.5 rounded-full text-[#7a7a7a] hover:text-[#1d1d1f] transition-colors">Shares</button>
+                <button class="py-1.5 rounded-full text-[#7a7a7a] hover:text-[#1d1d1f] transition-colors">Custom</button>
+              </div>
+            </div>
+
+            <!-- Member Share Targets List -->
+            <div class="space-y-3">
+              
+
+              <!-- Row 1: Jordan Doe -->
+              <div class="flex items-center justify-between p-3 rounded-[14px] bg-surface-pearl border border-borderLine-hairline">
+                <div class="flex items-center gap-3">
+                  <div class="w-8 h-8 rounded-full bg-[#0066cc] text-white text-xs font-semibold flex items-center justify-center">JD</div>
+                  <div>
+                    <div class="text-xs font-semibold text-[#1d1d1f]">Jordan Doe (You)</div>
+                    <div class="text-[11px] text-[#7a7a7a]">Primary Organizer</div>
+                  </div>
+                </div>
+                <div class="text-xs font-semibold text-[#1d1d1f] tabular-nums pr-2">33.3%</div>
+              </div>
+
+              <!-- Row 2: Marcus Kim -->
+              <div class="flex items-center justify-between p-3 rounded-[14px] bg-surface-pearl border border-borderLine-hairline">
+                <div class="flex items-center gap-3">
+                  <div class="w-8 h-8 rounded-full bg-[#0284c7] text-white text-xs font-semibold flex items-center justify-center">MK</div>
+                  <div>
+                    <div class="text-xs font-semibold text-[#1d1d1f]">Marcus Kim</div>
+                    <div class="text-[11px] text-[#7a7a7a]">Room 2 · Co-tenant</div>
+                  </div>
+                </div>
+                <div class="text-xs font-semibold text-[#1d1d1f] tabular-nums pr-2">33.3%</div>
+              </div>
+
+              <!-- Row 3: Alex Lee -->
+              <div class="flex items-center justify-between p-3 rounded-[14px] bg-surface-pearl border border-borderLine-hairline">
+                <div class="flex items-center gap-3">
+                  <div class="w-8 h-8 rounded-full bg-[#ea580c] text-white text-xs font-semibold flex items-center justify-center">AL</div>
+                  <div>
+                    <div class="text-xs font-semibold text-[#1d1d1f]">Alex Lee</div>
+                    <div class="text-[11px] text-[#7a7a7a]">Room 3 · Co-tenant</div>
+                  </div>
+                </div>
+                <div class="text-xs font-semibold text-[#1d1d1f] tabular-nums pr-2">33.4%</div>
+              </div>
+
+              <!-- Total Allocation Status -->
+              
+            </div>
+
+            <!-- Currency & Reset Day Pill Selects -->
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-[11px] font-semibold text-[#7a7a7a] uppercase tracking-wider mb-2">Group Currency</label>
+                <div class="relative">
+                  <select class="w-full h-11 px-4 text-xs font-medium text-[#1d1d1f] bg-[#ffffff] border border-[#e0e0e0] rounded-full appearance-none focus:outline-none focus:border-[#0066cc]">
+                    <option>USD ($) — US Dollar</option>
+                    <option>EUR (€) — Euro</option>
+                    <option>GBP (£) — British Pound</option>
+                  </select>
+                  <div class="absolute inset-y-0 right-0 pr-3.5 flex items-center pointer-events-none text-[#7a7a7a]">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"></path></svg>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label class="block text-[11px] font-semibold text-[#7a7a7a] uppercase tracking-wider mb-2">Cycle Reset Day</label>
+                <div class="relative">
+                  <select class="w-full h-11 px-4 text-xs font-medium text-[#1d1d1f] bg-[#ffffff] border border-[#e0e0e0] rounded-full appearance-none focus:outline-none focus:border-[#0066cc]">
+                    <option>1st of month (Auto-settle)</option>
+                    <option>15th of month</option>
+                    <option>Last day of month</option>
+                  </select>
+                  <div class="absolute inset-y-0 right-0 pr-3.5 flex items-center pointer-events-none text-[#7a7a7a]">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"></path></svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Automation & Policy Switches -->
+            <div class="space-y-4 pt-2">
+              <span class="text-[11px] font-semibold text-[#7a7a7a] uppercase tracking-wider block">Automation &amp; Policies</span>
+
+              <!-- Switch 1 -->
+              <div class="flex items-center justify-between p-3.5 rounded-[14px] bg-surface-pearl border border-borderLine-hairline">
+                <div>
+                  <div class="text-xs font-semibold text-[#1d1d1f]">Allow any member to add expenses</div>
+                  <div class="text-[11px] text-[#7a7a7a]">Co-tenants can log receipts directly without prior sign-off</div>
+                </div>
+                <!-- Pill Toggle Active -->
+                <button class="w-11 h-6 rounded-full bg-[#22c55e] p-0.5 transition-colors relative flex items-center">
+                  <span class="w-5 h-5 rounded-full bg-white shadow-sm transform translate-x-5 transition-transform"></span>
+                </button>
+              </div>
+
+              <!-- Switch 2 -->
+              <div class="flex items-center justify-between p-3.5 rounded-[14px] bg-surface-pearl border border-borderLine-hairline">
+                <div>
+                  <div class="text-xs font-semibold text-[#1d1d1f]">Require receipt for expenses over <span class="tabular-nums">$100</span></div>
+                  <div class="text-[11px] text-[#7a7a7a]">Enforce image or PDF receipt attachment before splitting</div>
+                </div>
+                <!-- Pill Toggle Inactive -->
+                <button class="w-11 h-6 rounded-full bg-[#d2d2d7] p-0.5 transition-colors relative flex items-center">
+                  <span class="w-5 h-5 rounded-full bg-white shadow-sm transform translate-x-0 transition-transform"></span>
+                </button>
+              </div>
+
+              <!-- Switch 3 -->
+              <div class="flex items-center justify-between p-3.5 rounded-[14px] bg-surface-pearl border border-borderLine-hairline">
+                <div>
+                  <div class="text-xs font-semibold text-[#1d1d1f]">Send reminders when cycle closes</div>
+                  <div class="text-[11px] text-[#7a7a7a]">Automated notification <span class="tabular-nums">48 hours</span> prior to monthly cut-off</div>
+                </div>
+                <!-- Pill Toggle Active -->
+                <button class="w-11 h-6 rounded-full bg-[#22c55e] p-0.5 transition-colors relative flex items-center">
+                  <span class="w-5 h-5 rounded-full bg-white shadow-sm transform translate-x-5 transition-transform"></span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- RIGHT COLUMN: INVITE & MEMBER ACCESS -->
+          <div class="space-y-6">
+            <div class="flex items-center justify-between">
+              <div>
+                <h3 class="text-sm font-semibold text-[#1d1d1f]">Invite &amp; Member Access</h3>
+                <p class="text-xs text-[#7a7a7a] mt-0.5">Manage invites, passkeys, and tenant permissions.</p>
+              </div>
+              
+            </div>
+
+            <!-- Shareable Invite Link -->
+            <div class="space-y-2">
+              <label class="block text-[11px] font-semibold text-[#7a7a7a] uppercase tracking-wider">Shareable Invite Link</label>
+              <div class="flex items-center gap-2">
+                <input type="text" readonly="" value="https://ledgersplit.app/join/apt-4b-8x9k" class="flex-1 h-11 px-4 text-xs font-mono bg-[#f5f5f7] border border-[#e0e0e0] rounded-full text-[#1d1d1f] focus:outline-none">
+                <button class="h-11 px-4 rounded-full bg-[#ffffff] border border-[#e0e0e0] hover:bg-[#f5f5f7] text-xs font-medium text-[#1d1d1f] flex items-center gap-1.5 transition-colors">
+                  <svg class="w-3.5 h-3.5 text-[#7a7a7a]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                    <rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect>
+                    <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path>
+                  </svg>
+                  <span>Copy Link</span>
+                </button>
+                <button class="h-11 px-3.5 rounded-full bg-[#ffffff] border border-[#e0e0e0] hover:bg-[#f5f5f7] text-xs font-medium text-[#7a7a7a] hover:text-[#1d1d1f] flex items-center gap-1.5 transition-colors" title="Regenerate link">
+                  <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path>
+                    <path d="M21 3v5h-5"></path>
+                    <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path>
+                    <path d="M8 16H3v5"></path>
+                  </svg>
+                </button>
+              </div>
+              <p class="text-[11px] text-[#7a7a7a] pl-1">Expires in <span class="tabular-nums">14 days</span> · Single passkey registration</p>
+            </div>
+
+            <!-- Invite By Email -->
+            <div class="space-y-2">
+              <label class="block text-[11px] font-semibold text-[#7a7a7a] uppercase tracking-wider">Invite by Email</label>
+              <div class="flex items-center gap-2">
+                <input type="email" placeholder="email@example.com" class="flex-1 h-11 px-4 text-xs bg-[#ffffff] border border-[#e0e0e0] rounded-full text-[#1d1d1f] placeholder-[#7a7a7a] focus:outline-none focus:border-[#0066cc]">
+                <button class="h-11 px-5 rounded-full bg-[#0066cc] hover:bg-[#0071e3] text-white text-xs font-medium flex items-center gap-1.5 transition-colors">
+                  <svg class="w-3.5 h-3.5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="22" x2="11" y1="2" y2="13"></line>
+                    <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                  </svg>
+                  <span>Send Invite</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Group Members (3) List -->
+            <div class="space-y-3 pt-2">
+              <div class="flex items-center justify-between text-xs text-[#7a7a7a] font-medium px-1">
+                <span><span class="tabular-nums">GROUP MEMBERS (3)</span>
+                
+              </div>
+
+              <!-- Member 1: Jordan Doe -->
+              <div class="flex items-center justify-between p-3 rounded-[14px] bg-white border border-borderLine-hairline">
+                <div class="flex items-center gap-3">
+                  <div class="w-8 h-8 rounded-full bg-[#0066cc] text-white text-xs font-semibold flex items-center justify-center">JD</div>
+                  <div>
+                    <div class="text-xs font-semibold text-[#1d1d1f]">Jordan Doe (You)</div>
+                    <div class="text-[11px] text-[#7a7a7a]">jordan.doe@example.com</div>
+                  </div>
+                </div>
+                <span class="px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-[#f5f5f7] text-[#7a7a7a] border border-[#e0e0e0] mr-1">Owner</span>
+              </div>
+
+              <!-- Member 2: Marcus Kim -->
+              <div class="flex items-center justify-between p-3 rounded-[14px] bg-white border border-borderLine-hairline">
+                <div class="flex items-center gap-3">
+                  <div class="w-8 h-8 rounded-full bg-[#0284c7] text-white text-xs font-semibold flex items-center justify-center">MK</div>
+                  <div>
+                    <div class="text-xs font-semibold text-[#1d1d1f]">Marcus Kim</div>
+                    <div class="text-[11px] text-[#7a7a7a]">marcus.k@example.com</div>
+                  </div>
+                </div>
+                <div class="flex items-center gap-2 mr-1">
+                  <span class="px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-[#f5f5f7] text-[#7a7a7a] border border-[#e0e0e0]">Member</span>
+                  <button class="text-xs text-[#dc2626] hover:underline px-2 py-1">Remove</button>
+                </div>
+              </div>
+
+              <!-- Member 3: Alex Lee -->
+              <div class="flex items-center justify-between p-3 rounded-[14px] bg-white border border-borderLine-hairline">
+                <div class="flex items-center gap-3">
+                  <div class="w-8 h-8 rounded-full bg-[#ea580c] text-white text-xs font-semibold flex items-center justify-center">AL</div>
+                  <div>
+                    <div class="text-xs font-semibold text-[#1d1d1f]">Alex Lee</div>
+                    <div class="text-[11px] text-[#7a7a7a]">alex.lee@example.com</div>
+                  </div>
+                </div>
+                <div class="flex items-center gap-2 mr-1">
+                  <span class="px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-[#f5f5f7] text-[#7a7a7a] border border-[#e0e0e0]">Member</span>
+                  <button class="text-xs text-[#dc2626] hover:underline px-2 py-1">Remove</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Group Maintenance Actions -->
+            <div class="pt-4 border-t border-[#f0f0f0] space-y-3">
+              <span class="text-[11px] font-semibold text-[#7a7a7a] uppercase tracking-wider block">Group Maintenance</span>
+              <div class="flex items-center justify-between p-3.5 rounded-[14px] bg-surface-pearl border border-borderLine-hairline">
+                <div>
+                  <div class="text-xs font-semibold text-[#1d1d1f]">Archive or Leave Group</div>
+                  <div class="text-[11px] text-[#7a7a7a]">Archive to read-only or leave this split entity</div>
+                </div>
+                <div class="flex items-center gap-2">
+                  <button class="h-8 px-3.5 rounded-full bg-semantic-dangerBg border border-[#fecaca] text-xs font-medium text-semantic-danger hover:bg-red-100 transition-colors">Archive Group</button>
+                  <button class="h-8 px-3.5 rounded-full bg-[#ffffff] border border-[#e0e0e0] text-xs font-medium text-[#7a7a7a] hover:text-[#1d1d1f] hover:bg-[#f5f5f7] transition-colors">Leave Group</button>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+  </main>
+
+
+
+
+
+  <script>
+    lucide.createIcons();
+  </script>
+</body></html>

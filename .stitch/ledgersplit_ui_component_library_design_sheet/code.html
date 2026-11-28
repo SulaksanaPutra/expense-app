@@ -1,0 +1,1278 @@
+<!DOCTYPE html><html lang="en"><head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LedgerSplit UI Component Library &amp; Design Sheet</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              DEFAULT: '#0066cc',
+              focus: '#0071e3',
+              dark: '#0052a3',
+              light: '#e6f0fa',
+            },
+            surface: {
+              canvas: '#f5f5f7',
+              card: '#ffffff',
+              pearl: '#fafafc',
+              dim: '#d9dadc',
+            },
+            ink: {
+              DEFAULT: '#1d1d1f',
+              muted80: '#333333',
+              muted48: '#7a7a7a',
+            },
+            borderLine: {
+              hairline: '#e0e0e0',
+              divider: '#f0f0f0',
+            },
+            semantic: {
+              success: '#22c55e',
+              successBg: '#edfbf2',
+              warning: '#f59e0b',
+              warningBg: '#fef8ea',
+              danger: '#dc2626',
+              dangerBg: '#fef2f2',
+              info: '#0066cc',
+              infoBg: '#f0f7ff',
+            }
+          },
+          fontFamily: {
+            sans: ['-apple-system', 'BlinkMacSystemFont', '"SF Pro Display"', '"SF Pro Text"', 'Inter', 'Helvetica Neue', 'sans-serif'],
+            mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace'],
+          },
+          borderRadius: {
+            'card': '18px',
+            'pill': '9999px',
+          },
+          boxShadow: {
+            'overlay': '0 16px 40px rgba(0, 0, 0, 0.08), 0 4px 12px rgba(0, 0, 0, 0.04)',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      background-color: #f5f5f7;
+      color: #1d1d1f;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    }
+    .tabular-nums {
+      font-variant-numeric: tabular-nums;
+    }
+    /* Skeleton Shimmer */
+    @keyframes shimmer {
+      100% {
+        transform: translateX(100%);
+      }
+    }
+    .skeleton-box {
+      position: relative;
+      overflow: hidden;
+      background-color: #e8e8ed;
+    }
+    .skeleton-box::after {
+      position: absolute;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      left: 0;
+      transform: translateX(-100%);
+      background-image: linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0) 0,
+        rgba(255, 255, 255, 0.5) 50%,
+        rgba(255, 255, 255, 0) 100%
+      );
+      animation: shimmer 1.8s infinite;
+      content: '';
+    }
+  </style>
+</head>
+<body class="p-6 md:p-10 max-w-[1440px] mx-auto space-y-6">
+
+  <!-- ==================== PAGE HEADER ==================== -->
+  <header class="bg-white rounded-card border border-borderLine-hairline p-6 shadow-none">
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div>
+        <p class="text-[11px] font-semibold uppercase tracking-wider text-brand mb-1">
+          LEDGER SPLIT · DESIGN SYSTEM &amp; UI CONTRACT
+        </p>
+        <h1 class="text-[28px] md:text-[30px] font-semibold text-ink tracking-tight leading-tight">
+          LedgerSplit UI Component Library &amp; Design Sheet
+        </h1>
+        <p class="text-[14px] text-ink-muted48 mt-1">
+          Single source of truth for tokens, typography, iconography, pill form controls, states, and overlays.
+        </p>
+      </div>
+      <div class="flex items-center gap-3">
+        <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-[#f0f7ff] text-brand border border-[#d0e5fc]">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="shield-check" class="lucide lucide-shield-check w-3.5 h-3.5 text-brand"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"></path><path d="m9 12 2 2 4-4"></path></svg> Specimen Ready
+        </span>
+        <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-[#f5f5f7] text-ink-muted80 border border-borderLine-hairline">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="layers" class="lucide lucide-layers w-3.5 h-3.5 text-ink-muted48"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"></path><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"></path><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"></path></svg> 1440px Desktop Grid
+        </span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ==================== SECTION 01: FOUNDATIONS, TYPOGRAPHY & SPACING ==================== -->
+  <section class="space-y-4">
+    <div class="flex items-center justify-between px-1">
+      <h2 class="text-xs font-semibold uppercase tracking-wider text-ink-muted48">
+        SECTION 01 · FOUNDATIONS, TYPOGRAPHY &amp; SPACING
+      </h2>
+      <span class="text-xs text-ink-muted48 font-mono">Tokens &amp; Constraints</span>
+    </div>
+
+    <!-- 2-Col Tokens & Typography -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      
+      <!-- Color & Surface Tokens -->
+      <div class="bg-white rounded-card border border-borderLine-hairline p-6 space-y-5">
+        <div>
+          <h3 class="text-sm font-semibold text-ink">Color &amp; Surface Tokens</h3>
+          <p class="text-xs text-ink-muted48">Apple-inspired semantic slate, canvas tiers, and functional accents</p>
+        </div>
+
+        <!-- Core Brand & Slate -->
+        <div class="space-y-2">
+          <span class="text-[11px] font-medium uppercase tracking-wider text-ink-muted48">Core Brand &amp; Ink</span>
+          <div class="grid grid-cols-5 gap-2.5">
+            <div class="bg-[#0066cc] text-white p-2.5 rounded-xl text-center">
+              <span class="block text-[11px] font-semibold">Primary</span>
+              <span class="block text-[10px] opacity-80 font-mono mt-0.5">#0066cc</span>
+            </div>
+            <div class="bg-[#0071e3] text-white p-2.5 rounded-xl text-center">
+              <span class="block text-[11px] font-semibold">Focus</span>
+              <span class="block text-[10px] opacity-80 font-mono mt-0.5">#0071e3</span>
+            </div>
+            <div class="bg-[#1d1d1f] text-white p-2.5 rounded-xl text-center">
+              <span class="block text-[11px] font-semibold">Ink</span>
+              <span class="block text-[10px] opacity-80 font-mono mt-0.5">#1d1d1f</span>
+            </div>
+            <div class="bg-[#333333] text-white p-2.5 rounded-xl text-center">
+              <span class="block text-[11px] font-semibold">Muted-80</span>
+              <span class="block text-[10px] opacity-80 font-mono mt-0.5">#333333</span>
+            </div>
+            <div class="bg-[#7a7a7a] text-white p-2.5 rounded-xl text-center">
+              <span class="block text-[11px] font-semibold">Muted-48</span>
+              <span class="block text-[10px] opacity-80 font-mono mt-0.5">#7a7a7a</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Surfaces & Hairlines -->
+        <div class="space-y-2">
+          <span class="text-[11px] font-medium uppercase tracking-wider text-ink-muted48">Surfaces &amp; Hairlines</span>
+          <div class="grid grid-cols-5 gap-2.5">
+            <div class="bg-[#ffffff] border border-borderLine-hairline p-2.5 rounded-xl text-center">
+              <span class="block text-[11px] font-semibold text-ink">Canvas</span>
+              <span class="block text-[10px] text-ink-muted48 font-mono mt-0.5">#ffffff</span>
+            </div>
+            <div class="bg-[#f5f5f7] border border-borderLine-hairline p-2.5 rounded-xl text-center">
+              <span class="block text-[11px] font-semibold text-ink">Parchment</span>
+              <span class="block text-[10px] text-ink-muted48 font-mono mt-0.5">#f5f5f7</span>
+            </div>
+            <div class="bg-[#fafafc] border border-borderLine-hairline p-2.5 rounded-xl text-center">
+              <span class="block text-[11px] font-semibold text-ink">Pearl</span>
+              <span class="block text-[10px] text-ink-muted48 font-mono mt-0.5">#fafafc</span>
+            </div>
+            <div class="bg-[#e0e0e0] p-2.5 rounded-xl text-center">
+              <span class="block text-[11px] font-semibold text-ink">Hairline</span>
+              <span class="block text-[10px] text-ink-muted80 font-mono mt-0.5">#e0e0e0</span>
+            </div>
+            <div class="bg-[#f0f0f0] p-2.5 rounded-xl text-center">
+              <span class="block text-[11px] font-semibold text-ink">Divider</span>
+              <span class="block text-[10px] text-ink-muted48 font-mono mt-0.5">#f0f0f0</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Functional Semantics -->
+        <div class="space-y-2">
+          <span class="text-[11px] font-medium uppercase tracking-wider text-ink-muted48">Functional Semantic Accents</span>
+          <div class="grid grid-cols-3 gap-3">
+            <div class="flex items-center gap-2 p-2.5 rounded-xl bg-semantic-successBg border border-[#bbf7d0]">
+              <div class="w-3.5 h-3.5 rounded-full bg-semantic-success flex items-center justify-center text-white">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="check" class="lucide lucide-check w-2.5 h-2.5 stroke-[3]"><path d="M20 6 9 17l-5-5"></path></svg>
+              </div>
+              <div>
+                <span class="block text-xs font-semibold text-[#166534]">Success · Settled</span>
+                <span class="block text-[10px] text-[#166534]/80 font-mono">#22c55e</span>
+              </div>
+            </div>
+            <div class="flex items-center gap-2 p-2.5 rounded-xl bg-semantic-warningBg border border-[#fde68a]">
+              <div class="w-3.5 h-3.5 rounded-full bg-semantic-warning flex items-center justify-center text-white">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="alert-circle" class="lucide lucide-alert-circle w-2.5 h-2.5 stroke-[3]"><circle cx="12" cy="12" r="10"></circle><line x1="12" x2="12" y1="8" y2="12"></line><line x1="12" x2="12.01" y1="16" y2="16"></line></svg>
+              </div>
+              <div>
+                <span class="block text-xs font-semibold text-[#9a3412]">Warning · Pending</span>
+                <span class="block text-[10px] text-[#9a3412]/80 font-mono">#f59e0b</span>
+              </div>
+            </div>
+            <div class="flex items-center gap-2 p-2.5 rounded-xl bg-semantic-dangerBg border border-[#fecaca]">
+              <div class="w-3.5 h-3.5 rounded-full bg-semantic-danger flex items-center justify-center text-white">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="x" class="lucide lucide-x w-2.5 h-2.5 stroke-[3]"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+              </div>
+              <div>
+                <span class="block text-xs font-semibold text-[#991b1b]">Danger · Action</span>
+                <span class="block text-[10px] text-[#991b1b]/80 font-mono">#dc2626</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Typography Scale & Numeric Rule -->
+      <div class="bg-white rounded-card border border-borderLine-hairline p-6 space-y-4">
+        <div>
+          <h3 class="text-sm font-semibold text-ink">Typography Scale &amp; Numeric Rule</h3>
+          <p class="text-xs text-ink-muted48">SF Pro Display &amp; SF Pro Text with strict tabular-nums financial alignment</p>
+        </div>
+
+        <div class="divide-y divide-borderLine-divider text-xs">
+          <div class="py-2.5 flex items-baseline justify-between">
+            <span class="w-28 text-ink-muted48 font-mono text-[11px]">Eyebrow</span>
+            <span class="text-[11px] font-semibold uppercase tracking-wider text-brand flex-1">ACCOUNT &amp; LEDGER SPECIMEN</span>
+            <span class="text-ink-muted48 font-mono text-[11px]">11px / 600 / uppercase</span>
+          </div>
+
+          <div class="py-2.5 flex items-baseline justify-between">
+            <span class="w-28 text-ink-muted48 font-mono text-[11px]">Page Title (H1)</span>
+            <span class="text-[24px] font-semibold text-ink tracking-tight flex-1">Dashboard Overview</span>
+            <span class="text-ink-muted48 font-mono text-[11px]">30px / 600 / -0.02em</span>
+          </div>
+
+          <div class="py-2.5 flex items-baseline justify-between">
+            <span class="w-28 text-ink-muted48 font-mono text-[11px]">Page Subtitle</span>
+            <span class="text-[14px] text-ink-muted48 flex-1">All active groups · November 2026 cycle</span>
+            <span class="text-ink-muted48 font-mono text-[11px]">14px / 400 / #7a7a7a</span>
+          </div>
+
+          <div class="py-2.5 flex items-baseline justify-between">
+            <span class="w-28 text-ink-muted48 font-mono text-[11px]">Card Title (H2)</span>
+            <span class="text-[17px] font-semibold text-ink flex-1">Monthly Category Breakdown</span>
+            <span class="text-ink-muted48 font-mono text-[11px]">17px / 600 / #1d1d1f</span>
+          </div>
+
+          <div class="py-2.5 flex items-baseline justify-between">
+            <span class="w-28 text-ink-muted48 font-mono text-[11px]">Sub-card (H3)</span>
+            <span class="text-[15px] font-semibold text-ink flex-1">Household Run-Rate Analysis</span>
+            <span class="text-ink-muted48 font-mono text-[11px]">15px / 600 / #1d1d1f</span>
+          </div>
+
+          <div class="py-2.5 flex items-baseline justify-between">
+            <span class="w-28 text-ink-muted48 font-mono text-[11px]">Form Label / Hint</span>
+            <span class="text-[12px] text-ink-muted80 flex-1"><strong class="font-medium text-ink">Legal Full Name *</strong> · Standard helper caption</span>
+            <span class="text-ink-muted48 font-mono text-[11px]">12px / 500 &amp; 400</span>
+          </div>
+
+          <div class="py-2.5 flex items-baseline justify-between bg-surface-pearl px-3 rounded-lg border border-borderLine-divider">
+            <span class="w-28 text-brand font-mono text-[11px] font-semibold">Tabular Nums</span>
+            <div class="flex items-center gap-4 flex-1 tabular-nums font-semibold text-sm">
+              <span class="text-ink font-semibold">$3,428.50</span>
+              <span class="text-semantic-success">+$840.00</span>
+              <span class="text-semantic-danger">-$215.40</span>
+            </div>
+            <span class="text-ink-muted48 font-mono text-[11px]">tabular-nums font-semibold</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Full-width Compact Card: Spacing & Radius Rules -->
+    <div class="bg-white rounded-card border border-borderLine-hairline p-6">
+      <div class="flex flex-col md:flex-row md:items-center justify-between pb-4 mb-4 border-b border-borderLine-divider gap-2">
+        <div>
+          <h3 class="text-sm font-semibold text-ink">Spacing &amp; Radius Rules</h3>
+          <p class="text-xs text-ink-muted48">Strict mathematical geometric rules for clean visual rhythm</p>
+        </div>
+        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-mono bg-surface-pearl text-ink-muted80 border border-borderLine-hairline">
+          Zero-Clash Hierarchy
+        </span>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
+        <div class="p-3.5 rounded-xl bg-surface-pearl border border-borderLine-hairline">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="font-semibold text-ink">Cards &amp; Sheets</span>
+            <span class="font-mono text-brand font-semibold text-[11px]">18px Radius</span>
+          </div>
+          <p class="text-[11px] text-ink-muted48">Main content cards, setting groups, modal container frames, and preview surfaces.</p>
+        </div>
+
+        <div class="p-3.5 rounded-xl bg-surface-pearl border border-borderLine-hairline">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="font-semibold text-ink">Table &amp; Dropzones</span>
+            <span class="font-mono text-brand font-semibold text-[11px]">14px &amp; 18px</span>
+          </div>
+          <p class="text-[11px] text-ink-muted48">Table outer frame at 14px, Textarea &amp; Receipt upload dropzones at 18px radius.</p>
+        </div>
+
+        <div class="p-3.5 rounded-xl bg-surface-pearl border border-borderLine-hairline">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="font-semibold text-ink">Interactive Controls</span>
+            <span class="font-mono text-semantic-success font-semibold text-[11px]">9999px Pill</span>
+          </div>
+          <p class="text-[11px] text-ink-muted48">Buttons, inputs, search inputs, selects, filter chips, and badges strictly pill-shaped.</p>
+        </div>
+
+        <div class="p-3.5 rounded-xl bg-surface-pearl border border-borderLine-hairline">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="font-semibold text-ink">Spacing Grid</span>
+            <span class="font-mono text-brand font-semibold text-[11px]">8 / 16 / 24 / 32px</span>
+          </div>
+          <p class="text-[11px] text-ink-muted48">Tight 8px, control gap 12–16px, section grid 24px, card interior padding 24–32px.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== SECTION 02: ICONOGRAPHY, BUTTONS WITH ICONS & BADGES ==================== -->
+  <section class="space-y-4">
+    <div class="flex items-center justify-between px-1">
+      <h2 class="text-xs font-semibold uppercase tracking-wider text-ink-muted48">
+        SECTION 02 · ICONOGRAPHY, BUTTONS WITH ICONS &amp; BADGES
+      </h2>
+      <span class="text-xs text-ink-muted48 font-mono">Primitives &amp; Feedback</span>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      
+      <!-- Icon Style & Buttons With Icons -->
+      <div class="bg-white rounded-card border border-borderLine-hairline p-6 space-y-5">
+        <div>
+          <h3 class="text-sm font-semibold text-ink">Icon Style &amp; Buttons With Icons</h3>
+          <p class="text-xs text-ink-muted48">Lucide icons at 1.75px stroke, unified 9999px pill radii with interactive hover states</p>
+        </div>
+
+        <!-- Iconography Strip -->
+        <div class="p-3.5 rounded-xl bg-surface-pearl border border-borderLine-hairline space-y-2">
+          <div class="flex items-center justify-between text-xs">
+            <span class="font-medium text-ink">Iconography Strip (Lucide · 1.75px Stroke)</span>
+            <span class="text-[11px] font-mono text-ink-muted48">14px · 16px · 20px</span>
+          </div>
+          <div class="flex items-center gap-6 pt-1 text-xs text-ink-muted80">
+            <div class="flex items-center gap-2">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="tag" class="lucide lucide-tag w-3.5 h-3.5 text-brand stroke-[1.75]"><path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"></path><circle cx="7.5" cy="7.5" r=".5" fill="currentColor"></circle></svg>
+              <span class="text-[11px] font-mono">14px Badges/sm</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="compass" class="lucide lucide-compass w-4 h-4 text-ink-muted48 stroke-[1.75]"><path d="m16.24 7.76-1.804 5.411a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.411a2 2 0 0 1 1.265-1.265z"></path><circle cx="12" cy="12" r="10"></circle></svg>
+              <span class="text-[11px] font-mono">16px Nav/md/inputs</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <div class="w-7 h-7 rounded-full bg-[#f0f7ff] flex items-center justify-center text-brand">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="pie-chart" class="lucide lucide-pie-chart w-4 h-4 stroke-[1.75]"><path d="M21 12c.552 0 1.005-.449.95-.998a10 10 0 0 0-8.953-8.951c-.55-.055-.998.398-.998.95v8a1 1 0 0 0 1 1z"></path><path d="M21.21 15.89A10 10 0 1 1 8 2.83"></path></svg>
+              </div>
+              <span class="text-[11px] font-mono">20px Header/KPI</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Button Variants with Icons -->
+        <div class="space-y-3">
+          <span class="text-[11px] font-medium uppercase tracking-wider text-ink-muted48">Button Variants With Icons</span>
+          <div class="flex flex-wrap items-center gap-2.5">
+            <!-- Primary -->
+            <button class="inline-flex items-center gap-1.5 px-4 h-10 rounded-pill bg-brand text-white text-xs font-semibold hover:bg-brand-focus transition-colors shadow-none">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="plus" class="lucide lucide-plus w-4 h-4 stroke-[2]"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg> Add Expense
+            </button>
+            <button class="inline-flex items-center gap-1.5 px-4 h-10 rounded-pill bg-brand text-white text-xs font-semibold hover:bg-brand-focus transition-colors shadow-none">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="check" class="lucide lucide-check w-4 h-4 stroke-[2]"><path d="M20 6 9 17l-5-5"></path></svg> Save Changes
+            </button>
+
+            <!-- Secondary -->
+            <button class="inline-flex items-center gap-1.5 px-4 h-10 rounded-pill bg-white border border-borderLine-hairline text-ink text-xs font-medium hover:bg-surface-pearl transition-colors">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="download" class="lucide lucide-download w-3.5 h-3.5 text-ink-muted48 stroke-[1.75]"><path d="M12 15V3"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path></svg> Export CSV
+            </button>
+            <button class="inline-flex items-center gap-1.5 px-4 h-10 rounded-pill bg-white border border-borderLine-hairline text-ink text-xs font-medium hover:bg-surface-pearl transition-colors">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="camera" class="lucide lucide-camera w-3.5 h-3.5 text-ink-muted48 stroke-[1.75]"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"></path><circle cx="12" cy="13" r="3"></circle></svg> Change Photo
+            </button>
+
+            <!-- Ghost -->
+            <button class="inline-flex items-center gap-1.5 px-3.5 h-10 rounded-pill text-ink-muted80 hover:bg-surface-pearl text-xs font-medium transition-colors">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="rotate-ccw" class="lucide lucide-rotate-ccw w-3.5 h-3.5 text-ink-muted48 stroke-[1.75]"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg> Reset to Defaults
+            </button>
+            <button class="inline-flex items-center gap-1 px-3.5 h-10 rounded-pill text-brand hover:bg-[#f0f7ff] text-xs font-semibold transition-colors">
+              Settle now <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="arrow-right" class="lucide lucide-arrow-right w-3.5 h-3.5 stroke-[2]"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg>
+            </button>
+
+            <!-- Danger Soft -->
+            <button class="inline-flex items-center gap-1.5 px-4 h-10 rounded-pill bg-semantic-dangerBg border border-[#fecaca] text-semantic-danger text-xs font-medium hover:bg-red-100 transition-colors">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="trash-2" class="lucide lucide-trash-2 w-3.5 h-3.5 stroke-[1.75]"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" x2="10" y1="11" y2="17"></line><line x1="14" x2="14" y1="11" y2="17"></line></svg> Delete Account
+            </button>
+
+            <!-- Danger Solid -->
+            <button class="inline-flex items-center gap-1.5 px-4 h-10 rounded-pill bg-semantic-danger text-white text-xs font-semibold hover:bg-red-700 transition-colors shadow-none">
+              Confirm Delete
+            </button>
+
+            <!-- Loading State -->
+            <button disabled="" class="inline-flex items-center gap-1.5 px-4 h-10 rounded-pill bg-brand text-white text-xs font-medium opacity-50 cursor-not-allowed">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="loader-2" class="lucide lucide-loader-2 w-3.5 h-3.5 animate-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg> Saving...
+            </button>
+
+            <!-- Icon Circles (36px) -->
+            <div class="flex items-center gap-2 pl-1 border-l border-borderLine-divider">
+              <button class="w-9 h-9 rounded-full bg-white border border-borderLine-hairline flex items-center justify-center text-ink-muted80 hover:bg-surface-pearl transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="bell" class="lucide lucide-bell w-4 h-4 stroke-[1.75]"><path d="M10.268 21a2 2 0 0 0 3.464 0"></path><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"></path></svg>
+              </button>
+              <button class="w-9 h-9 rounded-full bg-white border border-borderLine-hairline flex items-center justify-center text-ink-muted80 hover:bg-surface-pearl transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="refresh-cw" class="lucide lucide-refresh-cw w-4 h-4 stroke-[1.75]"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg>
+              </button>
+              <button class="w-9 h-9 rounded-full bg-white border border-borderLine-hairline flex items-center justify-center text-ink-muted80 hover:bg-surface-pearl transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="x" class="lucide lucide-x w-4 h-4 stroke-[1.75]"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+              </button>
+              <button class="w-9 h-9 rounded-full bg-white border border-borderLine-hairline flex items-center justify-center text-ink-muted80 hover:bg-surface-pearl transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="more-vertical" class="lucide lucide-more-vertical w-4 h-4 stroke-[1.75]"><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Size Scale -->
+        <div class="pt-3 border-t border-borderLine-divider space-y-2">
+          <span class="text-[11px] font-medium uppercase tracking-wider text-ink-muted48">Size Scale (sm h-8, md h-10, lg h-11)</span>
+          <div class="flex items-center gap-3">
+            <button class="px-3 h-8 rounded-pill bg-brand text-white text-xs font-medium">Small (h-8)</button>
+            <button class="px-4 h-10 rounded-pill bg-brand text-white text-xs font-semibold">Medium (h-10 Default)</button>
+            <button class="px-5 h-11 rounded-pill bg-brand text-white text-sm font-semibold">Large (h-11 CTA)</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Badge / StatusPill Tones & Avatars -->
+      <div class="bg-white rounded-card border border-borderLine-hairline p-6 space-y-5">
+        <div>
+          <h3 class="text-sm font-semibold text-ink">Badge / StatusPill Tones &amp; Avatars</h3>
+          <p class="text-xs text-ink-muted48">Standardized 9999px pill badges with high-contrast text and border tints</p>
+        </div>
+
+        <!-- 6 StatusPill Tones -->
+        <div class="space-y-3">
+          <span class="text-[11px] font-medium uppercase tracking-wider text-ink-muted48">6 StatusPill Tones</span>
+          <div class="flex flex-wrap items-center gap-2.5">
+            <!-- Neutral -->
+            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-pill text-xs font-medium bg-[#f5f5f7] text-ink-muted80 border border-borderLine-hairline">
+              <span class="w-1.5 h-1.5 rounded-full bg-ink-muted48"></span> Neutral · Default
+            </span>
+            <!-- Info -->
+            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-pill text-xs font-medium bg-[#f0f7ff] text-brand border border-[#d0e5fc]">
+              <span class="w-1.5 h-1.5 rounded-full bg-brand"></span> Info · Open Cycle
+            </span>
+            <!-- Success -->
+            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-pill text-xs font-medium bg-semantic-successBg text-[#166534] border border-[#bbf7d0]">
+              <span class="w-1.5 h-1.5 rounded-full bg-semantic-success"></span> Live Sync / Settled
+            </span>
+            <!-- Warning -->
+            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-pill text-xs font-medium bg-semantic-warningBg text-[#9a3412] border border-[#fde68a]">
+              <span class="w-1.5 h-1.5 rounded-full bg-semantic-warning"></span> Closed Period
+            </span>
+            <!-- Danger -->
+            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-pill text-xs font-medium bg-semantic-dangerBg text-[#991b1b] border border-[#fecaca]">
+              <span class="w-1.5 h-1.5 rounded-full bg-semantic-danger"></span> Action Needed (2)
+            </span>
+            <!-- Category -->
+            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-pill text-xs font-medium bg-white text-ink-muted80 border border-borderLine-hairline">
+              <span class="w-1.5 h-1.5 rounded-full bg-purple-500"></span> Groceries &amp; Food
+            </span>
+            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-pill text-xs font-medium bg-white text-ink-muted80 border border-borderLine-hairline">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Utilities &amp; Wifi
+            </span>
+          </div>
+        </div>
+
+        <!-- Avatars & AvatarStack -->
+        <div class="pt-3 border-t border-borderLine-divider space-y-3">
+          <span class="text-[11px] font-medium uppercase tracking-wider text-ink-muted48">Avatar Sizing &amp; AvatarStack</span>
+          <div class="flex items-center justify-between flex-wrap gap-4">
+            <!-- Sizes -->
+            <div class="flex items-center gap-3">
+              <div class="w-6 h-6 rounded-full bg-[#0066cc] text-white flex items-center justify-center text-[10px] font-semibold">
+                JD
+              </div>
+              <div class="w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs font-semibold">
+                MK
+              </div>
+              <div class="w-12 h-12 rounded-full bg-amber-600 text-white flex items-center justify-center text-sm font-semibold">
+                SC
+              </div>
+              <span class="text-xs text-ink-muted48 font-mono">24px · 32px · 48px</span>
+            </div>
+
+            <!-- AvatarStack -->
+            <div class="flex items-center">
+              <div class="flex -space-x-2 overflow-hidden p-1">
+                <div class="inline-block h-8 w-8 rounded-full ring-2 ring-white bg-[#0066cc] text-white flex items-center justify-center text-xs font-semibold">
+                  JD
+                </div>
+                <div class="inline-block h-8 w-8 rounded-full ring-2 ring-white bg-emerald-600 text-white flex items-center justify-center text-xs font-semibold">
+                  MK
+                </div>
+                <div class="inline-block h-8 w-8 rounded-full ring-2 ring-white bg-amber-600 text-white flex items-center justify-center text-xs font-semibold">
+                  SC
+                </div>
+                <div class="inline-block h-8 w-8 rounded-full ring-2 ring-white bg-purple-600 text-white flex items-center justify-center text-xs font-semibold">
+                  AL
+                </div>
+                <div class="inline-block h-8 w-8 rounded-full ring-2 ring-white bg-slate-200 text-ink-muted80 flex items-center justify-center text-xs font-semibold">
+                  +2
+                </div>
+              </div>
+              <span class="text-xs text-ink-muted48 ml-2">6 members</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== SECTION 03: UNIFIED PILL FORM INPUTS, SWITCH & PROGRESS ==================== -->
+  <section class="space-y-4">
+    <div class="flex items-center justify-between px-1">
+      <h2 class="text-xs font-semibold uppercase tracking-wider text-ink-muted48">
+        SECTION 03 · UNIFIED PILL FORM INPUTS WITH ICONS, SWITCH &amp; PROGRESS
+      </h2>
+      <span class="text-xs text-ink-muted48 font-mono">Form &amp; Measurement Controls</span>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      
+      <!-- Pill Form Controls -->
+      <div class="bg-white rounded-card border border-borderLine-hairline p-6 space-y-4">
+        <div>
+          <h3 class="text-sm font-semibold text-ink">Pill Form Controls — Unified 9999px Radius</h3>
+          <p class="text-xs text-ink-muted48">Standardized h-11 / 44px box height, 9999px pill radius, 1px solid #e0e0e0 borders</p>
+        </div>
+
+        <!-- Leading Icon Pill Inputs -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div class="space-y-1">
+            <label class="block text-xs font-medium text-ink">Email Address *</label>
+            <div class="relative">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="mail" class="lucide lucide-mail w-4 h-4 text-ink-muted48 absolute left-3.5 top-1/2 -translate-y-1/2 stroke-[1.75]"><path d="m22 7-8.991 5.727a2 2 0 0 1-2.009 0L2 7"></path><rect x="2" y="4" width="20" height="16" rx="2"></rect></svg>
+              <input type="email" placeholder="name@example.com" class="w-full h-11 pl-10 pr-4 rounded-pill border border-borderLine-hairline bg-white text-xs text-ink focus:outline-none focus:border-brand">
+            </div>
+          </div>
+
+          <div class="space-y-1">
+            <label class="block text-xs font-medium text-ink">Phone Number</label>
+            <div class="relative">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="phone" class="lucide lucide-phone w-4 h-4 text-ink-muted48 absolute left-3.5 top-1/2 -translate-y-1/2 stroke-[1.75]"><path d="M13.832 16.568a1 1 0 0 0 1.213-.303l.355-.465A2 2 0 0 1 17 15h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2A18 18 0 0 1 2 4a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2v3a2 2 0 0 1-.8 1.6l-.468.351a1 1 0 0 0-.292 1.233 14 14 0 0 0 6.392 6.384"></path></svg>
+              <input type="text" placeholder="+1 (555) 000-0000" class="w-full h-11 pl-10 pr-4 rounded-pill border border-borderLine-hairline bg-white text-xs text-ink focus:outline-none focus:border-brand">
+            </div>
+          </div>
+
+          <div class="space-y-1">
+            <label class="block text-xs font-medium text-ink">Transaction Date</label>
+            <div class="relative">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="calendar" class="lucide lucide-calendar w-4 h-4 text-ink-muted48 absolute left-3.5 top-1/2 -translate-y-1/2 stroke-[1.75]"><path d="M8 2v4"></path><path d="M16 2v4"></path><rect width="18" height="18" x="3" y="4" rx="2"></rect><path d="M3 10h18"></path></svg>
+              <input type="text" value="2026-11-28" class="w-full h-11 pl-10 pr-4 rounded-pill border border-borderLine-hairline bg-white text-xs text-ink focus:outline-none focus:border-brand">
+            </div>
+          </div>
+
+          <div class="space-y-1">
+            <label class="block text-xs font-medium text-ink-muted48">SSO Primary Handle</label>
+            <div class="relative">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="lock" class="lucide lucide-lock w-4 h-4 text-ink-muted48 absolute left-3.5 top-1/2 -translate-y-1/2 stroke-[1.75]"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+              <input type="text" disabled="" value="Verified via auth" class="w-full h-11 pl-10 pr-4 rounded-pill border border-borderLine-hairline bg-surface-pearl text-xs text-ink-muted48 cursor-not-allowed">
+            </div>
+          </div>
+        </div>
+
+        <!-- Prefix + Trailing Icon Pill Inputs -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div class="space-y-1">
+            <label class="block text-xs font-medium text-ink">Settlement Tag</label>
+            <div class="relative flex items-center">
+              <span class="absolute left-3.5 text-xs text-ink-muted48 font-mono">@</span>
+              <input type="text" placeholder="your-handle" class="w-full h-11 pl-8 pr-9 rounded-pill border border-borderLine-hairline bg-white text-xs text-ink focus:outline-none focus:border-brand">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="zap" class="lucide lucide-zap w-4 h-4 text-amber-500 absolute right-3.5 top-1/2 -translate-y-1/2 stroke-[1.75]"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"></path></svg>
+            </div>
+          </div>
+
+          <div class="space-y-1">
+            <label class="block text-xs font-medium text-ink">Personal Monthly Cap</label>
+            <div class="relative flex items-center">
+              <span class="absolute left-3.5 text-xs text-ink-muted48 font-mono">$</span>
+              <input type="text" value="0.00" class="w-full h-11 pl-7 pr-20 rounded-pill border border-borderLine-hairline bg-white text-xs font-medium text-ink focus:outline-none focus:border-brand tabular-nums">
+              <span class="absolute right-2 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                Verified
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Error Input & SearchInput -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div class="space-y-1">
+            <label class="block text-xs font-medium text-semantic-danger">Invalid Input</label>
+            <input type="text" value="invalid-email@" class="w-full h-11 px-4 rounded-pill border border-semantic-danger bg-red-50/20 text-xs text-semantic-danger focus:outline-none">
+            <p class="text-[10px] text-semantic-danger pl-3">Please enter a valid email address</p>
+          </div>
+
+          <div class="space-y-1">
+            <label class="block text-xs font-medium text-ink">Search Transactions</label>
+            <div class="relative flex items-center">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="search" class="lucide lucide-search w-4 h-4 text-ink-muted48 absolute left-3.5 top-1/2 -translate-y-1/2 stroke-[1.75]"><path d="m21 21-4.34-4.34"></path><circle cx="11" cy="11" r="8"></circle></svg>
+              <input type="text" placeholder="Search transactions..." class="w-full h-11 pl-10 pr-12 rounded-pill border border-borderLine-hairline bg-white text-xs text-ink focus:outline-none focus:border-brand">
+              <span class="absolute right-3 px-1.5 py-0.5 rounded text-[10px] font-mono bg-surface-pearl text-ink-muted48 border border-borderLine-hairline">
+                ⌘K
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Pill Selects & Filter Chips -->
+        <div class="space-y-2 pt-1">
+          <label class="block text-xs font-medium text-ink">Pill Select &amp; Filter Chips (9999px Radius)</label>
+          <div class="flex flex-wrap items-center gap-2">
+            <div class="relative">
+              <select class="appearance-none h-9 pl-3.5 pr-8 rounded-pill border border-borderLine-hairline bg-white text-xs text-ink font-medium focus:outline-none">
+                <option>USD ($) — US Dollar</option>
+                <option>EUR (€) — Euro</option>
+              </select>
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="chevron-down" class="lucide lucide-chevron-down w-3.5 h-3.5 text-ink-muted48 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none"><path d="m6 9 6 6 6-6"></path></svg>
+            </div>
+
+            <div class="relative">
+              <select class="appearance-none h-9 pl-3.5 pr-8 rounded-pill border border-borderLine-hairline bg-white text-xs text-ink font-medium focus:outline-none">
+                <option>All Groups (4)</option>
+                <option>Apartment 4B Shared</option>
+                <option>Weekend Cabin Crew</option>
+              </select>
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="chevron-down" class="lucide lucide-chevron-down w-3.5 h-3.5 text-ink-muted48 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none"><path d="m6 9 6 6 6-6"></path></svg>
+            </div>
+
+            <button class="px-3 h-9 rounded-pill bg-ink text-white text-xs font-medium">All</button>
+            <button class="px-3 h-9 rounded-pill bg-white border border-borderLine-hairline text-ink-muted80 hover:bg-surface-pearl text-xs font-medium">Groceries</button>
+            <button class="px-3 h-9 rounded-pill bg-white border border-borderLine-hairline text-ink-muted80 hover:bg-surface-pearl text-xs font-medium">Utilities</button>
+          </div>
+        </div>
+
+        <!-- Textarea & Dropzone (18px Radius) -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+          <div class="space-y-1">
+            <label class="block text-xs font-medium text-ink">Notes / Split Memo (18px radius)</label>
+            <textarea rows="3" placeholder="Add optional receipt notes or tax allocation rules..." class="w-full p-3 rounded-card border border-borderLine-hairline bg-white text-xs text-ink focus:outline-none focus:border-brand resize-none"></textarea>
+          </div>
+
+          <div class="space-y-1">
+            <label class="block text-xs font-medium text-ink">Receipt Upload Dropzone (18px radius)</label>
+            <div class="h-[76px] rounded-card border border-dashed border-borderLine-hairline bg-surface-canvas hover:bg-surface-pearl transition-colors flex flex-col items-center justify-center p-2 text-center cursor-pointer">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="upload-cloud" class="lucide lucide-upload-cloud w-4 h-4 text-brand mb-1 stroke-[1.75]"><path d="M12 13v8"></path><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path><path d="m8 17 4-4 4 4"></path></svg>
+              <p class="text-[11px] font-medium text-ink">Drop receipt or click to browse</p>
+              <p class="text-[9px] text-ink-muted48">PNG, JPG up to 10 MB</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Card: Single SegmentedControl, Switch & Progress -->
+      <div class="bg-white rounded-card border border-borderLine-hairline p-6 space-y-6">
+        <div>
+          <h3 class="text-sm font-semibold text-ink">Single SegmentedControl, Switch &amp; Progress</h3>
+          <p class="text-xs text-ink-muted48">Pill-style segment switches, binary toggles, and ratio meters</p>
+        </div>
+
+        <!-- Single Standard SegmentedControl -->
+        <div class="space-y-2">
+          <span class="text-[11px] font-medium uppercase tracking-wider text-ink-muted48">SegmentedControl (Single Pill Style)</span>
+          <div class="inline-flex p-1 bg-surface-canvas rounded-pill border border-borderLine-hairline w-full">
+            <button class="flex-1 py-1.5 rounded-pill bg-brand text-white text-xs font-semibold shadow-sm transition-all text-center">
+              All Expenses
+            </button>
+            <button class="flex-1 py-1.5 rounded-pill text-ink-muted80 hover:text-ink text-xs font-medium transition-all text-center">
+              Paid by Me
+            </button>
+            <button class="flex-1 py-1.5 rounded-pill text-ink-muted80 hover:text-ink text-xs font-medium transition-all text-center">
+              Split with Me
+            </button>
+            <button class="flex-1 py-1.5 rounded-pill text-ink-muted80 hover:text-ink text-xs font-medium transition-all text-center">
+              Recurring
+            </button>
+          </div>
+        </div>
+
+        <!-- Switch States -->
+        <div class="space-y-2.5">
+          <span class="text-[11px] font-medium uppercase tracking-wider text-ink-muted48">Switch States</span>
+          <div class="grid grid-cols-3 gap-3 p-3.5 rounded-xl bg-surface-pearl border border-borderLine-hairline">
+            <!-- Active -->
+            <div class="flex items-center justify-between">
+              <div>
+                <span class="block text-xs font-medium text-ink">Active</span>
+                <span class="block text-[10px] text-emerald-600 font-mono">Checked</span>
+              </div>
+              <div class="w-11 h-6 bg-semantic-success rounded-full p-0.5 cursor-pointer flex items-center justify-end">
+                <div class="w-5 h-5 rounded-full bg-white shadow-sm"></div>
+              </div>
+            </div>
+
+            <!-- Inactive -->
+            <div class="flex items-center justify-between border-x border-borderLine-divider px-3">
+              <div>
+                <span class="block text-xs font-medium text-ink">Inactive</span>
+                <span class="block text-[10px] text-ink-muted48 font-mono">Off</span>
+              </div>
+              <div class="w-11 h-6 bg-[#d2d2d7] rounded-full p-0.5 cursor-pointer flex items-center">
+                <div class="w-5 h-5 rounded-full bg-white shadow-sm"></div>
+              </div>
+            </div>
+
+            <!-- Disabled -->
+            <div class="flex items-center justify-between opacity-50">
+              <div>
+                <span class="block text-xs font-medium text-ink">Disabled</span>
+                <span class="block text-[10px] text-ink-muted48 font-mono">Locked</span>
+              </div>
+              <div class="w-11 h-6 bg-[#d2d2d7] rounded-full p-0.5 cursor-not-allowed flex items-center">
+                <div class="w-5 h-5 rounded-full bg-white shadow-sm"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Progress Visualizations -->
+        <div class="space-y-4">
+          <span class="text-[11px] font-medium uppercase tracking-wider text-ink-muted48">Progress Visualizations</span>
+          
+          <!-- Segmented Progress Bar -->
+          <div class="space-y-1.5">
+            <div class="flex justify-between text-xs">
+              <span class="font-medium text-ink">Category Breakdown Progress</span>
+              <span class="text-ink-muted48 font-mono">86% of $4,000 Target</span>
+            </div>
+            <div class="h-2.5 w-full bg-[#f0f0f2] rounded-full overflow-hidden flex">
+              <div class="bg-brand h-full" style="width: 38%" title="Groceries: 38%"></div>
+              <div class="bg-emerald-500 h-full" style="width: 24%" title="Utilities: 24%"></div>
+              <div class="bg-amber-500 h-full" style="width: 15%" title="Dining: 15%"></div>
+              <div class="bg-purple-500 h-full" style="width: 9%" title="Travel: 9%"></div>
+            </div>
+          </div>
+
+          <!-- Progress Ring & Quota -->
+          <div class="flex items-center justify-between p-3.5 rounded-xl bg-surface-pearl border border-borderLine-hairline">
+            <div class="flex items-center gap-3">
+              <div class="relative w-12 h-12 flex items-center justify-center">
+                <svg class="w-12 h-12 transform -rotate-90">
+                  <circle cx="24" cy="24" r="20" stroke="#e0e0e0" stroke-width="4" fill="none"></circle>
+                  <circle cx="24" cy="24" r="20" stroke="#0066cc" stroke-width="4" stroke-dasharray="125.6" stroke-dashoffset="90.4" stroke-linecap="round" fill="none"></circle>
+                </svg>
+                <span class="absolute text-[11px] font-semibold text-ink font-mono">28%</span>
+              </div>
+              <div>
+                <span class="block text-xs font-semibold text-ink">Storage Quota</span>
+                <span class="block text-[11px] text-ink-muted48 font-mono">142 MB / 500 MB cloud archival</span>
+              </div>
+            </div>
+            <span class="text-xs font-medium text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
+              Within budget
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== SECTION 04: CONTAINERS, PAGE HEADER, TABLE & STATES ==================== -->
+  <section class="space-y-4">
+    <div class="flex items-center justify-between px-1">
+      <h2 class="text-xs font-semibold uppercase tracking-wider text-ink-muted48">
+        SECTION 04 · CONTAINERS, PAGE HEADER, TABLE &amp; EMPTY/LOADING STATES
+      </h2>
+      <span class="text-xs text-ink-muted48 font-mono">Layout &amp; Data Primitives</span>
+    </div>
+
+    <!-- 3-Col Card Variants -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <!-- KPI Card -->
+      <div class="bg-white rounded-card border border-borderLine-hairline p-6 flex flex-col justify-between">
+        <div class="flex items-start justify-between">
+          <span class="text-xs font-semibold text-ink-muted48 uppercase tracking-wider">TOTAL GROUP EXPENSES</span>
+          <div class="w-8 h-8 rounded-full bg-surface-pearl border border-borderLine-hairline flex items-center justify-center text-ink-muted48">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="receipt" class="lucide lucide-receipt w-4 h-4"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z"></path><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"></path><path d="M12 17.5v-11"></path></svg>
+          </div>
+        </div>
+        <div class="mt-4">
+          <span class="text-3xl font-semibold text-ink tracking-tight tabular-nums">$5,842.10</span>
+          <div class="flex items-center gap-2 mt-2">
+            <span class="inline-flex items-center text-xs font-medium text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+              +6.4% MoM
+            </span>
+            <span class="text-xs text-ink-muted48">42 transactions</span>
+          </div>
+        </div>
+        <div class="mt-4 pt-3 border-t border-borderLine-divider text-[11px] font-mono text-ink-muted48">
+          Card variant="kpi" (#ffffff)
+        </div>
+      </div>
+
+      <!-- Section Card -->
+      <div class="bg-white rounded-card border border-borderLine-hairline p-6 flex flex-col justify-between">
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="text-sm font-semibold text-ink">Monthly Category</h3>
+            <a href="#" class="text-xs font-medium text-brand hover:underline flex items-center gap-0.5">View Report <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="arrow-right" class="lucide lucide-arrow-right w-3 h-3"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg></a>
+          </div>
+          <p class="text-xs text-ink-muted48 leading-relaxed">
+            Container card with primary content, internal sub-components, and hairline borders.
+          </p>
+          <div class="mt-4 p-3 rounded-xl bg-surface-pearl border border-borderLine-hairline text-xs text-ink-muted80">
+            Inner content container
+          </div>
+        </div>
+        <div class="mt-4 pt-3 border-t border-borderLine-divider text-[11px] font-mono text-ink-muted48">
+          Card variant="section" (#ffffff)
+        </div>
+      </div>
+
+      <!-- Sub-Card -->
+      <div class="bg-[#f5f5f7] rounded-card border border-borderLine-hairline p-6 flex flex-col justify-between">
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-[11px] font-semibold text-ink-muted48 uppercase tracking-wider">ASSIGNED HABITAT</span>
+            <div class="w-7 h-7 rounded-full bg-white flex items-center justify-center text-brand shadow-sm">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="home" class="lucide lucide-home w-3.5 h-3.5"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"></path><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>
+            </div>
+          </div>
+          <h4 class="text-base font-semibold text-ink">Apartment 4B Shared</h4>
+          <p class="text-xs text-ink-muted48 mt-1">Base currency USD · Anchored on day 1</p>
+        </div>
+        <div class="mt-4 pt-3 border-t border-borderLine-hairline text-[11px] font-mono text-ink-muted48">
+          Card variant="sub-card" (#f5f5f7)
+        </div>
+      </div>
+    </div>
+
+    <!-- PageHeader Specimen -->
+    <div class="bg-white rounded-card border border-borderLine-hairline p-6">
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-borderLine-divider">
+        <div>
+          <div class="flex items-center gap-2">
+            <h2 class="text-xl font-semibold text-ink">Expenses Ledger</h2>
+            <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-pill text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Live Sync
+            </span>
+          </div>
+          <p class="text-xs text-ink-muted48 mt-0.5">
+            All active groups shared expenses, real-time splits, and monthly settlement balances (November 2026).
+          </p>
+        </div>
+        <div class="flex items-center gap-2.5">
+          <div class="relative">
+            <select class="appearance-none h-9 pl-3 pr-7 rounded-pill border border-borderLine-hairline bg-white text-xs text-ink font-medium">
+              <option>Filter: All Groups (4)</option>
+            </select>
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="chevron-down" class="lucide lucide-chevron-down w-3.5 h-3.5 text-ink-muted48 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"><path d="m6 9 6 6 6-6"></path></svg>
+          </div>
+          <button class="inline-flex items-center gap-1.5 px-3.5 h-9 rounded-pill bg-white border border-borderLine-hairline text-ink text-xs font-medium hover:bg-surface-pearl">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="download" class="lucide lucide-download w-3.5 h-3.5 text-ink-muted48"><path d="M12 15V3"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path></svg> Export CSV
+          </button>
+          <button class="inline-flex items-center gap-1.5 px-4 h-9 rounded-pill bg-brand text-white text-xs font-semibold hover:bg-brand-focus">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="plus" class="lucide lucide-plus w-3.5 h-3.5"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg> Add Expense
+          </button>
+        </div>
+      </div>
+
+      <!-- AlertBanner Specimens -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3 pt-4">
+        <div class="flex items-center gap-2.5 px-3.5 py-2.5 rounded-pill bg-semantic-successBg border border-[#bbf7d0] text-xs text-[#166534]">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="check-circle-2" class="lucide lucide-check-circle-2 w-4 h-4 text-semantic-success shrink-0"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg>
+          <span class="font-medium truncate"><strong>Settled:</strong> Net balance of $215.40 cleared.</span>
+        </div>
+        <div class="flex items-center gap-2.5 px-3.5 py-2.5 rounded-pill bg-semantic-warningBg border border-[#fde68a] text-xs text-[#9a3412]">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="alert-triangle" class="lucide lucide-alert-triangle w-4 h-4 text-semantic-warning shrink-0"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>
+          <span class="font-medium truncate"><strong>Notice:</strong> 48 hours prior to cycle close.</span>
+        </div>
+        <div class="flex items-center gap-2.5 px-3.5 py-2.5 rounded-pill bg-semantic-dangerBg border border-[#fecaca] text-xs text-[#991b1b]">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="alert-octagon" class="lucide lucide-alert-octagon w-4 h-4 text-semantic-danger shrink-0"><path d="M12 16h.01"></path><path d="M12 8v4"></path><path d="M15.312 2a2 2 0 0 1 1.414.586l4.688 4.688A2 2 0 0 1 22 8.688v6.624a2 2 0 0 1-.586 1.414l-4.688 4.688a2 2 0 0 1-1.414.586H8.688a2 2 0 0 1-1.414-.586l-4.688-4.688A2 2 0 0 1 2 15.312V8.688a2 2 0 0 1 .586-1.414l4.688-4.688A2 2 0 0 1 8.688 2z"></path></svg>
+          <span class="font-medium truncate"><strong>Action Required:</strong> Unsettled balance overdue.</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Table & Pagination Specimen (8 Columns, No Checkboxes) -->
+    <div class="bg-white rounded-card border border-borderLine-hairline overflow-hidden">
+      <div class="p-5 border-b border-borderLine-hairline flex items-center justify-between">
+        <div>
+          <h3 class="text-sm font-semibold text-ink">Table &amp; Pagination Specimen (8 Columns)</h3>
+          <p class="text-xs text-ink-muted48">Full column alignment, tabular numbers, status pills, and action dock</p>
+        </div>
+        <span class="text-xs font-mono text-ink-muted48">Border radius: 14px outer table frame</span>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-left border-collapse text-xs">
+          <thead>
+            <tr class="bg-surface-pearl border-b border-borderLine-hairline text-ink-muted48 font-medium">
+              <th class="py-3 px-4 font-mono uppercase text-[11px]">DATE</th>
+              <th class="py-3 px-4 font-mono uppercase text-[11px]">DESCRIPTION &amp; MERCHANT</th>
+              <th class="py-3 px-4 font-mono uppercase text-[11px]">CATEGORY</th>
+              <th class="py-3 px-4 font-mono uppercase text-[11px]">PAID BY</th>
+              <th class="py-3 px-4 font-mono uppercase text-[11px]">SPLIT</th>
+              <th class="py-3 px-4 font-mono uppercase text-[11px] text-right">YOUR SHARE</th>
+              <th class="py-3 px-4 font-mono uppercase text-[11px] text-center">STATUS</th>
+              <th class="py-3 px-4 font-mono uppercase text-[11px] text-right">ACTION</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-borderLine-divider text-ink">
+            <tr class="hover:bg-surface-pearl transition-colors">
+              <td class="py-3 px-4 text-ink-muted48 font-mono">Nov 28, 2026</td>
+              <td class="py-3 px-4">
+                <span class="font-semibold block text-ink">Trader Joe's Provisions</span>
+                <span class="text-[11px] text-ink-muted48">Apt 4B Shared</span>
+              </td>
+              <td class="py-3 px-4">
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-[#f5f5f7] text-ink-muted80 border border-borderLine-hairline">
+                  <span class="w-1.5 h-1.5 rounded-full bg-blue-500"></span> Groceries
+                </span>
+              </td>
+              <td class="py-3 px-4">
+                <div class="flex items-center gap-2">
+                  <div class="w-6 h-6 rounded-full bg-brand text-white flex items-center justify-center text-[10px] font-semibold">JD</div>
+                  <span class="font-medium">You</span>
+                </div>
+              </td>
+              <td class="py-3 px-4 text-ink-muted80">Equal (3)</td>
+              <td class="py-3 px-4 text-right font-semibold text-semantic-success tabular-nums">+$62.40</td>
+              <td class="py-3 px-4 text-center">
+                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  Settled
+                </span>
+              </td>
+              <td class="py-3 px-4 text-right">
+                <button class="p-1 rounded-full hover:bg-surface-canvas text-ink-muted48 hover:text-ink">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="more-vertical" class="lucide lucide-more-vertical w-4 h-4"><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>
+                </button>
+              </td>
+            </tr>
+
+            <tr class="hover:bg-surface-pearl transition-colors">
+              <td class="py-3 px-4 text-ink-muted48 font-mono">Nov 27, 2026</td>
+              <td class="py-3 px-4">
+                <span class="font-semibold block text-ink">ConEdison High-Speed Fiber</span>
+                <span class="text-[11px] text-ink-muted48">Apt 4B Shared</span>
+              </td>
+              <td class="py-3 px-4">
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-[#f5f5f7] text-ink-muted80 border border-borderLine-hairline">
+                  <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Utilities
+                </span>
+              </td>
+              <td class="py-3 px-4">
+                <div class="flex items-center gap-2">
+                  <div class="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[10px] font-semibold">MK</div>
+                  <span class="font-medium">Marcus</span>
+                </div>
+              </td>
+              <td class="py-3 px-4 text-ink-muted80">Equal (3)</td>
+              <td class="py-3 px-4 text-right font-semibold text-semantic-danger tabular-nums">-$46.67</td>
+              <td class="py-3 px-4 text-center">
+                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                  Pending
+                </span>
+              </td>
+              <td class="py-3 px-4 text-right">
+                <button class="p-1 rounded-full hover:bg-surface-canvas text-ink-muted48 hover:text-ink">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="more-vertical" class="lucide lucide-more-vertical w-4 h-4"><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>
+                </button>
+              </td>
+            </tr>
+
+            <tr class="hover:bg-surface-pearl transition-colors">
+              <td class="py-3 px-4 text-ink-muted48 font-mono">Nov 25, 2026</td>
+              <td class="py-3 px-4">
+                <span class="font-semibold block text-ink">Nobu Downtown Omakase</span>
+                <span class="text-[11px] text-ink-muted48">Weekend Cabin Crew</span>
+              </td>
+              <td class="py-3 px-4">
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-[#f5f5f7] text-ink-muted80 border border-borderLine-hairline">
+                  <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span> Dining
+                </span>
+              </td>
+              <td class="py-3 px-4">
+                <div class="flex items-center gap-2">
+                  <div class="w-6 h-6 rounded-full bg-amber-600 text-white flex items-center justify-center text-[10px] font-semibold">SC</div>
+                  <span class="font-medium">Sarah</span>
+                </div>
+              </td>
+              <td class="py-3 px-4 text-ink-muted80">Exact Shares</td>
+              <td class="py-3 px-4 text-right font-semibold text-semantic-danger tabular-nums">-$145.40</td>
+              <td class="py-3 px-4 text-center">
+                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-50 text-red-700 border border-red-200">
+                  Action
+                </span>
+              </td>
+              <td class="py-3 px-4 text-right">
+                <button class="p-1 rounded-full hover:bg-surface-canvas text-ink-muted48 hover:text-ink">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="more-vertical" class="lucide lucide-more-vertical w-4 h-4"><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Pagination -->
+      <div class="p-4 border-t border-borderLine-hairline flex items-center justify-between text-xs text-ink-muted48">
+        <span>Showing 1-3 of 42 itemized expenses</span>
+        <div class="flex items-center gap-1">
+          <button class="w-8 h-8 rounded-full border border-borderLine-hairline flex items-center justify-center hover:bg-surface-pearl text-ink-muted48">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="chevron-left" class="lucide lucide-chevron-left w-4 h-4"><path d="m15 18-6-6 6-6"></path></svg>
+          </button>
+          <button class="w-8 h-8 rounded-full bg-brand text-white font-semibold flex items-center justify-center">
+            1
+          </button>
+          <button class="w-8 h-8 rounded-full border border-borderLine-hairline flex items-center justify-center hover:bg-surface-pearl text-ink">
+            2
+          </button>
+          <button class="w-8 h-8 rounded-full border border-borderLine-hairline flex items-center justify-center hover:bg-surface-pearl text-ink">
+            3
+          </button>
+          <button class="w-8 h-8 rounded-full border border-borderLine-hairline flex items-center justify-center hover:bg-surface-pearl text-ink-muted48">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="chevron-right" class="lucide lucide-chevron-right w-4 h-4"><path d="m9 18 6-6-6-6"></path></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2-Col State Specimens: Empty State & Loading Skeleton -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      
+      <!-- Empty State Specimen -->
+      <div class="bg-white rounded-card border border-borderLine-hairline p-8 text-center flex flex-col items-center justify-center space-y-3">
+        <div class="w-11 h-11 rounded-full bg-[#f0f7ff] border border-[#d0e5fc] flex items-center justify-center text-brand">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="inbox" class="lucide lucide-inbox w-5 h-5 stroke-[1.75]"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path></svg>
+        </div>
+        <div>
+          <h4 class="text-sm font-semibold text-ink">No expenses logged for November 2026</h4>
+          <p class="text-xs text-ink-muted48 max-w-sm mt-1">
+            Log a shared bill or adjust your filters to see transactions here.
+          </p>
+        </div>
+        <div class="pt-2">
+          <button class="inline-flex items-center gap-1.5 px-4 h-10 rounded-pill bg-brand text-white text-xs font-semibold hover:bg-brand-focus transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="plus" class="lucide lucide-plus w-4 h-4"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg> Add Expense
+          </button>
+        </div>
+      </div>
+
+      <!-- Loading Skeleton Specimen -->
+      <div class="bg-white rounded-card border border-borderLine-hairline p-6 space-y-4">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-semibold text-ink">Loading Skeleton Specimen</span>
+          <span class="text-[11px] font-mono text-ink-muted48">Shimmer active</span>
+        </div>
+
+        <!-- Skeleton KPI snippet -->
+        <div class="p-4 rounded-xl bg-surface-pearl border border-borderLine-hairline space-y-2.5">
+          <div class="skeleton-box h-3 w-28 rounded-full"></div>
+          <div class="skeleton-box h-7 w-40 rounded-full"></div>
+          <div class="skeleton-box h-3 w-20 rounded-full"></div>
+        </div>
+
+        <!-- Skeleton Table Row snippets -->
+        <div class="space-y-2 pt-1">
+          <div class="flex items-center gap-3 p-2.5 rounded-lg bg-surface-pearl border border-borderLine-divider">
+            <div class="skeleton-box w-6 h-6 rounded-full shrink-0"></div>
+            <div class="skeleton-box h-3.5 flex-1 rounded-full"></div>
+            <div class="skeleton-box h-3.5 w-16 rounded-full"></div>
+          </div>
+          <div class="flex items-center gap-3 p-2.5 rounded-lg bg-surface-pearl border border-borderLine-divider">
+            <div class="skeleton-box w-6 h-6 rounded-full shrink-0"></div>
+            <div class="skeleton-box h-3.5 flex-1 rounded-full"></div>
+            <div class="skeleton-box h-3.5 w-16 rounded-full"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== SECTION 05: OVERLAYS & FEEDBACK ==================== -->
+  <section class="space-y-4">
+    <div class="flex items-center justify-between px-1">
+      <h2 class="text-xs font-semibold uppercase tracking-wider text-ink-muted48">
+        SECTION 05 · OVERLAYS &amp; FEEDBACK (MODAL, POPUP, POPOVER, DRAWER &amp; TOAST)
+      </h2>
+      <span class="text-xs text-ink-muted48 font-mono">Elevation &amp; Transient Surfaces</span>
+    </div>
+
+    <!-- 4-Col Grid of Elevated Overlays -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 items-start">
+      
+      <!-- 1. Modal Sheet (Dialog) -->
+      <div class="bg-white rounded-[20px] border border-borderLine-hairline p-5 shadow-overlay space-y-4">
+        <div class="flex items-center justify-between pb-3 border-b border-borderLine-divider">
+          <div>
+            
+            <h4 class="text-sm font-semibold text-ink">Add Expense</h4>
+          </div>
+          <button class="w-7 h-7 rounded-full bg-surface-pearl flex items-center justify-center text-ink-muted48 hover:text-ink">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="x" class="lucide lucide-x w-4 h-4"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+          </button>
+        </div>
+
+        <div class="space-y-2.5 text-xs">
+          <div>
+            <label class="block text-ink-muted80 font-medium mb-1">Description</label>
+            <input type="text" placeholder="e.g. Whole Foods Groceries" class="w-full h-9 px-3.5 rounded-pill border border-borderLine-hairline text-xs focus:outline-none focus:border-brand">
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block text-ink-muted80 font-medium mb-1">Amount</label>
+              <input type="text" value="$ 0.00" class="w-full h-9 px-3.5 rounded-pill border border-borderLine-hairline text-xs font-mono focus:outline-none focus:border-brand">
+            </div>
+            <div>
+              <label class="block text-ink-muted80 font-medium mb-1">Category</label>
+              <select class="w-full h-9 px-3 rounded-pill border border-borderLine-hairline text-xs bg-white focus:outline-none">
+                <option>Groceries</option>
+                <option>Utilities</option>
+              </select>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block text-ink-muted80 font-medium mb-1">Paid By</label>
+              <select class="w-full h-9 px-3 rounded-pill border border-borderLine-hairline text-xs bg-white focus:outline-none">
+                <option>You</option>
+                <option>Marcus</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-ink-muted80 font-medium mb-1">Split Type</label>
+              <select class="w-full h-9 px-3 rounded-pill border border-borderLine-hairline text-xs bg-white focus:outline-none">
+                <option>Equal (3)</option>
+                <option>Custom</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-end gap-2 pt-2 border-t border-borderLine-divider">
+          <button class="px-3.5 h-8 rounded-pill text-xs font-medium text-ink hover:bg-surface-pearl">Cancel</button>
+          <button class="px-4 h-8 rounded-pill bg-brand text-white text-xs font-semibold hover:bg-brand-focus">Save Expense</button>
+        </div>
+      </div>
+
+      <!-- 2. Confirmation Popup (ConfirmDialog) -->
+      <div class="bg-white rounded-card border border-borderLine-hairline p-5 shadow-overlay space-y-4">
+        <div class="w-10 h-10 rounded-full bg-semantic-dangerBg flex items-center justify-center text-semantic-danger">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="alert-triangle" class="lucide lucide-alert-triangle w-5 h-5"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>
+        </div>
+        <div>
+          <h4 class="text-sm font-semibold text-ink">Delete Account?</h4>
+          <p class="text-xs text-ink-muted48 mt-1 leading-relaxed">
+            Permanently delete your LedgerSplit account and all audit logs. This action cannot be undone.
+          </p>
+        </div>
+        <div class="flex items-center justify-end gap-2 pt-2 border-t border-borderLine-divider">
+          <button class="px-3.5 h-8 rounded-pill text-xs font-medium text-ink hover:bg-surface-pearl border border-borderLine-hairline">Cancel</button>
+          <button class="px-4 h-8 rounded-pill bg-semantic-danger text-white text-xs font-semibold hover:bg-red-700">Delete Account</button>
+        </div>
+      </div>
+
+      <!-- 3. Popover & Action Menus -->
+      <div class="space-y-4">
+        <!-- Row Action Menu -->
+        <div class="bg-white rounded-2xl border border-borderLine-hairline p-2 shadow-overlay text-xs space-y-1">
+          <div class="px-2.5 py-1 text-[10px] font-mono uppercase text-ink-muted48">ROW ACTION DOCK</div>
+          <button class="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-surface-pearl text-ink font-medium text-left">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="eye" class="lucide lucide-eye w-3.5 h-3.5 text-ink-muted48"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"></path><circle cx="12" cy="12" r="3"></circle></svg> View Details
+          </button>
+          <button class="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-surface-pearl text-ink font-medium text-left">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="edit-3" class="lucide lucide-edit-3 w-3.5 h-3.5 text-ink-muted48"><path d="M12 20h9"></path><path d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838a.5.5 0 0 1-.62-.62l.838-2.872a2 2 0 0 1 .506-.854z"></path></svg> Edit Expense
+          </button>
+          <div class="h-px bg-borderLine-divider my-1"></div>
+          <button class="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-red-50 text-semantic-danger font-medium text-left">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="trash-2" class="lucide lucide-trash-2 w-3.5 h-3.5"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" x2="10" y1="11" y2="17"></line><line x1="14" x2="14" y1="11" y2="17"></line></svg> Delete Expense
+          </button>
+        </div>
+
+        <!-- Notifications Popover -->
+        <div class="bg-white rounded-2xl border border-borderLine-hairline p-3.5 shadow-overlay text-xs space-y-2">
+          <div class="flex items-center justify-between pb-1.5 border-b border-borderLine-divider">
+            <span class="font-semibold text-ink">Notifications</span>
+            <button class="text-[10px] font-medium text-brand hover:underline">Mark all read</button>
+          </div>
+          <div class="space-y-2">
+            <div class="flex items-start gap-2">
+              <span class="w-2 h-2 rounded-full bg-brand mt-1 shrink-0"></span>
+              <div>
+                <p class="text-ink font-medium leading-tight">Marcus King settled $215.40</p>
+                <p class="text-[10px] text-ink-muted48">2h ago · Apartment 4B</p>
+              </div>
+            </div>
+            <div class="flex items-start gap-2">
+              <span class="w-2 h-2 rounded-full bg-amber-500 mt-1 shrink-0"></span>
+              <div>
+                <p class="text-ink font-medium leading-tight">ConEdison bill due in 48h</p>
+                <p class="text-[10px] text-ink-muted48">5h ago · Utilities</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4. Slide-Over Drawer & Toast Notifications -->
+      <div class="space-y-4">
+        <!-- Audit Log Drawer Specimen -->
+        <div class="bg-white rounded-[20px] border border-borderLine-hairline p-4 shadow-overlay space-y-3">
+          <div class="flex items-center justify-between pb-2 border-b border-borderLine-divider">
+            <div class="flex items-center gap-1.5">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="history" class="lucide lucide-history w-4 h-4 text-brand"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path><path d="M12 7v5l4 2"></path></svg>
+              <h4 class="text-xs font-semibold text-ink">Audit Log Drawer</h4>
+            </div>
+            <span class="text-[10px] font-mono text-ink-muted48">Right Docked</span>
+          </div>
+          <div class="space-y-2 text-xs">
+            <div class="p-2.5 rounded-xl bg-surface-pearl border border-borderLine-hairline">
+              <span class="text-[10px] text-ink-muted48 font-mono block">10:42 AM · Marcus</span>
+              <p class="text-ink font-medium text-[11px] mt-0.5">Ratio adjusted to 33.3% equal consensus</p>
+            </div>
+            <div class="p-2.5 rounded-xl bg-surface-pearl border border-borderLine-hairline">
+              <span class="text-[10px] text-ink-muted48 font-mono block">09:15 AM · System</span>
+              <p class="text-ink font-medium text-[11px] mt-0.5">Monthly billing cycle opened for Nov</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Stacked Toast Notifications -->
+        <div class="space-y-2">
+          <div class="flex items-center gap-2 px-3 py-2 rounded-pill bg-white border border-borderLine-hairline shadow-overlay text-xs text-ink">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="check-circle" class="lucide lucide-check-circle w-4 h-4 text-semantic-success stroke-[2]"><path d="M21.801 10A10 10 0 1 1 17 3.335"></path><path d="m9 11 3 3L22 4"></path></svg>
+            <span class="font-medium text-xs">Settings saved</span>
+          </div>
+          <div class="flex items-center gap-2 px-3 py-2 rounded-pill bg-white border border-borderLine-hairline shadow-overlay text-xs text-ink">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="alert-circle" class="lucide lucide-alert-circle w-4 h-4 text-semantic-danger stroke-[2]"><circle cx="12" cy="12" r="10"></circle><line x1="12" x2="12" y1="8" y2="12"></line><line x1="12" x2="12.01" y1="16" y2="16"></line></svg>
+            <span class="font-medium text-xs">Unable to sync</span>
+          </div>
+          <div class="flex items-center gap-2 px-3 py-2 rounded-pill bg-white border border-borderLine-hairline shadow-overlay text-xs text-ink">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="info" class="lucide lucide-info w-4 h-4 text-brand stroke-[2]"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg>
+            <span class="font-medium text-xs">Invite link copied</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- Lucide Script Initialization -->
+  <script>
+    lucide.createIcons();
+  </script>
+
+
+
+
+</body></html>
