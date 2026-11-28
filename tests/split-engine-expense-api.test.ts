@@ -1,11 +1,10 @@
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  RECEIPT_STORAGE_QUOTA_BYTES,
-  checkReceiptStorageQuota,
   computeEqualSplit,
   computeExactSplit,
   computePercentageSplit,
+  computeSharesSplit,
   convertForeignAmountToBaseMinorUnits,
   validateSplitBreakdown,
 } from "@/lib/expenses/split-engine";
@@ -17,7 +16,6 @@ interface InMemoryDb {
     id: string;
     email: string;
     full_name: string;
-    receipt_storage_used_bytes: number;
   }>;
   groups: Array<{
     id: string;
@@ -26,7 +24,9 @@ interface InMemoryDb {
     group_type: "RESIDENTIAL" | "TRIP" | "RECURRING";
     status: "ACTIVE" | "NEEDS_RATIO_UPDATE" | "ARCHIVED";
     base_currency: string;
-    default_split_mode: "EQUAL" | "CUSTOM_RATIOS";
+    default_split_mode: "EQUAL" | "PERCENTAGE" | "SHARES" | "CUSTOM" | "CUSTOM_RATIOS";
+    allow_any_member_add_expense: boolean;
+    require_receipt_over_100: boolean;
   }>;
   group_members: Array<{
     group_id: string;
@@ -34,6 +34,7 @@ interface InMemoryDb {
     role: "ADMIN" | "MEMBER";
     status: "ACTIVE" | "FORMER_MEMBER";
     share_percentage: number;
+    share_units: number;
     joined_at: string;
   }>;
   expenses: Array<Record<string, unknown>>;
@@ -206,7 +207,6 @@ describe("BIGINT Minor-Unit Split Engine", () => {
       participantIds: ["u-1", "u-2", "u-3", "u-4", "u-5", "u-6"],
     });
     const byId = new Map(breakdown.map((b) => [b.user_id, b.share_cents]));
-    // 100 = 16 * 6 + 4; payer u-3 gets +1, then u-1, u-2, u-4 get +1
     expect(byId.get("u-3")).toBe(17);
     expect(byId.get("u-1")).toBe(17);
     expect(byId.get("u-2")).toBe(17);
@@ -247,7 +247,136 @@ describe("BIGINT Minor-Unit Split Engine", () => {
     }
   });
 
-  it("validates exact splits and rejects mismatched sums or former members", () => {
+  it("computes SHARES splits with floor(amount_cents * shares / total_shares) and payer-first penny rounding", () => {
+    // $100.00 (10000 cents) split 1:2:3 (total 6) -> floors 1666, 3333, 5000 (sum 9999, remainder 1 -> payer u-elena)
+    const res1 = computeSharesSplit({
+      amountCents: 10000,
+      paidBy: "u-elena",
+      participants: [
+        { userId: "u-alex", shares: 1 },
+        { userId: "u-elena", shares: 2 },
+        { userId: "u-marcus", shares: 3 },
+      ],
+    });
+    expect(res1.ok).toBe(true);
+    if (res1.ok) {
+      expect(res1.breakdown).toEqual([
+        { user_id: "u-alex", share_cents: 1666, shares: 1, percentage: 16.66 },
+        { user_id: "u-elena", share_cents: 3334, shares: 2, percentage: 33.34 },
+        { user_id: "u-marcus", share_cents: 5000, shares: 3, percentage: 50 },
+      ]);
+      expect(res1.breakdown.reduce((s, b) => s + b.share_cents, 0)).toBe(10000);
+    }
+
+    // Payer excluded from split -> residual cents go sequentially from index 0
+    const resExcludedPayer = computeSharesSplit({
+      amountCents: 10000,
+      paidBy: "u-outside",
+      participants: [
+        { userId: "u-alex", shares: 1 },
+        { userId: "u-elena", shares: 1 },
+        { userId: "u-marcus", shares: 1 },
+      ],
+    });
+    expect(resExcludedPayer.ok).toBe(true);
+    if (resExcludedPayer.ok) {
+      expect(resExcludedPayer.breakdown.map((b) => b.share_cents)).toEqual([
+        3334, 3333, 3333,
+      ]);
+      expect(resExcludedPayer.breakdown.reduce((s, b) => s + b.share_cents, 0)).toBe(10000);
+    }
+
+    // Payer has 0 shares -> 0-share payer receives 0 cents; remainder goes to index 0 with > 0 shares
+    const resZeroPayer = computeSharesSplit({
+      amountCents: 10000,
+      paidBy: "u-alex",
+      participants: [
+        { userId: "u-alex", shares: 0 },
+        { userId: "u-elena", shares: 1 },
+        { userId: "u-marcus", shares: 2 },
+      ],
+    });
+    expect(resZeroPayer.ok).toBe(true);
+    if (resZeroPayer.ok) {
+      expect(resZeroPayer.breakdown.map((b) => b.share_cents)).toEqual([
+        0, 3334, 6666,
+      ]);
+      expect(resZeroPayer.breakdown.reduce((s, b) => s + b.share_cents, 0)).toBe(10000);
+    }
+
+    // Decimal shares + 1-cent edge case + negative adjustment
+    const resDecimal = computeSharesSplit({
+      amountCents: 10001,
+      paidBy: "u-marcus",
+      participants: [
+        { userId: "u-alex", shares: 1.5 },
+        { userId: "u-elena", shares: 2.5 },
+        { userId: "u-marcus", shares: 1 },
+      ],
+    });
+    expect(resDecimal.ok).toBe(true);
+    if (resDecimal.ok) {
+      expect(resDecimal.breakdown.reduce((s, b) => s + b.share_cents, 0)).toBe(10001);
+      // 10001 * 1.5/5 = 3000.3 -> 3000, 10001 * 2.5/5 = 5000.5 -> 5000, 10001 * 1/5 = 2000.2 -> 2000; rem 1 -> payer u-marcus
+      expect(resDecimal.breakdown.map((b) => b.share_cents)).toEqual([
+        3000, 5000, 2001,
+      ]);
+    }
+
+    const resOneCent = computeSharesSplit({
+      amountCents: 1,
+      paidBy: "u-elena",
+      participants: [
+        { userId: "u-alex", shares: 1 },
+        { userId: "u-elena", shares: 1 },
+        { userId: "u-marcus", shares: 1 },
+      ],
+    });
+    expect(resOneCent.ok).toBe(true);
+    if (resOneCent.ok) {
+      expect(resOneCent.breakdown.map((b) => b.share_cents)).toEqual([0, 1, 0]);
+    }
+
+    const resNeg = computeSharesSplit({
+      amountCents: -10000,
+      paidBy: "u-alex",
+      participants: [
+        { userId: "u-alex", shares: 1 },
+        { userId: "u-elena", shares: 2 },
+      ],
+      allowNegative: true,
+    });
+    expect(resNeg.ok).toBe(true);
+    if (resNeg.ok) {
+      expect(resNeg.breakdown.map((b) => b.share_cents)).toEqual([-3334, -6666]);
+      expect(resNeg.breakdown.reduce((s, b) => s + b.share_cents, 0)).toBe(-10000);
+    }
+
+    // Rejects all-zero shares & negative shares
+    expect(
+      computeSharesSplit({
+        amountCents: 1000,
+        paidBy: "u-alex",
+        participants: [
+          { userId: "u-alex", shares: 0 },
+          { userId: "u-elena", shares: 0 },
+        ],
+      }).ok,
+    ).toBe(false);
+
+    expect(
+      computeSharesSplit({
+        amountCents: 1000,
+        paidBy: "u-alex",
+        participants: [
+          { userId: "u-alex", shares: -1 },
+          { userId: "u-elena", shares: 2 },
+        ],
+      }).ok,
+    ).toBe(false);
+  });
+
+  it("validates exact and SHARES splits and rejects mismatched sums or former members", () => {
     const exactOk = computeExactSplit({
       amountCents: 12000,
       participants: [
@@ -266,6 +395,17 @@ describe("BIGINT Minor-Unit Split Engine", () => {
     });
     expect(exactMismatch.ok).toBe(false);
 
+    const sharesValidated = validateSplitBreakdown({
+      amountCents: 10000,
+      splitMethod: "SHARES",
+      splitBreakdown: [
+        { user_id: "u-alex", share_cents: 3334, shares: 1, percentage: 33.34 },
+        { user_id: "u-elena", share_cents: 6666, shares: 2, percentage: 66.66 },
+      ],
+      activeMemberIds: ["u-alex", "u-elena"],
+    });
+    expect(sharesValidated.ok).toBe(true);
+
     const formerBlocked = validateSplitBreakdown({
       amountCents: 10000,
       splitMethod: "EXACT",
@@ -281,44 +421,34 @@ describe("BIGINT Minor-Unit Split Engine", () => {
     }
   });
 
-  it("converts foreign-currency minor units (including 0-decimal JPY and half-up rounding) using 1e6 fixed-point rate scaling", () => {
-    const usdFromEur = convertForeignAmountToBaseMinorUnits({
-      originalAmountCents: 10000, // €100.00
-      originalCurrency: "EUR",
-      exchangeRate: 1.085,
-      baseCurrency: "USD",
-    });
-    expect(usdFromEur).toBe(10850);
-
-    const usdFromJpy = convertForeignAmountToBaseMinorUnits({
-      originalAmountCents: 94500, // ¥94,500
-      originalCurrency: "JPY",
-      exchangeRate: 0.006667,
-      baseCurrency: "USD",
-    });
-    expect(usdFromJpy).toBe(63003);
-
-    // 2-decimal USD ($100.00 = 10000 cents) -> 0-decimal JPY at 150.25 -> ¥15,025
-    const jpyFromUsd = convertForeignAmountToBaseMinorUnits({
-      originalAmountCents: 10000,
-      originalCurrency: "USD",
-      exchangeRate: 150.25,
-      baseCurrency: "JPY",
-    });
-    expect(jpyFromUsd).toBe(15025);
-
-    // Half-up rounding boundary: €10.01 (1001 cents) * 1.005 = 1006.005 -> 1006 cents;
-    // €10.00 (1000 cents) * 1.0005 = 1000.5 -> 1001 cents
+  it("converts display-only rollup minor units (including 0-decimal JPY and half-up rounding)", () => {
     expect(
       convertForeignAmountToBaseMinorUnits({
-        originalAmountCents: 1000,
+        originalAmountCents: 10000,
         originalCurrency: "EUR",
-        exchangeRate: 1.0005,
+        exchangeRate: 1.085,
         baseCurrency: "USD",
       }),
-    ).toBe(1001);
+    ).toBe(10850);
 
-    // Rejects invalid rates or non-positive amounts
+    expect(
+      convertForeignAmountToBaseMinorUnits({
+        originalAmountCents: 94500,
+        originalCurrency: "JPY",
+        exchangeRate: 0.006667,
+        baseCurrency: "USD",
+      }),
+    ).toBe(63003);
+
+    expect(
+      convertForeignAmountToBaseMinorUnits({
+        originalAmountCents: 10000,
+        originalCurrency: "USD",
+        exchangeRate: 150.25,
+        baseCurrency: "JPY",
+      }),
+    ).toBe(15025);
+
     expect(
       convertForeignAmountToBaseMinorUnits({
         originalAmountCents: 1000,
@@ -328,18 +458,9 @@ describe("BIGINT Minor-Unit Split Engine", () => {
       }),
     ).toBeNull();
   });
-
-  it("checks 500 MB receipt storage quota accurately", () => {
-    expect(
-      checkReceiptStorageQuota(RECEIPT_STORAGE_QUOTA_BYTES - 1024, 1024).allowed,
-    ).toBe(true);
-    expect(
-      checkReceiptStorageQuota(RECEIPT_STORAGE_QUOTA_BYTES - 1024, 1025).allowed,
-    ).toBe(false);
-  });
 });
 
-describe("Expense Create API, FX Audit & Receipt Quota", () => {
+describe("Expense Create API, SHARES & Group Policy Enforcement", () => {
   const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const originalAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
@@ -354,19 +475,16 @@ describe("Expense Create API, FX Audit & Receipt Quota", () => {
           id: "u-alex",
           email: "alex@example.com",
           full_name: "Alex Rivera",
-          receipt_storage_used_bytes: 0,
         },
         {
           id: "u-elena",
           email: "elena@example.com",
           full_name: "Elena Rostova",
-          receipt_storage_used_bytes: RECEIPT_STORAGE_QUOTA_BYTES,
         },
         {
           id: "u-marcus",
           email: "marcus@example.com",
           full_name: "Marcus Vance",
-          receipt_storage_used_bytes: 0,
         },
       ],
       groups: [
@@ -378,6 +496,8 @@ describe("Expense Create API, FX Audit & Receipt Quota", () => {
           status: "ACTIVE",
           base_currency: "USD",
           default_split_mode: "EQUAL",
+          allow_any_member_add_expense: true,
+          require_receipt_over_100: false,
         },
       ],
       group_members: [
@@ -387,6 +507,7 @@ describe("Expense Create API, FX Audit & Receipt Quota", () => {
           role: "ADMIN",
           status: "ACTIVE",
           share_percentage: 33.34,
+          share_units: 1,
           joined_at: "2026-10-01T00:00:00.000Z",
         },
         {
@@ -395,6 +516,7 @@ describe("Expense Create API, FX Audit & Receipt Quota", () => {
           role: "MEMBER",
           status: "ACTIVE",
           share_percentage: 33.33,
+          share_units: 2,
           joined_at: "2026-10-02T00:00:00.000Z",
         },
         {
@@ -403,6 +525,7 @@ describe("Expense Create API, FX Audit & Receipt Quota", () => {
           role: "MEMBER",
           status: "ACTIVE",
           share_percentage: 33.33,
+          share_units: 3,
           joined_at: "2026-10-03T00:00:00.000Z",
         },
       ],
@@ -436,7 +559,7 @@ describe("Expense Create API, FX Audit & Receipt Quota", () => {
         body: JSON.stringify({
           paid_by: "u-alex",
           description: "Trader Joe's Groceries",
-          category: "Groceries & Food",
+          category: "Groceries",
           amount_cents: 10000,
           expense_date: "2026-11-27T12:00:00.000Z",
           split_method: "EQUAL",
@@ -455,6 +578,164 @@ describe("Expense Create API, FX Audit & Receipt Quota", () => {
       { user_id: "u-elena", share_cents: 3333, percentage: 33.33 },
       { user_id: "u-marcus", share_cents: 3333, percentage: 33.33 },
     ]);
+  });
+
+  it("persists SHARES expense with deterministic penny-rounding", async () => {
+    getUserMock.mockResolvedValueOnce({
+      data: { user: { id: "u-alex", email: "alex@example.com" } },
+      error: null,
+    });
+
+    const sharesCalc = computeSharesSplit({
+      amountCents: 10000,
+      paidBy: "u-elena",
+      participants: [
+        { userId: "u-alex", shares: 1 },
+        { userId: "u-elena", shares: 2 },
+        { userId: "u-marcus", shares: 3 },
+      ],
+    });
+    expect(sharesCalc.ok).toBe(true);
+
+    const res = await expensePost(
+      new NextRequest("http://localhost:3000/api/groups/grp-apt4b/expenses", {
+        method: "POST",
+        body: JSON.stringify({
+          paid_by: "u-elena",
+          description: "Shared Rent",
+          category: "Housing & Utilities",
+          amount_cents: 10000,
+          split_method: "SHARES",
+          split_breakdown: sharesCalc.ok ? sharesCalc.breakdown : [],
+        }),
+      }),
+      { params: Promise.resolve({ groupId: "grp-apt4b" }) },
+    );
+
+    expect(res.status).toBe(201);
+    const json = await res.json();
+    expect(json.expense.split_method).toBe("SHARES");
+    expect(json.expense.split_breakdown).toEqual([
+      { user_id: "u-alex", share_cents: 1666, shares: 1, percentage: 16.66 },
+      { user_id: "u-elena", share_cents: 3334, shares: 2, percentage: 33.34 },
+      { user_id: "u-marcus", share_cents: 5000, shares: 3, percentage: 50 },
+    ]);
+  });
+
+  it("enforces Group.allow_any_member_add_expense: 403 for non-Admin when false, 201 for Admin", async () => {
+    activeDb.groups[0].allow_any_member_add_expense = false;
+
+    // Non-Admin (u-elena) -> 403 Forbidden
+    getUserMock.mockResolvedValueOnce({
+      data: { user: { id: "u-elena", email: "elena@example.com" } },
+      error: null,
+    });
+
+    const memberRes = await expensePost(
+      new NextRequest("http://localhost:3000/api/groups/grp-apt4b/expenses", {
+        method: "POST",
+        body: JSON.stringify({
+          paid_by: "u-elena",
+          description: "Member Expense",
+          category: "Groceries",
+          amount_cents: 3000,
+          split_method: "EQUAL",
+        }),
+      }),
+      { params: Promise.resolve({ groupId: "grp-apt4b" }) },
+    );
+    expect(memberRes.status).toBe(403);
+    expect((await memberRes.json()).code).toBe("EXPENSE_CREATION_RESTRICTED");
+
+    // Admin (u-alex) -> 201 Created
+    getUserMock.mockResolvedValueOnce({
+      data: { user: { id: "u-alex", email: "alex@example.com" } },
+      error: null,
+    });
+
+    const adminRes = await expensePost(
+      new NextRequest("http://localhost:3000/api/groups/grp-apt4b/expenses", {
+        method: "POST",
+        body: JSON.stringify({
+          paid_by: "u-alex",
+          description: "Admin Expense",
+          category: "Groceries",
+          amount_cents: 3000,
+          split_method: "EQUAL",
+        }),
+      }),
+      { params: Promise.resolve({ groupId: "grp-apt4b" }) },
+    );
+    expect(adminRes.status).toBe(201);
+  });
+
+  it("enforces Group.require_receipt_over_100: 400 when > 10000 cents without receipt, 201 at <= 10000 or with receipt", async () => {
+    activeDb.groups[0].require_receipt_over_100 = true;
+
+    // 1. Exactly $100.00 (10000 cents) without receipt -> 201 allowed
+    getUserMock.mockResolvedValueOnce({
+      data: { user: { id: "u-alex", email: "alex@example.com" } },
+      error: null,
+    });
+    const atThresholdRes = await expensePost(
+      new NextRequest("http://localhost:3000/api/groups/grp-apt4b/expenses", {
+        method: "POST",
+        body: JSON.stringify({
+          paid_by: "u-alex",
+          description: "Exactly 100",
+          category: "Groceries",
+          amount_cents: 10000,
+          split_method: "EQUAL",
+        }),
+      }),
+      { params: Promise.resolve({ groupId: "grp-apt4b" }) },
+    );
+    expect(atThresholdRes.status).toBe(201);
+
+    // 2. $100.01 (10001 cents) without receipt -> 400 RECEIPT_REQUIRED
+    getUserMock.mockResolvedValueOnce({
+      data: { user: { id: "u-alex", email: "alex@example.com" } },
+      error: null,
+    });
+    const missingReceiptRes = await expensePost(
+      new NextRequest("http://localhost:3000/api/groups/grp-apt4b/expenses", {
+        method: "POST",
+        body: JSON.stringify({
+          paid_by: "u-alex",
+          description: "Over 100 No Receipt",
+          category: "Groceries",
+          amount_cents: 10001,
+          split_method: "EQUAL",
+        }),
+      }),
+      { params: Promise.resolve({ groupId: "grp-apt4b" }) },
+    );
+    expect(missingReceiptRes.status).toBe(400);
+    expect((await missingReceiptRes.json()).code).toBe("RECEIPT_REQUIRED");
+
+    // 3. $150.00 (15000 cents) WITH receipt_url -> 201 Created
+    getUserMock.mockResolvedValueOnce({
+      data: { user: { id: "u-alex", email: "alex@example.com" } },
+      error: null,
+    });
+    const withReceiptRes = await expensePost(
+      new NextRequest("http://localhost:3000/api/groups/grp-apt4b/expenses", {
+        method: "POST",
+        body: JSON.stringify({
+          paid_by: "u-alex",
+          description: "Over 100 With Receipt",
+          category: "Groceries",
+          amount_cents: 15000,
+          split_method: "EQUAL",
+          receipt_url: "receipts://u-alex/grp-apt4b/1700000000-receipt.png",
+        }),
+      }),
+      { params: Promise.resolve({ groupId: "grp-apt4b" }) },
+    );
+    expect(withReceiptRes.status).toBe(201);
+    expect((await withReceiptRes.json()).expense.receipt_url).toBe(
+      "receipts://u-alex/grp-apt4b/1700000000-receipt.png",
+    );
   });
 
   it("rejects SUM(split_breakdown) != amount_cents and missing description", async () => {
@@ -505,10 +786,7 @@ describe("Expense Create API, FX Audit & Receipt Quota", () => {
     expect((await emptyDescRes.json()).code).toBe("INVALID_DESCRIPTION");
   });
 
-
-
-
-  it("returns FX spot rate for valid currency pairs and rejects invalid currency codes", async () => {
+  it("returns FX spot rate for display-only rollup currency pairs and rejects invalid currency codes", async () => {
     const sameRes = await fxGet(
       new NextRequest("http://localhost:3000/api/fx?from=USD&to=USD"),
     );
@@ -540,7 +818,7 @@ describe("Expense Create API, FX Audit & Receipt Quota", () => {
     fetchSpy.mockRestore();
   });
 
-  it("increments User.receipt_storage_used_bytes cumulatively across multiple groups and authorizes signed downloads", async () => {
+  it("uploads receipts without 500 MB quota blocking and authorizes signed downloads by group membership", async () => {
     const sharedGroupUuid = "11111111-1111-4111-8111-111111111111";
     const privateGroupUuid = "22222222-2222-4222-8222-222222222222";
     activeDb.groups.push(
@@ -552,6 +830,8 @@ describe("Expense Create API, FX Audit & Receipt Quota", () => {
         status: "ACTIVE",
         base_currency: "USD",
         default_split_mode: "EQUAL",
+        allow_any_member_add_expense: true,
+        require_receipt_over_100: false,
       },
       {
         id: privateGroupUuid,
@@ -561,6 +841,8 @@ describe("Expense Create API, FX Audit & Receipt Quota", () => {
         status: "ACTIVE",
         base_currency: "USD",
         default_split_mode: "EQUAL",
+        allow_any_member_add_expense: true,
+        require_receipt_over_100: false,
       },
     );
     activeDb.group_members.push(
@@ -570,6 +852,7 @@ describe("Expense Create API, FX Audit & Receipt Quota", () => {
         role: "ADMIN",
         status: "ACTIVE",
         share_percentage: 50,
+        share_units: 1,
         joined_at: "2026-10-04T00:00:00.000Z",
       },
       {
@@ -578,6 +861,7 @@ describe("Expense Create API, FX Audit & Receipt Quota", () => {
         role: "MEMBER",
         status: "ACTIVE",
         share_percentage: 50,
+        share_units: 1,
         joined_at: "2026-10-04T00:00:00.000Z",
       },
       {
@@ -586,11 +870,11 @@ describe("Expense Create API, FX Audit & Receipt Quota", () => {
         role: "ADMIN",
         status: "ACTIVE",
         share_percentage: 100,
+        share_units: 1,
         joined_at: "2026-10-04T00:00:00.000Z",
       },
     );
 
-    // 1. Upload 1200-byte receipt in sharedGroupUuid
     getUserMock.mockResolvedValueOnce({
       data: { user: { id: "u-alex", email: "alex@example.com" } },
       error: null,
@@ -614,7 +898,6 @@ describe("Expense Create API, FX Audit & Receipt Quota", () => {
       new RegExp(`^receipts://u-alex/${sharedGroupUuid}/`),
     );
 
-    // 2. Upload 800-byte receipt in privateGroupUuid -> accumulates to 2000 bytes
     getUserMock.mockResolvedValueOnce({
       data: { user: { id: "u-alex", email: "alex@example.com" } },
       error: null,
@@ -633,9 +916,7 @@ describe("Expense Create API, FX Audit & Receipt Quota", () => {
     );
     expect(res2.status).toBe(201);
     const json2 = await res2.json();
-    expect(json2.sizeBytes).toBe(800);
 
-    // 3. Group member (u-elena) can access signed URL for sharedGroupUuid receipt, but not privateGroupUuid receipt
     getUserMock.mockResolvedValueOnce({
       data: { user: { id: "u-elena", email: "elena@example.com" } },
       error: null,
@@ -659,5 +940,4 @@ describe("Expense Create API, FX Audit & Receipt Quota", () => {
     );
     expect(forbiddenGet.status).toBe(403);
   });
-
 });

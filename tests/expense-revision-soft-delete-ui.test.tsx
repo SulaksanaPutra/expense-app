@@ -369,7 +369,7 @@ describe("Itemized Transactions Edit Mode (ExpenseRevision), Soft-Delete & Role 
       );
 
       const editDialog = screen.getByRole("dialog", { name: "Edit Expense" });
-      const amountInput = within(editDialog).getByLabelText(/Total Bill Amount/i);
+      const amountInput = within(editDialog).getByLabelText(/Amount/i);
       const descInput = within(editDialog).getByLabelText(/Description/i);
       expect(amountInput).toHaveValue("80.00");
       expect(descInput).toHaveValue("ConEd Electric Bill");

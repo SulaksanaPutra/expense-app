@@ -1,15 +1,12 @@
 import { getCurrencyMinorDigits, isValidCurrencyCode } from "@/lib/money";
 import type { ExpenseSplitMethod, SplitBreakdownItem } from "@/types/database";
 
-export const RECEIPT_STORAGE_QUOTA_BYTES = 524_288_000; // 500 MB
-
 export const EXPENSE_CATEGORIES = [
-  "Groceries & Food",
-  "Rent & Housing",
-  "Utilities",
-  "Dining Out",
-  "Transit & Travel",
-  "Household Supplies",
+  "Groceries",
+  "Housing & Utilities",
+  "Dining & Social",
+  "Travel & Fuel",
+  "Supplies & Misc",
   "Entertainment",
   "General",
 ] as const;
@@ -24,6 +21,11 @@ export interface PercentageParticipantInput {
 export interface ExactParticipantInput {
   userId: string;
   shareCents: number;
+}
+
+export interface SharesParticipantInput {
+  userId: string;
+  shares: number;
 }
 
 export type SplitComputationResult =
@@ -243,6 +245,154 @@ export function computePercentageSplit(params: {
 }
 
 /**
+ * Computes proportional shares split in integer minor units using BigInt floor
+ * division (`floor(amount_cents * shares / total_shares)`) and deterministic
+ * payer-first penny-rounding (assigning residual cent(s) to the payer if included
+ * with > 0 shares, or sequentially from participant index 0).
+ * Guarantees SUM(share_cents) == amountCents across all edge cases.
+ */
+export function computeSharesSplit(params: {
+  amountCents: number;
+  paidBy: string;
+  participants: readonly SharesParticipantInput[];
+  allowNegative?: boolean;
+}): SplitComputationResult {
+  const safeAmount = Math.trunc(params.amountCents);
+  if (
+    !Number.isSafeInteger(safeAmount) ||
+    safeAmount === 0 ||
+    (!params.allowNegative && safeAmount < 0)
+  ) {
+    return {
+      ok: false,
+      code: "INVALID_AMOUNT",
+      message: params.allowNegative
+        ? "Expense amount must be a non-zero integer in minor units."
+        : "Expense amount must be a positive integer in minor units.",
+    };
+  }
+
+  if (!Array.isArray(params.participants) || params.participants.length === 0) {
+    return {
+      ok: false,
+      code: "NO_PARTICIPANTS",
+      message: "Select at least one participant for the split.",
+    };
+  }
+
+  const SHARE_SCALE = 10_000;
+  const seen = new Set<string>();
+  const scaledWeights: bigint[] = [];
+  const cleanParticipants: SharesParticipantInput[] = [];
+  let totalWeight = BigInt(0);
+
+  for (const entry of params.participants) {
+    if (!entry || typeof entry.userId !== "string" || !entry.userId) {
+      return {
+        ok: false,
+        code: "INVALID_PARTICIPANT",
+        message: "Invalid participant in split breakdown.",
+      };
+    }
+    if (seen.has(entry.userId)) {
+      return {
+        ok: false,
+        code: "DUPLICATE_PARTICIPANT",
+        message: "Duplicate participant in split breakdown.",
+      };
+    }
+    seen.add(entry.userId);
+
+    const rawShares = entry.shares;
+    if (
+      typeof rawShares !== "number" ||
+      !Number.isFinite(rawShares) ||
+      rawShares < 0
+    ) {
+      return {
+        ok: false,
+        code: "INVALID_SHARES",
+        message: "Share weights must be non-negative numbers.",
+      };
+    }
+
+    const scaled = rawShares * SHARE_SCALE;
+    const rounded = Math.round(scaled);
+    if (!Number.isSafeInteger(rounded) || Math.abs(scaled - rounded) > 1e-4) {
+      return {
+        ok: false,
+        code: "INVALID_SHARES_PRECISION",
+        message: "Share weights support up to 4 decimal places.",
+      };
+    }
+
+    const weightBig = BigInt(rounded);
+    scaledWeights.push(weightBig);
+    cleanParticipants.push({
+      userId: entry.userId,
+      shares: rounded / SHARE_SCALE,
+    });
+    totalWeight += weightBig;
+  }
+
+  if (totalWeight <= BigInt(0)) {
+    return {
+      ok: false,
+      code: "INVALID_SHARES",
+      message: "Total shares must be greater than zero.",
+    };
+  }
+
+  const bigAmount = BigInt(safeAmount);
+  const sharesCents = scaledWeights.map((weight) =>
+    Number((bigAmount * weight) / totalWeight),
+  );
+  const allocated = sharesCents.reduce((sum, s) => sum + s, 0);
+  let remainder = safeAmount - allocated;
+
+  const nonZeroIndices = scaledWeights
+    .map((weight, idx) => (weight > BigInt(0) ? idx : -1))
+    .filter((idx) => idx >= 0);
+  const payerIndex = cleanParticipants.findIndex(
+    (p) => p.userId === params.paidBy,
+  );
+  const order = buildPayerFirstDistributionOrder(nonZeroIndices, payerIndex);
+
+  let cursor = 0;
+  while (remainder !== 0 && order.length > 0) {
+    const step = remainder > 0 ? 1 : -1;
+    const targetIdx = order[cursor % order.length];
+    sharesCents[targetIdx] += step;
+    remainder -= step;
+    cursor += 1;
+  }
+
+  // Deterministic 2-decimal percentages summing to 100.00% (10,000 bps)
+  const bigTenThousand = BigInt(10_000);
+  const bpsShares = scaledWeights.map((weight) =>
+    Number((bigTenThousand * weight) / totalWeight),
+  );
+  let remBps = 10_000 - bpsShares.reduce((sum, b) => sum + b, 0);
+  let bpsCursor = 0;
+  while (remBps > 0 && order.length > 0) {
+    const targetIdx = order[bpsCursor % order.length];
+    bpsShares[targetIdx] += 1;
+    remBps -= 1;
+    bpsCursor += 1;
+  }
+
+  return {
+    ok: true,
+    breakdown: cleanParticipants.map((p, idx) => ({
+      user_id: p.userId,
+      share_cents: sharesCents[idx],
+      shares: p.shares,
+      percentage: bpsShares[idx] / 100,
+    })),
+  };
+}
+
+/**
  * Validates and builds an exact minor-unit split breakdown.
  * Guarantees SUM(share_cents) == amountCents.
  */
@@ -357,12 +507,13 @@ export function validateSplitBreakdown(params: {
   if (
     params.splitMethod !== "EQUAL" &&
     params.splitMethod !== "PERCENTAGE" &&
-    params.splitMethod !== "EXACT"
+    params.splitMethod !== "EXACT" &&
+    params.splitMethod !== "SHARES"
   ) {
     return {
       ok: false,
       code: "INVALID_SPLIT_METHOD",
-      message: "Split method must be EQUAL, PERCENTAGE, or EXACT.",
+      message: "Split method must be EQUAL, PERCENTAGE, EXACT, or SHARES.",
     };
   }
 
@@ -380,6 +531,8 @@ export function validateSplitBreakdown(params: {
   let sumCents = 0;
   let totalBps = 0;
   let hasPercentages = false;
+  let totalShares = 0;
+  let hasShares = false;
 
   for (const item of params.splitBreakdown) {
     if (!item || typeof item.user_id !== "string" || !item.user_id) {
@@ -436,6 +589,11 @@ export function validateSplitBreakdown(params: {
 
     sumCents += item.share_cents;
 
+    const normalizedItem: SplitBreakdownItem = {
+      user_id: item.user_id,
+      share_cents: item.share_cents,
+    };
+
     if (item.percentage !== undefined) {
       hasPercentages = true;
       if (
@@ -451,17 +609,28 @@ export function validateSplitBreakdown(params: {
         };
       }
       totalBps += Math.round(item.percentage * 100);
-      normalized.push({
-        user_id: item.user_id,
-        share_cents: item.share_cents,
-        percentage: Math.round(item.percentage * 100) / 100,
-      });
-    } else {
-      normalized.push({
-        user_id: item.user_id,
-        share_cents: item.share_cents,
-      });
+      normalizedItem.percentage = Math.round(item.percentage * 100) / 100;
     }
+
+    if (item.shares !== undefined) {
+      hasShares = true;
+      if (
+        typeof item.shares !== "number" ||
+        !Number.isFinite(item.shares) ||
+        item.shares < 0
+      ) {
+        return {
+          ok: false,
+          code: "INVALID_SHARES",
+          message: "Split shares must be non-negative numbers.",
+        };
+      }
+      const cleanShares = Math.round(item.shares * 10_000) / 10_000;
+      totalShares += cleanShares;
+      normalizedItem.shares = cleanShares;
+    }
+
+    normalized.push(normalizedItem);
   }
 
   if (sumCents !== safeAmount) {
@@ -480,12 +649,20 @@ export function validateSplitBreakdown(params: {
     };
   }
 
+  if (params.splitMethod === "SHARES" && hasShares && totalShares <= 0) {
+    return {
+      ok: false,
+      code: "INVALID_SHARES",
+      message: "Total shares must be greater than zero.",
+    };
+  }
+
   return { ok: true, breakdown: normalized };
 }
 
 /**
- * Converts a foreign-currency minor-unit integer into Group.base_currency integer
- * minor units using 1e6 fixed-point rate scaling matching Postgres NUMERIC(12,6).
+ * Converts minor units between currencies using 1e6 fixed-point rate scaling
+ * (used for display-only rollups in All Groups views).
  */
 export function convertForeignAmountToBaseMinorUnits(params: {
   originalAmountCents: number;
@@ -537,25 +714,4 @@ export function convertForeignAmountToBaseMinorUnits(params: {
     return null;
   }
   return result;
-}
-
-export function checkReceiptStorageQuota(
-  currentUsedBytes: number,
-  fileSizeBytes: number,
-  quotaBytes = RECEIPT_STORAGE_QUOTA_BYTES,
-): { allowed: boolean; projectedBytes: number; quotaBytes: number } {
-  const safeUsed =
-    Number.isFinite(currentUsedBytes) && currentUsedBytes >= 0
-      ? Math.trunc(currentUsedBytes)
-      : 0;
-  const safeFileSize =
-    Number.isFinite(fileSizeBytes) && fileSizeBytes >= 0
-      ? Math.trunc(fileSizeBytes)
-      : 0;
-  const projectedBytes = safeUsed + safeFileSize;
-  return {
-    allowed: safeUsed < quotaBytes && projectedBytes <= quotaBytes,
-    projectedBytes,
-    quotaBytes,
-  };
 }

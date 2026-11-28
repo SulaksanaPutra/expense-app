@@ -346,7 +346,7 @@ describe("RecordSettlementModal & ExpensesClient FORMER_MEMBER settlement UI", (
         within(addDialog).getByText("Former members cannot log expenses"),
       ).toBeInTheDocument();
       expect(
-        within(addDialog).getByRole("button", { name: /Save Expense/i }),
+        within(addDialog).getByRole("button", { name: /Add Expense/i }),
       ).toBeDisabled();
       await user.click(within(addDialog).getByRole("button", { name: "Cancel" }));
 

@@ -6,8 +6,9 @@ import {
   Check,
   CheckCircle2,
   Paperclip,
-  RefreshCw,
+  Plus,
   Trash2,
+  Upload,
 } from "lucide-react";
 import {
   AlertBanner,
@@ -22,21 +23,17 @@ import {
 } from "@/components/ui";
 import type { SegmentedOption, SelectOption } from "@/components/ui";
 import type { ShellGroupSummary, ShellUserSummary } from "@/components/shell/types";
-import { formatCycleLabel } from "@/components/shell/url-state";
 import { cn } from "@/lib/cn";
 import {
   EXPENSE_CATEGORIES,
-  RECEIPT_STORAGE_QUOTA_BYTES,
-  checkReceiptStorageQuota,
   computeEqualSplit,
   computeExactSplit,
   computePercentageSplit,
-  convertForeignAmountToBaseMinorUnits,
+  computeSharesSplit,
   validateSplitBreakdown,
 } from "@/lib/expenses/split-engine";
 import { computeEqualSharePercentages } from "@/lib/groups/invite-utils";
 import {
-  SUPPORTED_CURRENCIES,
   formatMinorUnits,
   getCurrencyMinorDigits,
   getCurrencySymbol,
@@ -44,7 +41,6 @@ import {
   parseSignedCurrencyInputToMinorUnits,
 } from "@/lib/money";
 import type { ExpenseLedgerRecord } from "@/lib/expenses/ledger";
-type ExchangeRateSource = "API" | "MANUAL_OVERRIDE";
 import type {
   Database,
   ExpenseSplitMethod,
@@ -71,42 +67,18 @@ export interface AddEditExpenseModalProps {
 }
 
 const SPLIT_METHOD_OPTIONS: Array<SegmentedOption<ExpenseSplitMethod>> = [
-  { value: "EQUAL", label: "Split Evenly" },
-  { value: "PERCENTAGE", label: "By Percentage" },
-  { value: "EXACT", label: "Exact Amounts" },
+  { value: "EQUAL", label: "Equal" },
+  { value: "PERCENTAGE", label: "Percentage" },
+  { value: "EXACT", label: "Exact" },
+  { value: "SHARES", label: "Shares" },
 ];
-
-const CURRENCY_OPTIONS: SelectOption[] = SUPPORTED_CURRENCIES.map((c) => ({
-  value: c.code,
-  label: `${c.code} (${c.symbol})`,
-  description: c.label,
-}));
 
 const CATEGORY_OPTIONS: SelectOption[] = EXPENSE_CATEGORIES.map((cat) => ({
   value: cat,
   label: cat,
 }));
 
-async function fetchSpotRateFromApi(
-  fromCur: string,
-  toCur: string,
-  signal: AbortSignal,
-): Promise<number | null> {
-  const res = await fetch(
-    `/api/fx?from=${encodeURIComponent(fromCur)}&to=${encodeURIComponent(toCur)}`,
-    { signal },
-  );
-  if (!res.ok) return null;
-  const data = (await res.json()) as { rate?: number };
-  if (
-    typeof data.rate === "number" &&
-    Number.isFinite(data.rate) &&
-    data.rate > 0
-  ) {
-    return data.rate;
-  }
-  return null;
-}
+const RECEIPT_POLICY_THRESHOLD_CENTS = 10_000;
 
 function getTodayIsoDate(): string {
   const now = new Date();
@@ -143,21 +115,21 @@ function buildInitialGroupState(
   group: ShellGroupSummary | null,
   currentUser: ShellUserSummary | null,
 ): {
-  currency: string;
   paidBy: string;
   splitMethod: ExpenseSplitMethod;
   includedMemberIds: string[];
   percentageInputs: Record<string, string>;
   exactInputs: Record<string, string>;
+  shareInputs: Record<string, string>;
 } {
   if (!group) {
     return {
-      currency: currentUser?.baseCurrency || "USD",
       paidBy: currentUser?.id ?? "",
       splitMethod: currentUser?.defaultSplitMethod ?? "EQUAL",
       includedMemberIds: [],
       percentageInputs: {},
       exactInputs: {},
+      shareInputs: {},
     };
   }
 
@@ -176,24 +148,30 @@ function buildInitialGroupState(
       : memberIds;
 
   const equalMap = computeEqualSharePercentages(includedMemberIds);
-  const hasCustomRatios =
-    group.defaultSplitMode === "CUSTOM_RATIOS" &&
+  const isRatioMode =
+    (group.defaultSplitMode === "PERCENTAGE" ||
+      group.defaultSplitMode === "CUSTOM" ||
+      group.defaultSplitMode === "CUSTOM_RATIOS") &&
     group.status !== "NEEDS_RATIO_UPDATE" &&
     members.some((m) => typeof m.sharePercentage === "number");
 
   const resolvedSplitMethod: ExpenseSplitMethod =
-    currentUser?.defaultSplitMethod ??
-    (hasCustomRatios ? "PERCENTAGE" : "EQUAL");
+    group.defaultSplitMode === "SHARES"
+      ? "SHARES"
+      : isRatioMode
+        ? "PERCENTAGE"
+        : (currentUser?.defaultSplitMethod ?? "EQUAL");
 
   const customRatioSum = members.reduce(
     (sum, m) => sum + Math.round((m.sharePercentage ?? 0) * 100),
     0,
   );
   const useMemberRatios =
-    hasCustomRatios && Math.abs(customRatioSum - 10_000) <= 1;
+    isRatioMode &&
+    includedMemberIds.length === memberIds.length &&
+    Math.abs(customRatioSum - 10_000) <= 1;
 
   return {
-    currency: group.baseCurrency,
     paidBy: defaultPayer,
     splitMethod: resolvedSplitMethod,
     includedMemberIds,
@@ -208,6 +186,18 @@ function buildInitialGroupState(
       ]),
     ),
     exactInputs: Object.fromEntries(members.map((m) => [m.id, ""])),
+    shareInputs: Object.fromEntries(
+      members.map((m) => [
+        m.id,
+        String(
+          typeof m.shareUnits === "number" &&
+            Number.isFinite(m.shareUnits) &&
+            m.shareUnits >= 0
+            ? m.shareUnits
+            : 1,
+        ),
+      ]),
+    ),
   };
 }
 
@@ -217,9 +207,6 @@ function buildInitialEditState(
   currentUser: ShellUserSummary | null,
 ): {
   amountInput: string;
-  currency: string;
-  exchangeRateInput: string;
-  exchangeRateSource: ExchangeRateSource;
   description: string;
   category: string;
   expenseDate: string;
@@ -228,6 +215,7 @@ function buildInitialEditState(
   includedMemberIds: string[];
   percentageInputs: Record<string, string>;
   exactInputs: Record<string, string>;
+  shareInputs: Record<string, string>;
   existingReceiptUrl: string | null;
 } {
   const baseDefaults = buildInitialGroupState(group, currentUser);
@@ -235,29 +223,7 @@ function buildInitialEditState(
   const activeMemberSet = new Set(members.map((m) => m.id));
   const baseCurrency = group?.baseCurrency ?? expense.currency;
 
-  const isForeign =
-    expense.originalAmountCents !== null &&
-    Boolean(expense.originalCurrency) &&
-    expense.originalCurrency !== baseCurrency;
-
-  const currency = isForeign
-    ? (expense.originalCurrency ?? baseCurrency)
-    : expense.currency;
-  const amountInput = isForeign
-    ? formatMinorUnitsPlain(
-        expense.originalAmountCents ?? expense.amountCents,
-        currency,
-      )
-    : formatMinorUnitsPlain(expense.amountCents, currency);
-
-  const exchangeRateInput =
-    isForeign && expense.exchangeRate !== null
-      ? String(expense.exchangeRate)
-      : "1";
-  const exchangeRateSource: ExchangeRateSource =
-    isForeign && expense.exchangeRateSource
-      ? expense.exchangeRateSource
-      : "API";
+  const amountInput = formatMinorUnitsPlain(expense.amountCents, baseCurrency);
 
   const breakdownByUserId = new Map(
     expense.splitBreakdown.map((item) => [item.user_id, item]),
@@ -273,6 +239,7 @@ function buildInitialEditState(
   const equalMap = computeEqualSharePercentages(includedMemberIds);
   const percentageInputs: Record<string, string> = {};
   const exactInputs: Record<string, string> = {};
+  const shareInputs: Record<string, string> = {};
 
   for (const m of members) {
     const entry = breakdownByUserId.get(m.id);
@@ -286,9 +253,15 @@ function buildInitialEditState(
             : (equalMap.get(m.id) ?? 0);
       percentageInputs[m.id] = String(derivedPct);
       exactInputs[m.id] = formatMinorUnitsPlain(entry.share_cents, baseCurrency);
+      shareInputs[m.id] = String(
+        entry.shares !== undefined
+          ? entry.shares
+          : (m.shareUnits ?? 1),
+      );
     } else {
       percentageInputs[m.id] = "0";
       exactInputs[m.id] = "";
+      shareInputs[m.id] = String(m.shareUnits ?? 1);
     }
   }
 
@@ -303,9 +276,6 @@ function buildInitialEditState(
 
   return {
     amountInput,
-    currency,
-    exchangeRateInput,
-    exchangeRateSource,
     description: expense.description,
     category: expense.category,
     expenseDate,
@@ -314,6 +284,7 @@ function buildInitialEditState(
     includedMemberIds,
     percentageInputs,
     exactInputs,
+    shareInputs,
     existingReceiptUrl: expense.receiptUrl ?? null,
   };
 }
@@ -344,7 +315,7 @@ export function AddEditExpenseModal(props: AddEditExpenseModalProps) {
       ? `edit-${props.expense.id}`
       : isAdjustmentMode && props.expense
         ? `adjustment-${props.expense.id}`
-        : `create-${props.activeGroupId}`;
+        : `create-${props.activeGroupId}-${String(props.currentUser?.autoIncludeInExpenses ?? true)}`;
 
   return <AddEditExpenseModalInner key={modalKey} {...props} />;
 }
@@ -358,8 +329,6 @@ function AddEditExpenseModalInner({
   groups,
   activeGroupId,
   currentUser,
-  cycle,
-  onReceiptStorageUsedBytesChange,
   onCreated,
   onUpdated,
 }: AddEditExpenseModalProps) {
@@ -379,13 +348,16 @@ function AddEditExpenseModalInner({
     [groups],
   );
 
-  const initialGroupId = (isEditMode || isAdjustmentMode) && expense
-    ? expense.groupId
-    : activeGroupId &&
-        activeGroupId !== "all" &&
-        nonArchivedGroups.some((g) => g.id === activeGroupId)
-      ? activeGroupId
-      : "";
+  const initialGroupId =
+    (isEditMode || isAdjustmentMode) && expense
+      ? expense.groupId
+      : activeGroupId &&
+          activeGroupId !== "all" &&
+          nonArchivedGroups.some((g) => g.id === activeGroupId)
+        ? activeGroupId
+        : nonArchivedGroups.length === 1
+          ? nonArchivedGroups[0].id
+          : "";
 
   const [selectedGroupId, setSelectedGroupId] =
     React.useState<string>(initialGroupId);
@@ -397,6 +369,13 @@ function AddEditExpenseModalInner({
 
   const isFormerMemberInSelectedGroup =
     selectedGroup?.currentUserStatus === "FORMER_MEMBER";
+
+  const isExpenseCreationBlockedByPolicy =
+    !isEditMode &&
+    !isFormerMemberInSelectedGroup &&
+    selectedGroup !== null &&
+    selectedGroup.allowAnyMemberAddExpense === false &&
+    selectedGroup.currentUserRole !== "ADMIN";
 
   const initialGroup = React.useMemo(
     () => nonArchivedGroups.find((g) => g.id === initialGroupId) ?? null,
@@ -420,9 +399,6 @@ function AddEditExpenseModalInner({
 
     return {
       ...base,
-      currency: baseCurrency,
-      exchangeRateInput: "1",
-      exchangeRateSource: "API" as ExchangeRateSource,
       amountInput: `-${formatMinorUnitsPlain(expense.amountCents, baseCurrency)}`,
       description: `Adjustment: ${expense.description}`.slice(0, 200),
       expenseDate: getTodayIsoDate(),
@@ -439,28 +415,6 @@ function AddEditExpenseModalInner({
   const [amountInput, setAmountInput] = React.useState(
     initialEditSeed?.amountInput ?? "",
   );
-  const [currency, setCurrency] = React.useState(
-    initialEditSeed?.currency ?? initialSeed.currency,
-  );
-  const [exchangeRateInput, setExchangeRateInput] = React.useState(
-    initialEditSeed?.exchangeRateInput ?? "1",
-  );
-  const [exchangeRateSource, setExchangeRateSource] =
-    React.useState<ExchangeRateSource>(
-      initialEditSeed?.exchangeRateSource ?? "API",
-    );
-  const skipFxAutoFetchForCurrencyRef = React.useRef<string | null>(
-    initialEditSeed &&
-      initialGroup &&
-      initialEditSeed.currency !== initialGroup.baseCurrency
-      ? initialEditSeed.currency
-      : null,
-  );
-  const [fxLoading, setFxLoading] = React.useState(false);
-  const [fxError, setFxError] = React.useState<string | null>(null);
-  const fxAbortRef = React.useRef<AbortController | null>(null);
-  const fxRequestSeqRef = React.useRef(0);
-
   const [description, setDescription] = React.useState(
     initialEditSeed?.description ?? "",
   );
@@ -485,42 +439,32 @@ function AddEditExpenseModalInner({
   const [exactInputs, setExactInputs] = React.useState<Record<string, string>>(
     initialEditSeed?.exactInputs ?? initialSeed.exactInputs,
   );
+  const [shareInputs, setShareInputs] = React.useState<Record<string, string>>(
+    initialEditSeed?.shareInputs ?? initialSeed.shareInputs,
+  );
   const [existingReceiptUrl, setExistingReceiptUrl] = React.useState<
     string | null
   >(initialEditSeed?.existingReceiptUrl ?? null);
 
   const [attachedFile, setAttachedFile] = React.useState<File | null>(null);
-  const [receiptWarning, setReceiptWarning] = React.useState<string | null>(
-    null,
-  );
+  const [receiptError, setReceiptError] = React.useState<string | null>(null);
   const [touched, setTouched] = React.useState<Record<string, boolean>>({});
   const [serverError, setServerError] = React.useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
 
-  const cancelPendingFxFetch = React.useCallback(() => {
-    fxRequestSeqRef.current += 1;
-    if (fxAbortRef.current) {
-      fxAbortRef.current.abort();
-      fxAbortRef.current = null;
-    }
-  }, []);
+  const baseCurrency = selectedGroup?.baseCurrency ?? currentUser?.displayCurrency ?? "USD";
 
   const applyGroupDefaults = React.useCallback(
     (group: ShellGroupSummary | null) => {
-      cancelPendingFxFetch();
       const next = buildInitialGroupState(group, currentUser);
-      setCurrency(next.currency);
-      setExchangeRateInput("1");
-      setExchangeRateSource("API");
-      setFxLoading(false);
-      setFxError(null);
       setPaidBy(next.paidBy);
       setSplitMethod(next.splitMethod);
       setIncludedMemberIds(next.includedMemberIds);
       setPercentageInputs(next.percentageInputs);
       setExactInputs(next.exactInputs);
+      setShareInputs(next.shareInputs);
     },
-    [cancelPendingFxFetch, currentUser],
+    [currentUser],
   );
 
   const resetAllState = React.useCallback(
@@ -534,7 +478,7 @@ function AddEditExpenseModalInner({
       setExpenseDate(getTodayIsoDate());
       setAttachedFile(null);
       uploadedReceiptRef.current = null;
-      setReceiptWarning(null);
+      setReceiptError(null);
       setTouched({});
       setServerError(null);
       setIsSubmitting(false);
@@ -548,117 +492,17 @@ function AddEditExpenseModalInner({
     const nextGroup =
       nonArchivedGroups.find((g) => g.id === nextGroupId) ?? null;
     applyGroupDefaults(nextGroup);
+    setReceiptError(null);
     setServerError(null);
   };
-
-  // Fetch spot FX rate when logging in a foreign currency
-  const baseCurrency = selectedGroup?.baseCurrency ?? "USD";
-  const isForeignCurrency =
-    selectedGroup !== null && currency !== baseCurrency;
-
-  const handleRefreshSpotRate = React.useCallback(() => {
-    cancelPendingFxFetch();
-    if (!selectedGroup || currency === selectedGroup.baseCurrency) {
-      setExchangeRateInput("1");
-      setExchangeRateSource("API");
-      setFxLoading(false);
-      setFxError(null);
-      return;
-    }
-
-    const requestSeq = fxRequestSeqRef.current;
-    const controller = new AbortController();
-    fxAbortRef.current = controller;
-    setFxLoading(true);
-    setFxError(null);
-
-    fetchSpotRateFromApi(currency, selectedGroup.baseCurrency, controller.signal)
-      .then((rate) => {
-        if (controller.signal.aborted || requestSeq !== fxRequestSeqRef.current) {
-          return;
-        }
-        if (rate !== null) {
-          setExchangeRateInput(String(rate));
-          setExchangeRateSource("API");
-          setFxError(null);
-        } else {
-          setFxError("Live spot rate unavailable. Enter an exchange rate manually.");
-        }
-      })
-      .catch(() => {
-        if (!controller.signal.aborted && requestSeq === fxRequestSeqRef.current) {
-          setFxError("Live spot rate unavailable. Enter an exchange rate manually.");
-        }
-      })
-      .finally(() => {
-        if (requestSeq === fxRequestSeqRef.current) {
-          fxAbortRef.current = null;
-          setFxLoading(false);
-        }
-      });
-  }, [cancelPendingFxFetch, currency, selectedGroup]);
-
-  React.useEffect(() => {
-    if (!open || !selectedGroup || currency === selectedGroup.baseCurrency) {
-      return;
-    }
-
-    if (skipFxAutoFetchForCurrencyRef.current === currency) {
-      skipFxAutoFetchForCurrencyRef.current = null;
-      return;
-    }
-
-    const requestSeq = fxRequestSeqRef.current;
-    const controller = new AbortController();
-    fxAbortRef.current = controller;
-
-    fetchSpotRateFromApi(currency, selectedGroup.baseCurrency, controller.signal)
-      .then((rate) => {
-        if (controller.signal.aborted || requestSeq !== fxRequestSeqRef.current) {
-          return;
-        }
-        if (rate !== null) {
-          setExchangeRateInput(String(rate));
-          setExchangeRateSource("API");
-          setFxError(null);
-        } else {
-          setFxError("Live spot rate unavailable. Enter an exchange rate manually.");
-        }
-      })
-      .catch(() => {
-        if (!controller.signal.aborted && requestSeq === fxRequestSeqRef.current) {
-          setFxError("Live spot rate unavailable. Enter an exchange rate manually.");
-        }
-      })
-      .finally(() => {
-        if (requestSeq === fxRequestSeqRef.current) {
-          fxAbortRef.current = null;
-          setFxLoading(false);
-        }
-      });
-
-    return () => {
-      controller.abort();
-    };
-  }, [currency, open, selectedGroup]);
 
   const parsedInputAmountCents = React.useMemo(
     () =>
       isAdjustmentMode
-        ? parseSignedCurrencyInputToMinorUnits(amountInput, currency)
-        : parseCurrencyInputToMinorUnits(amountInput, currency),
-    [amountInput, currency, isAdjustmentMode],
+        ? parseSignedCurrencyInputToMinorUnits(amountInput, baseCurrency)
+        : parseCurrencyInputToMinorUnits(amountInput, baseCurrency),
+    [amountInput, baseCurrency, isAdjustmentMode],
   );
-
-  const parsedExchangeRate = React.useMemo(() => {
-    if (!isForeignCurrency) return 1;
-    const cleaned = exchangeRateInput.trim();
-    if (!/^\d+(?:\.\d+)?$/.test(cleaned)) return null;
-    const num = Number(cleaned);
-    if (!Number.isFinite(num) || num <= 0 || num >= 1_000_000) return null;
-    const rounded = Number(num.toFixed(6));
-    return rounded > 0 ? rounded : null;
-  }, [exchangeRateInput, isForeignCurrency]);
 
   const effectiveBaseAmountCents = React.useMemo(() => {
     if (
@@ -668,28 +512,8 @@ function AddEditExpenseModalInner({
     ) {
       return null;
     }
-    if (!isForeignCurrency) {
-      return parsedInputAmountCents;
-    }
-    if (parsedExchangeRate === null) {
-      return null;
-    }
-    const sign = parsedInputAmountCents < 0 ? -1 : 1;
-    const converted = convertForeignAmountToBaseMinorUnits({
-      originalAmountCents: Math.abs(parsedInputAmountCents),
-      originalCurrency: currency,
-      exchangeRate: parsedExchangeRate,
-      baseCurrency,
-    });
-    return converted === null ? null : sign * converted;
-  }, [
-    baseCurrency,
-    currency,
-    isAdjustmentMode,
-    isForeignCurrency,
-    parsedExchangeRate,
-    parsedInputAmountCents,
-  ]);
+    return parsedInputAmountCents;
+  }, [isAdjustmentMode, parsedInputAmountCents]);
 
   const groupMembers = React.useMemo(
     () => selectedGroup?.members ?? [],
@@ -706,12 +530,13 @@ function AddEditExpenseModalInner({
     [groupMembers, includedSet],
   );
 
-  // Live split calculation
+  // Live split calculation (strictly integer minor units)
   const splitEvaluation = React.useMemo((): {
     ok: boolean;
     breakdown: SplitBreakdownItem[];
     assignedCents: number;
     totalBps: number;
+    totalShares: number;
     errorMessage: string | null;
   } => {
     const activeIds = groupMembers.map((m) => m.id);
@@ -721,6 +546,7 @@ function AddEditExpenseModalInner({
         breakdown: [],
         assignedCents: 0,
         totalBps: 0,
+        totalShares: 0,
         errorMessage: "Select a split group with active members.",
       };
     }
@@ -731,6 +557,7 @@ function AddEditExpenseModalInner({
         breakdown: [],
         assignedCents: 0,
         totalBps: 0,
+        totalShares: 0,
         errorMessage: "Select at least one member to split this expense.",
       };
     }
@@ -757,6 +584,7 @@ function AddEditExpenseModalInner({
           breakdown,
           assignedCents: 0,
           totalBps: 0,
+          totalShares: 0,
           errorMessage: isAdjustmentMode
             ? "Enter a non-zero adjustment amount."
             : "Enter an expense amount greater than zero.",
@@ -776,6 +604,7 @@ function AddEditExpenseModalInner({
         breakdown: check.ok ? check.breakdown : breakdown,
         assignedCents: breakdown.reduce((s, i) => s + i.share_cents, 0),
         totalBps: 10_000,
+        totalShares: selectedMemberIds.length,
         errorMessage: check.ok ? null : check.message,
       };
     }
@@ -808,6 +637,7 @@ function AddEditExpenseModalInner({
           })),
           assignedCents: 0,
           totalBps,
+          totalShares: 0,
           errorMessage: isAdjustmentMode
             ? "Enter a non-zero adjustment amount."
             : "Enter an expense amount greater than zero.",
@@ -824,6 +654,7 @@ function AddEditExpenseModalInner({
           })),
           assignedCents: 0,
           totalBps,
+          totalShares: 0,
           errorMessage: "Each percentage must be between 0% and 100%.",
         };
       }
@@ -852,6 +683,7 @@ function AddEditExpenseModalInner({
           breakdown: previewBreakdown,
           assignedCents: previewBreakdown.reduce((s, i) => s + i.share_cents, 0),
           totalBps,
+          totalShares: 0,
           errorMessage: result.message,
         };
       }
@@ -861,6 +693,97 @@ function AddEditExpenseModalInner({
         breakdown: result.breakdown,
         assignedCents: result.breakdown.reduce((s, i) => s + i.share_cents, 0),
         totalBps,
+        totalShares: 0,
+        errorMessage: null,
+      };
+    }
+
+    if (splitMethod === "SHARES") {
+      const participants: Array<{ userId: string; shares: number }> = [];
+      let totalShares = 0;
+      let hasInvalidShares = false;
+
+      for (const id of selectedMemberIds) {
+        const raw = (shareInputs[id] ?? "").trim();
+        const num = raw === "" ? 0 : Number(raw);
+        if (!Number.isFinite(num) || num < 0) {
+          hasInvalidShares = true;
+          participants.push({ userId: id, shares: 0 });
+        } else {
+          const clean = Math.round(num * 10_000) / 10_000;
+          totalShares += clean;
+          participants.push({ userId: id, shares: clean });
+        }
+      }
+
+      totalShares = Math.round(totalShares * 10_000) / 10_000;
+
+      if (!hasValidNonZeroTotal) {
+        return {
+          ok: false,
+          breakdown: participants.map((p) => ({
+            user_id: p.userId,
+            share_cents: 0,
+            shares: p.shares,
+            percentage:
+              totalShares > 0
+                ? Math.round((p.shares / totalShares) * 10_000) / 100
+                : 0,
+          })),
+          assignedCents: 0,
+          totalBps: totalShares > 0 ? 10_000 : 0,
+          totalShares,
+          errorMessage: isAdjustmentMode
+            ? "Enter a non-zero adjustment amount."
+            : "Enter an expense amount greater than zero.",
+        };
+      }
+
+      if (hasInvalidShares) {
+        return {
+          ok: false,
+          breakdown: participants.map((p) => ({
+            user_id: p.userId,
+            share_cents: 0,
+            shares: p.shares,
+            percentage: 0,
+          })),
+          assignedCents: 0,
+          totalBps: 0,
+          totalShares,
+          errorMessage: "Share weights must be non-negative numbers.",
+        };
+      }
+
+      const sharesResult = computeSharesSplit({
+        amountCents: totalCents,
+        paidBy,
+        participants,
+        allowNegative: isAdjustmentMode,
+      });
+
+      if (!sharesResult.ok) {
+        return {
+          ok: false,
+          breakdown: participants.map((p) => ({
+            user_id: p.userId,
+            share_cents: 0,
+            shares: p.shares,
+            percentage: 0,
+          })),
+          assignedCents: 0,
+          totalBps: 0,
+          totalShares,
+          errorMessage: sharesResult.message,
+        };
+      }
+
+      return {
+        ok: true,
+        breakdown: sharesResult.breakdown,
+        assignedCents: sharesResult.breakdown.reduce((s, i) => s + i.share_cents, 0),
+        totalBps: 10_000,
+        totalShares,
         errorMessage: null,
       };
     }
@@ -879,8 +802,7 @@ function AddEditExpenseModalInner({
             ? parseSignedCurrencyInputToMinorUnits(raw, baseCurrency)
             : parseCurrencyInputToMinorUnits(raw, baseCurrency);
       const invalidSign =
-        parsed === null ||
-        (totalCents < 0 ? parsed > 0 : parsed < 0);
+        parsed === null || (totalCents < 0 ? parsed > 0 : parsed < 0);
       if (invalidSign) {
         hasInvalidExact = true;
         exactParticipants.push({ userId: id, shareCents: 0 });
@@ -899,6 +821,7 @@ function AddEditExpenseModalInner({
         })),
         assignedCents: sumCents,
         totalBps: 0,
+        totalShares: 0,
         errorMessage: isAdjustmentMode
           ? "Enter a non-zero adjustment amount."
           : "Enter an expense amount greater than zero.",
@@ -914,6 +837,7 @@ function AddEditExpenseModalInner({
         })),
         assignedCents: sumCents,
         totalBps: 0,
+        totalShares: 0,
         errorMessage:
           totalCents < 0
             ? "Enter valid zero or negative currency amounts."
@@ -936,6 +860,7 @@ function AddEditExpenseModalInner({
         })),
         assignedCents: sumCents,
         totalBps: 0,
+        totalShares: 0,
         errorMessage: exactResult.message,
       };
     }
@@ -945,6 +870,7 @@ function AddEditExpenseModalInner({
       breakdown: exactResult.breakdown,
       assignedCents: sumCents,
       totalBps: 10_000,
+      totalShares: 0,
       errorMessage: null,
     };
   }, [
@@ -957,6 +883,7 @@ function AddEditExpenseModalInner({
     percentageInputs,
     selectedGroup,
     selectedMemberIds,
+    shareInputs,
     splitMethod,
   ]);
 
@@ -975,25 +902,6 @@ function AddEditExpenseModalInner({
       }
       return [...prev, memberId];
     });
-  };
-
-  const handleQuickIncrement = (majorUnits: number) => {
-    const digits = getCurrencyMinorDigits(currency);
-    const stepMinor = majorUnits * 10 ** digits;
-    const current = parsedInputAmountCents ?? 0;
-    const next = current + stepMinor;
-    setAmountInput(formatMinorUnitsPlain(next, currency));
-    setTouched((prev) => ({ ...prev, amount: true }));
-  };
-
-  const handleRoundNearest = () => {
-    const digits = getCurrencyMinorDigits(currency);
-    if (digits === 0) return;
-    const unit = 10 ** digits;
-    const current = parsedInputAmountCents ?? 0;
-    if (current <= 0) return;
-    const rounded = Math.round(current / unit) * unit;
-    setAmountInput(formatMinorUnitsPlain(Math.max(unit, rounded), currency));
   };
 
   const handleDistributePercentagesEvenly = () => {
@@ -1048,14 +956,6 @@ function AddEditExpenseModalInner({
   };
 
   const handleAttachReceiptClick = () => {
-    const usedBytes = currentUser?.receiptStorageUsedBytes ?? 0;
-    if (usedBytes >= RECEIPT_STORAGE_QUOTA_BYTES) {
-      setReceiptWarning(
-        "Receipt storage full (500 MB). Expense will be logged without receipt.",
-      );
-      setAttachedFile(null);
-      return;
-    }
     fileInputRef.current?.click();
   };
 
@@ -1066,20 +966,18 @@ function AddEditExpenseModalInner({
     event.target.value = "";
     if (!file) return;
 
-    const usedBytes = currentUser?.receiptStorageUsedBytes ?? 0;
-    const quota = checkReceiptStorageQuota(usedBytes, file.size);
-    if (!quota.allowed) {
-      setReceiptWarning(
-        "Receipt storage full (500 MB). Expense will be logged without receipt.",
-      );
-      setAttachedFile(null);
-      return;
-    }
-
-    setReceiptWarning(null);
+    setReceiptError(null);
+    setServerError(null);
     uploadedReceiptRef.current = null;
     setAttachedFile(file);
   };
+
+  const isReceiptRequired =
+    Boolean(selectedGroup?.requireReceiptOver100) &&
+    effectiveBaseAmountCents !== null &&
+    effectiveBaseAmountCents > RECEIPT_POLICY_THRESHOLD_CENTS;
+  const hasReceipt = Boolean(attachedFile || existingReceiptUrl);
+  const isMissingRequiredReceipt = isReceiptRequired && !hasReceipt;
 
   const isDescriptionValid = description.trim().length > 0;
   const isDateValid = isValidIsoDateInput(expenseDate);
@@ -1094,17 +992,15 @@ function AddEditExpenseModalInner({
   const isFormValid =
     !isLockedExpense &&
     !isFormerMemberInSelectedGroup &&
+    !isExpenseCreationBlockedByPolicy &&
+    !isMissingRequiredReceipt &&
     selectedGroup !== null &&
     selectedGroup.status !== "ARCHIVED" &&
     isDescriptionValid &&
     isDateValid &&
     isPayerValid &&
     isAmountValid &&
-    splitEvaluation.ok &&
-    (!isForeignCurrency ||
-      (parsedInputAmountCents !== null &&
-        parsedInputAmountCents !== 0 &&
-        parsedExchangeRate !== null));
+    splitEvaluation.ok;
 
   const handleClose = () => {
     if (isSubmitting) return;
@@ -1117,12 +1013,12 @@ function AddEditExpenseModalInner({
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setServerError(null);
+    setReceiptError(null);
     setTouched({
       group: true,
       amount: true,
       description: true,
       date: true,
-      exchangeRate: true,
     });
 
     if (!isFormValid || !selectedGroup || effectiveBaseAmountCents === null) {
@@ -1146,7 +1042,6 @@ function AddEditExpenseModalInner({
             ok?: boolean;
             code?: string;
             receiptUrl?: string;
-            usedBytes?: number;
             error?: string;
           } | null = null;
 
@@ -1160,15 +1055,10 @@ function AddEditExpenseModalInner({
               ok?: boolean;
               code?: string;
               receiptUrl?: string;
-              usedBytes?: number;
               error?: string;
             } | null;
           } catch {
             uploadOk = false;
-          }
-
-          if (typeof uploadPayload?.usedBytes === "number") {
-            onReceiptStorageUsedBytesChange?.(uploadPayload.usedBytes);
           }
 
           if (uploadOk && uploadPayload?.receiptUrl) {
@@ -1180,9 +1070,9 @@ function AddEditExpenseModalInner({
           } else {
             uploadedReceiptRef.current = null;
             setAttachedFile(null);
-            setReceiptWarning(
+            setReceiptError(
               uploadPayload?.error ||
-                "Receipt storage full (500 MB). Expense will be logged without receipt.",
+                "Unable to upload receipt file. Please try again.",
             );
             setIsSubmitting(false);
             return;
@@ -1213,12 +1103,6 @@ function AddEditExpenseModalInner({
           expense_date: resolvedExpenseDate,
           split_method: splitMethod,
           split_breakdown: splitEvaluation.breakdown,
-          original_amount_cents: isForeignCurrency
-            ? parsedInputAmountCents
-            : null,
-          original_currency: isForeignCurrency ? currency : null,
-          exchange_rate: isForeignCurrency ? parsedExchangeRate : null,
-          exchange_rate_source: isForeignCurrency ? exchangeRateSource : null,
           receipt_url: receiptUrl,
           ...(isAdjustmentMode && expense
             ? { adjustment_for_expense_id: expense.id }
@@ -1285,52 +1169,35 @@ function AddEditExpenseModalInner({
     [currentUser?.id, groupMembers],
   );
 
-  const payerMember =
-    groupMembers.find((m) => m.id === paidBy) ?? groupMembers[0] ?? null;
-
-  const inputCurrencySymbol = getCurrencySymbol(currency);
   const baseCurrencySymbol = getCurrencySymbol(baseCurrency);
-  const cycleLabel = cycle ? formatCycleLabel(cycle) : "Current Period";
 
   const amountError = React.useMemo(() => {
     if (!touched.amount) return undefined;
-    if (parsedInputAmountCents !== null && parsedInputAmountCents > 0) {
+    if (
+      parsedInputAmountCents !== null &&
+      (isAdjustmentMode ? parsedInputAmountCents !== 0 : parsedInputAmountCents > 0)
+    ) {
       return undefined;
     }
-    const digits = getCurrencyMinorDigits(currency);
+    const digits = getCurrencyMinorDigits(baseCurrency);
     const trimmed = amountInput.trim();
     if (digits === 0 && trimmed.includes(".")) {
-      return `${currency} does not use decimal places. Enter a whole number.`;
+      return `${baseCurrency} does not use decimal places. Enter a whole number.`;
     }
     if (digits > 0 && /^\d+\.\d+$/.test(trimmed)) {
       const frac = trimmed.split(".")[1] ?? "";
       if (frac.length > digits) {
-        return `Use up to ${digits} decimal places for ${currency}.`;
+        return `Use up to ${digits} decimal places for ${baseCurrency}.`;
       }
     }
     return isAdjustmentMode
       ? "Enter a non-zero adjustment amount (e.g. -25.00)."
       : "Enter an amount greater than 0.";
-  }, [amountInput, currency, isAdjustmentMode, parsedInputAmountCents, touched.amount]);
-
-  const exchangeRateError = React.useMemo(() => {
-    if (!isForeignCurrency || !touched.exchangeRate || parsedExchangeRate !== null) {
-      return undefined;
-    }
-    const trimmed = exchangeRateInput.trim();
-    if (!trimmed) {
-      return "Enter an exchange rate.";
-    }
-    const numeric = Number(trimmed);
-    if (Number.isFinite(numeric) && numeric >= 1_000_000) {
-      return "Exchange rate must be less than 1,000,000.";
-    }
-    return "Enter a positive exchange rate (e.g. 1.085).";
-  }, [exchangeRateInput, isForeignCurrency, parsedExchangeRate, touched.exchangeRate]);
+  }, [amountInput, baseCurrency, isAdjustmentMode, parsedInputAmountCents, touched.amount]);
 
   const descriptionError =
     touched.description && !isDescriptionValid
-      ? "Please enter a description for this expense."
+      ? "Please enter a merchant or description."
       : undefined;
   const dateError =
     touched.date && !isDateValid ? "Enter a valid YYYY-MM-DD date." : undefined;
@@ -1339,7 +1206,7 @@ function AddEditExpenseModalInner({
     ? "Save Adjustment"
     : isEditMode
       ? "Save Changes"
-      : "Save Expense";
+      : "Add Expense";
   const saveLabel =
     effectiveBaseAmountCents && effectiveBaseAmountCents !== 0
       ? `${saveBaseLabel} (${formatMinorUnits(effectiveBaseAmountCents, baseCurrency)})`
@@ -1349,6 +1216,28 @@ function AddEditExpenseModalInner({
     effectiveBaseAmountCents !== null
       ? effectiveBaseAmountCents - splitEvaluation.assignedCents
       : 0;
+
+  const distributionSummary = React.useMemo(() => {
+    if (selectedMemberIds.length === 0) return "No members selected";
+    if (splitMethod === "EQUAL") {
+      const pct = (100 / selectedMemberIds.length).toFixed(1);
+      return `${selectedMemberIds.length}-Way Equal (${pct}%)`;
+    }
+    if (splitMethod === "PERCENTAGE") {
+      return `${(splitEvaluation.totalBps / 100).toFixed(2)}% of 100%`;
+    }
+    if (splitMethod === "SHARES") {
+      return `${splitEvaluation.totalShares} Total ${splitEvaluation.totalShares === 1 ? "Share" : "Shares"}`;
+    }
+    return `${formatMinorUnits(splitEvaluation.assignedCents, baseCurrency)} Assigned`;
+  }, [
+    baseCurrency,
+    selectedMemberIds.length,
+    splitEvaluation.assignedCents,
+    splitEvaluation.totalBps,
+    splitEvaluation.totalShares,
+    splitMethod,
+  ]);
 
   return (
     <Dialog
@@ -1368,21 +1257,19 @@ function AddEditExpenseModalInner({
             ? selectedGroup
               ? `Editing expense in ${selectedGroup.name} · records an ExpenseRevision snapshot`
               : "Editing shared expense"
-            : selectedGroup
-              ? `Logging to ${selectedGroup.name} (${cycleLabel})`
-              : `Select a split group to log an expense for ${cycleLabel}`
+            : "Log a shared expense and split it with group members."
       }
-      size="lg"
+      size="md"
       closeOnBackdropClick={!isSubmitting}
       closeOnEscape={!isSubmitting}
       footer={
         <div className="flex w-full flex-col gap-3">
-          {receiptWarning && (
+          {receiptError && (
             <AlertBanner
-              tone="warning"
-              title="Receipt upload skipped"
-              description={receiptWarning}
-              onDismiss={() => setReceiptWarning(null)}
+              tone="error"
+              title="Receipt upload failed"
+              description={receiptError}
+              onDismiss={() => setReceiptError(null)}
             />
           )}
           <div className="flex w-full flex-wrap items-center justify-between gap-3">
@@ -1396,47 +1283,60 @@ function AddEditExpenseModalInner({
                 className="sr-only"
                 onChange={handleReceiptFileChange}
               />
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled={isSubmitting || isLockedExpense}
-                leftIcon={<Paperclip className="h-4 w-4" aria-hidden="true" />}
-                onClick={handleAttachReceiptClick}
-              >
-                Attach Receipt
-              </Button>
-              {attachedFile && (
-                <span className="inline-flex max-w-[200px] items-center gap-1.5 rounded-pill border border-hairline bg-canvas-parchment py-0.5 pr-1 pl-2.5 text-[11px] font-medium text-ink">
-                  <span className="truncate">{attachedFile.name}</span>
-                  <span className="shrink-0 text-ink-muted-48">
-                    ({formatFileSize(attachedFile.size)})
-                  </span>
-                  <button
+              {!isReceiptRequired && (
+                <>
+                  <Button
                     type="button"
-                    aria-label="Remove attached receipt"
-                    onClick={() => {
-                      uploadedReceiptRef.current = null;
-                      setAttachedFile(null);
-                    }}
-                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink-muted-48 transition-colors hover:bg-canvas hover:text-red-600 focus-visible:outline-2 focus-visible:outline-primary-focus"
+                    variant="ghost"
+                    size="sm"
+                    disabled={
+                      isSubmitting ||
+                      isLockedExpense ||
+                      isExpenseCreationBlockedByPolicy ||
+                      isFormerMemberInSelectedGroup
+                    }
+                    leftIcon={<Paperclip className="h-4 w-4" aria-hidden="true" />}
+                    onClick={handleAttachReceiptClick}
                   >
-                    <Trash2 className="h-3 w-3" aria-hidden="true" />
-                  </button>
-                </span>
-              )}
-              {!attachedFile && existingReceiptUrl && (
-                <span className="inline-flex max-w-[200px] items-center gap-1.5 rounded-pill border border-hairline bg-canvas-parchment py-0.5 pr-1 pl-2.5 text-[11px] font-medium text-ink">
-                  <span className="truncate">Existing receipt</span>
-                  <button
-                    type="button"
-                    aria-label="Remove existing receipt"
-                    onClick={() => setExistingReceiptUrl(null)}
-                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink-muted-48 transition-colors hover:bg-canvas hover:text-red-600 focus-visible:outline-2 focus-visible:outline-primary-focus"
-                  >
-                    <Trash2 className="h-3 w-3" aria-hidden="true" />
-                  </button>
-                </span>
+                    Attach Receipt
+                  </Button>
+                  {attachedFile && (
+                    <span className="inline-flex max-w-[190px] items-center gap-1.5 rounded-pill border border-hairline bg-canvas-parchment py-0.5 pr-1 pl-2.5 text-[11px] font-medium text-ink">
+                      <span className="truncate">{attachedFile.name}</span>
+                      <span className="shrink-0 text-ink-muted-48">
+                        ({formatFileSize(attachedFile.size)})
+                      </span>
+                      <Button
+                        type="button"
+                        variant="icon-circle"
+                        size="sm"
+                        aria-label="Remove attached receipt"
+                        onClick={() => {
+                          uploadedReceiptRef.current = null;
+                          setAttachedFile(null);
+                        }}
+                        className="h-6 w-6 border-transparent bg-transparent text-ink-muted-48 hover:bg-canvas hover:text-red-600"
+                      >
+                        <Trash2 className="h-3 w-3" aria-hidden="true" />
+                      </Button>
+                    </span>
+                  )}
+                  {!attachedFile && existingReceiptUrl && (
+                    <span className="inline-flex max-w-[190px] items-center gap-1.5 rounded-pill border border-hairline bg-canvas-parchment py-0.5 pr-1 pl-2.5 text-[11px] font-medium text-ink">
+                      <span className="truncate">Existing receipt</span>
+                      <Button
+                        type="button"
+                        variant="icon-circle"
+                        size="sm"
+                        aria-label="Remove existing receipt"
+                        onClick={() => setExistingReceiptUrl(null)}
+                        className="h-6 w-6 border-transparent bg-transparent text-ink-muted-48 hover:bg-canvas hover:text-red-600"
+                      >
+                        <Trash2 className="h-3 w-3" aria-hidden="true" />
+                      </Button>
+                    </span>
+                  )}
+                </>
               )}
             </div>
 
@@ -1444,7 +1344,7 @@ function AddEditExpenseModalInner({
               <Button
                 type="button"
                 variant="secondary"
-                size="sm"
+                size="md"
                 disabled={isSubmitting}
                 onClick={handleClose}
               >
@@ -1454,10 +1354,16 @@ function AddEditExpenseModalInner({
                 type="submit"
                 form={formId}
                 variant="primary"
-                size="sm"
+                size="md"
                 loading={isSubmitting}
                 disabled={!isFormValid || isSubmitting}
-                leftIcon={<Check className="h-4 w-4" aria-hidden="true" />}
+                leftIcon={
+                  isEditMode || isAdjustmentMode ? (
+                    <Check className="h-4 w-4" aria-hidden="true" />
+                  ) : (
+                    <Plus className="h-4 w-4" aria-hidden="true" />
+                  )
+                }
                 className="tabular-nums"
               >
                 {saveLabel}
@@ -1471,7 +1377,7 @@ function AddEditExpenseModalInner({
         id={formId}
         noValidate
         onSubmit={handleSubmit}
-        className="flex flex-col gap-4"
+        className="flex flex-col gap-4 tabular-nums"
       >
         {isLockedExpense && (
           <AlertBanner
@@ -1509,6 +1415,14 @@ function AddEditExpenseModalInner({
           />
         )}
 
+        {isExpenseCreationBlockedByPolicy && (
+          <AlertBanner
+            tone="warning"
+            title="Only group admins can add expenses"
+            description="This group's policy restricts adding new expenses to Group Owners/Admins. Ask an admin to log this expense or update Split Rules."
+          />
+        )}
+
         {serverError && (
           <AlertBanner
             tone="error"
@@ -1517,250 +1431,29 @@ function AddEditExpenseModalInner({
           />
         )}
 
-        {nonArchivedGroups.length === 0 ? (
+        {nonArchivedGroups.length === 0 && (
           <AlertBanner
             tone="warning"
             title="No active split groups"
             description="Create or join an active split group before logging an expense."
           />
-        ) : (
-          !isEditMode &&
-          !isAdjustmentMode &&
-          (activeGroupId === "all" || nonArchivedGroups.length > 1) && (
-            <Select
-              label="Split Group"
-              aria-label="Split Group"
-              placeholder="Select a split group..."
-              options={groupOptions}
-              value={selectedGroupId}
-              onChange={handleGroupChange}
-              error={
-                touched.group && !selectedGroup
-                  ? "Select a split group."
-                  : undefined
-              }
-            />
-          )
         )}
 
         {selectedGroup?.status === "NEEDS_RATIO_UPDATE" && (
           <AlertBanner
             tone="warning"
             title="Custom ratios need admin review"
-            description="A newly joined member has a 0% default ratio. Split Evenly, Exact Amounts, or percentages summing to 100.00% can still be logged."
+            description="A newly joined member has a 0% default ratio. Equal, Exact, Shares, or percentages summing to 100.00% can still be logged."
           />
         )}
 
-        {/* Hero Amount & Currency Card */}
-        <Card variant="sub-card" padding="md" className="flex flex-col gap-3">
-          <div className="flex flex-wrap items-end justify-between gap-3">
-            <div className="min-w-0 flex-1">
-              <Input
-                label="Total Bill Amount"
-                name="amount"
-                type="text"
-                inputMode="decimal"
-                required
-                autoFocus
-                prefix={inputCurrencySymbol}
-                placeholder={getCurrencyMinorDigits(currency) === 0 ? "0" : "0.00"}
-                value={amountInput}
-                onChange={(e) => {
-                  setAmountInput(e.target.value);
-                  setServerError(null);
-                }}
-                onBlur={() => setTouched((prev) => ({ ...prev, amount: true }))}
-                error={amountError}
-                className="text-[22px] font-semibold tracking-tight tabular-nums"
-              />
-            </div>
-
-            <div className="w-full sm:w-44">
-              <Select
-                label="Currency"
-                aria-label="Currency"
-                options={CURRENCY_OPTIONS}
-                value={currency}
-                onChange={(nextCur) => {
-                  skipFxAutoFetchForCurrencyRef.current = null;
-                  setCurrency(nextCur);
-                  if (selectedGroup && nextCur === selectedGroup.baseCurrency) {
-                    cancelPendingFxFetch();
-                    setExchangeRateInput("1");
-                    setExchangeRateSource("API");
-                    setFxLoading(false);
-                    setFxError(null);
-                  } else if (selectedGroup) {
-                    cancelPendingFxFetch();
-                    setExchangeRateInput("");
-                    setExchangeRateSource("API");
-                    setFxLoading(true);
-                    setFxError(null);
-                  }
-                  setServerError(null);
-                }}
-                disabled={!selectedGroup}
-              />
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-1.5">
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => handleQuickIncrement(10)}
-              className="h-7 px-2.5 text-[12px] tabular-nums"
-            >
-              +{inputCurrencySymbol}10
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => handleQuickIncrement(20)}
-              className="h-7 px-2.5 text-[12px] tabular-nums"
-            >
-              +{inputCurrencySymbol}20
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => handleQuickIncrement(50)}
-              className="h-7 px-2.5 text-[12px] tabular-nums"
-            >
-              +{inputCurrencySymbol}50
-            </Button>
-            {getCurrencyMinorDigits(currency) > 0 && (
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={handleRoundNearest}
-                className="ml-auto h-7 px-2.5 text-[12px]"
-              >
-                Round nearest {inputCurrencySymbol}
-              </Button>
-            )}
-          </div>
-
-          {isForeignCurrency && selectedGroup && (
-            <div
-              data-testid="fx-conversion-box"
-              className="mt-1 flex flex-col gap-2.5 rounded-md border border-hairline bg-canvas p-3"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted-48">
-                  FX Conversion to {baseCurrency}
-                </span>
-                <div className="flex items-center gap-1.5">
-                  <Badge
-                    data-testid="fx-rate-source-badge"
-                    tone={
-                      exchangeRateSource === "MANUAL_OVERRIDE"
-                        ? "warning"
-                        : fxError
-                          ? "danger"
-                          : "info"
-                    }
-                    size="sm"
-                  >
-                    {exchangeRateSource === "MANUAL_OVERRIDE"
-                      ? "Manual Override"
-                      : fxLoading
-                        ? "Fetching rate..."
-                        : fxError
-                          ? "Rate unavailable"
-                          : "API Spot Rate"}
-                  </Badge>
-                  <Button
-                    type="button"
-                    variant="icon-circle"
-                    size="sm"
-                    disabled={fxLoading}
-                    aria-label="Refresh spot exchange rate"
-                    onClick={handleRefreshSpotRate}
-                    className="h-6 w-6 border-transparent bg-transparent text-ink-muted-48 hover:bg-canvas-parchment hover:text-ink"
-                  >
-                    <RefreshCw
-                      className={cn("h-3.5 w-3.5", fxLoading && "animate-spin")}
-                      aria-hidden="true"
-                    />
-                  </Button>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:items-start">
-                <Input
-                  label={`Exchange Rate (1 ${currency} → ${baseCurrency})`}
-                  name="exchange_rate"
-                  type="text"
-                  inputMode="decimal"
-                  required
-                  placeholder={fxLoading ? "Fetching..." : "1.0000"}
-                  value={exchangeRateInput}
-                  onChange={(e) => {
-                    cancelPendingFxFetch();
-                    setFxLoading(false);
-                    setFxError(null);
-                    setExchangeRateInput(e.target.value);
-                    setExchangeRateSource("MANUAL_OVERRIDE");
-                    setServerError(null);
-                  }}
-                  onBlur={() =>
-                    setTouched((prev) => ({ ...prev, exchangeRate: true }))
-                  }
-                  error={exchangeRateError}
-                />
-                <div className="flex flex-col gap-1.5">
-                  <span className="text-[12px] font-semibold tracking-wide text-ink-muted-80">
-                    Converted Total ({baseCurrency})
-                  </span>
-                  <div
-                    data-testid="fx-base-total"
-                    className="flex h-11 items-center justify-between rounded-md border border-hairline bg-surface-pearl px-3.5"
-                  >
-                    <span className="text-[12px] font-medium text-ink-muted-48">
-                      Base Total
-                    </span>
-                    <span className="text-[15px] font-semibold tabular-nums text-ink">
-                      {effectiveBaseAmountCents !== null
-                        ? `${formatMinorUnits(effectiveBaseAmountCents, baseCurrency)} ${baseCurrency}`
-                        : `— ${baseCurrency}`}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {fxError && (
-                <p role="alert" className="text-[12px] font-medium text-red-600">
-                  {fxError}
-                </p>
-              )}
-
-              {!fxError &&
-                parsedInputAmountCents !== null &&
-                parsedInputAmountCents > 0 &&
-                parsedExchangeRate !== null &&
-                effectiveBaseAmountCents !== null && (
-                  <p className="text-[12px] tabular-nums text-ink-muted-48">
-                    {formatMinorUnits(parsedInputAmountCents, currency)} ×{" "}
-                    {parsedExchangeRate} ={" "}
-                    {formatMinorUnits(effectiveBaseAmountCents, baseCurrency)}{" "}
-                    {baseCurrency}
-                  </p>
-                )}
-            </div>
-          )}
-        </Card>
-
-        {/* Description */}
+        {/* 1. Merchant / Description */}
         <Input
-          label="Description"
+          label="Merchant / Description"
           name="description"
           required
-          placeholder="What was this expense for?"
+          autoFocus
+          placeholder="e.g., Whole Foods Market"
           value={description}
           onChange={(e) => {
             setDescription(e.target.value);
@@ -1768,17 +1461,31 @@ function AddEditExpenseModalInner({
           }}
           onBlur={() => setTouched((prev) => ({ ...prev, description: true }))}
           error={descriptionError}
+          disabled={isLockedExpense || isExpenseCreationBlockedByPolicy}
         />
 
-        {/* Category & Date */}
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Select
-            label="Category"
-            aria-label="Category"
-            options={categoryOptions}
-            value={category}
-            onChange={setCategory}
+        {/* 2. Amount & Date */}
+        <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+          <Input
+            label="Amount"
+            name="amount"
+            type="text"
+            inputMode="decimal"
+            required
+            prefix={baseCurrencySymbol}
+            suffix={baseCurrency}
+            placeholder={getCurrencyMinorDigits(baseCurrency) === 0 ? "0" : "0.00"}
+            value={amountInput}
+            onChange={(e) => {
+              setAmountInput(e.target.value);
+              setServerError(null);
+            }}
+            onBlur={() => setTouched((prev) => ({ ...prev, amount: true }))}
+            error={amountError}
+            disabled={isLockedExpense || isExpenseCreationBlockedByPolicy}
+            className="font-semibold tabular-nums"
           />
+
           <Input
             label="Date"
             name="expense_date"
@@ -1788,44 +1495,126 @@ function AddEditExpenseModalInner({
             onChange={(e) => setExpenseDate(e.target.value)}
             onBlur={() => setTouched((prev) => ({ ...prev, date: true }))}
             error={dateError}
+            disabled={isLockedExpense || isExpenseCreationBlockedByPolicy}
           />
         </div>
 
-        {/* Paid By */}
-        <Card variant="sub-card" padding="sm" className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-2.5">
-            <Avatar name={payerMember?.name ?? "Member"} size="md" />
-            <div className="min-w-0">
-              <span className="block text-[10px] font-semibold uppercase tracking-wider text-ink-muted-48">
-                Paid By
-              </span>
-              <span className="block truncate text-[13px] font-semibold text-ink">
-                {payerMember
-                  ? payerMember.id === currentUser?.id
-                    ? `Paid by You (${payerMember.name})`
-                    : `Paid by ${payerMember.name}`
-                  : "Select payer"}
-              </span>
+        {/* 3. Split Group & Category */}
+        <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+          <Select
+            label="Split Group"
+            aria-label="Split Group"
+            placeholder="Select a split group..."
+            options={groupOptions}
+            value={selectedGroupId}
+            onChange={handleGroupChange}
+            disabled={
+              isEditMode || isAdjustmentMode || nonArchivedGroups.length === 0
+            }
+            error={
+              touched.group && !selectedGroup
+                ? "Select a split group."
+                : undefined
+            }
+          />
+
+          <Select
+            label="Category"
+            aria-label="Category"
+            options={categoryOptions}
+            value={category}
+            onChange={setCategory}
+            disabled={isLockedExpense || isExpenseCreationBlockedByPolicy}
+          />
+        </div>
+
+        {/* 4. Paid By */}
+        <Select
+          label="Paid By"
+          aria-label="Paid By"
+          options={memberOptions}
+          value={paidBy}
+          onChange={setPaidBy}
+          disabled={
+            memberOptions.length === 0 ||
+            isLockedExpense ||
+            isExpenseCreationBlockedByPolicy
+          }
+        />
+
+        {/* 5. Conditional Receipt Upload when Group.require_receipt_over_100 is active and amount > $100 */}
+        {isReceiptRequired && (
+          <Card
+            variant="sub-card"
+            padding="sm"
+            data-testid="required-receipt-section"
+            className={cn(
+              "flex flex-col gap-2.5 border",
+              hasReceipt
+                ? "border-emerald-200 bg-emerald-50/40"
+                : "border-amber-300 bg-amber-50/60",
+            )}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[12px] font-semibold text-ink">
+                  Receipt Required (Over {formatMinorUnits(RECEIPT_POLICY_THRESHOLD_CENTS, baseCurrency)})
+                </span>
+                <Badge tone={hasReceipt ? "success" : "warning"} size="sm">
+                  {hasReceipt ? "Attached" : "Required"}
+                </Badge>
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={
+                  isSubmitting ||
+                  isLockedExpense ||
+                  isExpenseCreationBlockedByPolicy
+                }
+                leftIcon={<Upload className="h-3.5 w-3.5" aria-hidden="true" />}
+                onClick={handleAttachReceiptClick}
+              >
+                {hasReceipt ? "Replace Receipt" : "Upload Receipt"}
+              </Button>
             </div>
-          </div>
 
-          <div className="w-full sm:w-52">
-            <Select
-              aria-label="Paid By"
-              variant="pill-select"
-              options={memberOptions}
-              value={paidBy}
-              onChange={setPaidBy}
-              disabled={memberOptions.length === 0}
-              className="h-9 bg-canvas text-[13px]"
-            />
-          </div>
-        </Card>
+            {!hasReceipt ? (
+              <p className="text-[12px] text-amber-900">
+                This group requires a receipt attachment for expenses over{" "}
+                {formatMinorUnits(RECEIPT_POLICY_THRESHOLD_CENTS, baseCurrency)}.
+              </p>
+            ) : (
+              <div className="flex items-center justify-between gap-2 rounded-md border border-hairline bg-canvas px-3 py-1.5 text-[12px]">
+                <span className="truncate font-medium text-ink">
+                  {attachedFile
+                    ? `${attachedFile.name} (${formatFileSize(attachedFile.size)})`
+                    : "Existing receipt attached"}
+                </span>
+                <Button
+                  type="button"
+                  variant="icon-circle"
+                  size="sm"
+                  aria-label="Remove required receipt"
+                  onClick={() => {
+                    uploadedReceiptRef.current = null;
+                    setAttachedFile(null);
+                    setExistingReceiptUrl(null);
+                  }}
+                  className="h-6 w-6 border-transparent bg-transparent text-ink-muted-48 hover:bg-surface-pearl hover:text-red-600"
+                >
+                  <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                </Button>
+              </div>
+            )}
+          </Card>
+        )}
 
-        {/* Split Method SegmentedControl */}
-        <div className="flex flex-col gap-2">
+        {/* 6. Split Method SegmentedControl */}
+        <div className="flex flex-col gap-1.5 pt-0.5">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted-48">
+            <span className="text-[12px] font-medium text-ink-muted-80">
               Split Method
             </span>
             {splitMethod === "PERCENTAGE" && selectedMemberIds.length > 0 && (
@@ -1844,31 +1633,31 @@ function AddEditExpenseModalInner({
             ariaLabel="Split Method"
             variant="split-method"
             fullWidth
-            options={SPLIT_METHOD_OPTIONS}
+            options={SPLIT_METHOD_OPTIONS.map((opt) => ({
+              ...opt,
+              disabled: isLockedExpense || isExpenseCreationBlockedByPolicy,
+            }))}
             value={splitMethod}
             onChange={handleSplitMethodChange}
           />
         </div>
 
-        {/* Split Breakdown Member Checklist */}
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted-48">
-              Split Breakdown
+        {/* 7. Split Distribution Sub-Card */}
+        <Card variant="sub-card" padding="sm" className="flex flex-col gap-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-divider-soft pb-2 text-[11px] font-semibold uppercase tracking-wider text-ink-muted-48">
+            <span>
+              Split Distribution ({selectedMemberIds.length}{" "}
+              {selectedMemberIds.length === 1 ? "Member" : "Members"})
             </span>
-            <span className="text-[12px] text-ink-muted-48">
-              {selectedMemberIds.length} of {groupMembers.length} selected
-            </span>
+            <span className="text-[#0066cc]">{distributionSummary}</span>
           </div>
 
           {groupMembers.length === 0 ? (
-            <Card variant="sub-card" padding="sm">
-              <p className="text-center text-[13px] text-ink-muted-48">
-                {selectedGroup
-                  ? "No active members in this group."
-                  : "Choose a split group above to configure member shares."}
-              </p>
-            </Card>
+            <p className="py-2 text-center text-[13px] text-ink-muted-48">
+              {selectedGroup
+                ? "No active members in this group."
+                : "Choose a split group above to configure member shares."}
+            </p>
           ) : (
             <div className="flex flex-col gap-2">
               {groupMembers.map((member) => {
@@ -1883,36 +1672,36 @@ function AddEditExpenseModalInner({
                     key={member.id}
                     data-testid={`split-member-row-${member.id}`}
                     className={cn(
-                      "flex flex-wrap items-center justify-between gap-2.5 rounded-md border px-3 py-2.5 transition-colors",
-                      isIncluded
-                        ? "border-hairline bg-canvas"
-                        : "border-divider-soft bg-surface-pearl opacity-65",
+                      "flex flex-wrap items-center justify-between gap-2 rounded-[11px] px-2 py-1.5 transition-colors",
+                      isIncluded ? "bg-transparent" : "opacity-55",
                     )}
                   >
-                    <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2.5">
+                    <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
                       <input
                         type="checkbox"
                         checked={isIncluded}
+                        disabled={
+                          isLockedExpense || isExpenseCreationBlockedByPolicy
+                        }
                         onChange={() => handleToggleMember(member.id)}
                         aria-label={`Include ${member.name} in split`}
                         className="h-4 w-4 shrink-0 cursor-pointer rounded border-hairline accent-[#0066cc]"
                       />
                       <Avatar name={member.name} size="sm" />
-                      <div className="min-w-0">
-                        <span className="block truncate text-[13px] font-semibold text-ink">
-                          {member.id === currentUser?.id
-                            ? `${member.name} (You)`
-                            : member.name}
-                        </span>
-                        <span
-                          className={cn(
-                            "block text-[11px] font-medium",
-                            isPayer ? "text-[#0066cc]" : "text-ink-muted-48",
-                          )}
-                        >
-                          {isPayer ? "Payer (Credited)" : "Member"}
-                        </span>
-                      </div>
+                      <span className="truncate text-[13px] font-medium text-ink">
+                        {member.name}
+                        {member.id === currentUser?.id && (
+                          <span className="font-normal text-ink-muted-48">
+                            {" "}
+                            (You)
+                          </span>
+                        )}
+                      </span>
+                      {isPayer && (
+                        <Badge tone="info" size="sm" className="shrink-0">
+                          Payer
+                        </Badge>
+                      )}
                     </label>
 
                     <div className="flex shrink-0 items-center gap-2">
@@ -1936,7 +1725,11 @@ function AddEditExpenseModalInner({
                               type="text"
                               inputMode="decimal"
                               suffix="%"
-                              disabled={!isIncluded}
+                              disabled={
+                                !isIncluded ||
+                                isLockedExpense ||
+                                isExpenseCreationBlockedByPolicy
+                              }
                               value={
                                 isIncluded
                                   ? (percentageInputs[member.id] ?? "0")
@@ -1949,7 +1742,7 @@ function AddEditExpenseModalInner({
                                   [member.id]: val,
                                 }));
                               }}
-                              className="text-right text-[13px] tabular-nums"
+                              className="h-9 text-right text-[13px] tabular-nums"
                             />
                           </div>
                           <span
@@ -1973,7 +1766,11 @@ function AddEditExpenseModalInner({
                                 ? "0"
                                 : "0.00"
                             }
-                            disabled={!isIncluded}
+                            disabled={
+                              !isIncluded ||
+                              isLockedExpense ||
+                              isExpenseCreationBlockedByPolicy
+                            }
                             value={
                               isIncluded ? (exactInputs[member.id] ?? "") : ""
                             }
@@ -1984,8 +1781,48 @@ function AddEditExpenseModalInner({
                                 [member.id]: val,
                               }));
                             }}
-                            className="text-right text-[13px] tabular-nums"
+                            className="h-9 text-right text-[13px] tabular-nums"
                           />
+                        </div>
+                      )}
+
+                      {splitMethod === "SHARES" && (
+                        <div className="flex items-center gap-2">
+                          <div className="w-24">
+                            <Input
+                              aria-label={`${member.name} shares`}
+                              type="text"
+                              inputMode="decimal"
+                              suffix="sh"
+                              disabled={
+                                !isIncluded ||
+                                isLockedExpense ||
+                                isExpenseCreationBlockedByPolicy
+                              }
+                              value={
+                                isIncluded
+                                  ? (shareInputs[member.id] ?? "1")
+                                  : "0"
+                              }
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setShareInputs((prev) => ({
+                                  ...prev,
+                                  [member.id]: val,
+                                }));
+                              }}
+                              className="h-9 text-right text-[13px] tabular-nums"
+                            />
+                          </div>
+                          <span
+                            data-testid={`split-share-${member.id}`}
+                            className="min-w-[84px] text-right text-[13px] font-semibold tabular-nums text-ink"
+                          >
+                            {formatMinorUnits(shareCents, baseCurrency)}{" "}
+                            <span className="text-[11px] font-normal text-ink-muted-48">
+                              ({sharePct}%)
+                            </span>
+                          </span>
                         </div>
                       )}
                     </div>
@@ -2002,7 +1839,7 @@ function AddEditExpenseModalInner({
               aria-live="polite"
               data-testid="split-balance-bar"
               className={cn(
-                "flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2.5 text-[12px]",
+                "mt-1 flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-[12px]",
                 splitEvaluation.ok && isAmountValid
                   ? "border-[#0066cc]/25 bg-[#0066cc]/5 text-[#0066cc]"
                   : "border-amber-200 bg-amber-50 text-amber-900",
@@ -2043,17 +1880,20 @@ function AddEditExpenseModalInner({
                   : splitMethod === "PERCENTAGE" &&
                       splitEvaluation.totalBps !== 10_000
                     ? `${(splitEvaluation.totalBps / 100).toFixed(2)}% of 100.00%`
-                    : effectiveBaseAmountCents && effectiveBaseAmountCents > 0
-                      ? remainingCents > 0
-                        ? `${formatMinorUnits(remainingCents, baseCurrency)} remaining`
-                        : remainingCents < 0
-                          ? `Over by ${formatMinorUnits(Math.abs(remainingCents), baseCurrency)}`
-                          : splitEvaluation.errorMessage ?? "Incomplete"
-                      : "Pending amount"}
+                    : splitMethod === "SHARES" &&
+                        splitEvaluation.totalShares <= 0
+                      ? "Total shares must be > 0"
+                      : effectiveBaseAmountCents && effectiveBaseAmountCents > 0
+                        ? remainingCents > 0
+                          ? `${formatMinorUnits(remainingCents, baseCurrency)} remaining`
+                          : remainingCents < 0
+                            ? `Over by ${formatMinorUnits(Math.abs(remainingCents), baseCurrency)}`
+                            : (splitEvaluation.errorMessage ?? "Incomplete")
+                        : "Pending amount"}
               </span>
             </div>
           )}
-        </div>
+        </Card>
       </form>
     </Dialog>
   );
