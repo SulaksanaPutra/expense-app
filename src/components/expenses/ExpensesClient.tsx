@@ -1339,19 +1339,19 @@ export function ExpensesClient({
       <Card
         variant="section"
         padding="sm"
-        className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between"
+        className="flex flex-col gap-2.5 xl:flex-row xl:items-center xl:justify-between"
       >
         <div
           role="group"
           aria-label="Filter by category"
-          className="flex flex-wrap items-center gap-2"
+          className="flex flex-wrap items-center gap-1.5 xl:flex-nowrap"
         >
           <Button
             type="button"
             size="sm"
             variant={selectedCategory === "all" ? "primary" : "secondary"}
             onClick={() => handleCategoryChange("all")}
-            className="h-8 px-3.5 text-[13px] tabular-nums"
+            className="h-8 whitespace-nowrap px-2.5 text-[12px] tabular-nums"
           >
             All ({kpi.transactionCount})
           </Button>
@@ -1367,11 +1367,11 @@ export function ExpensesClient({
                 onClick={() =>
                   handleCategoryChange(isSelected ? "all" : cat.value)
                 }
-                className="h-8 gap-1.5 px-3.5 text-[13px]"
+                className="h-8 gap-1.5 whitespace-nowrap px-2.5 text-[12px]"
               >
                 <span
                   aria-hidden="true"
-                  className="h-2 w-2 shrink-0 rounded-full"
+                  className="h-1.5 w-1.5 shrink-0 rounded-full"
                   style={{
                     backgroundColor: isSelected ? "#ffffff" : cat.dotColor,
                   }}
@@ -1386,7 +1386,7 @@ export function ExpensesClient({
               size="sm"
               variant="primary"
               onClick={() => handleCategoryChange("all")}
-              className="h-8 gap-1.5 px-3.5 text-[13px]"
+              className="h-8 gap-1.5 whitespace-nowrap px-2.5 text-[12px]"
             >
               <span>{selectedCategory}</span>
               <X className="h-3.5 w-3.5" aria-hidden="true" />
@@ -1396,7 +1396,7 @@ export function ExpensesClient({
 
         <div
           data-testid="expenses-filter-controls"
-          className="flex flex-wrap items-center gap-2"
+          className="flex flex-wrap items-center gap-1.5 xl:flex-nowrap"
         >
           <Select
             aria-label="Ownership"
@@ -1412,7 +1412,7 @@ export function ExpensesClient({
                 </span>
               </span>
             }
-            className="!h-9 px-3.5 text-[12px]"
+            className="!h-8 whitespace-nowrap !px-3 text-[12px]"
             containerClassName="w-full sm:w-auto"
           />
 
@@ -1430,7 +1430,7 @@ export function ExpensesClient({
                 </span>
               </span>
             }
-            className="!h-9 px-3.5 text-[12px]"
+            className="!h-8 whitespace-nowrap !px-3 text-[12px]"
             containerClassName="w-full sm:w-auto"
           />
 
@@ -1448,7 +1448,7 @@ export function ExpensesClient({
                 </span>
               </span>
             }
-            className="!h-9 px-3.5 text-[12px]"
+            className="!h-8 whitespace-nowrap !px-3 text-[12px]"
             containerClassName="w-full sm:w-auto"
           />
         </div>
@@ -1488,23 +1488,23 @@ export function ExpensesClient({
                     sortBy === "date-desc" ? "date-asc" : "date-desc",
                   )
                 }
-                className="px-4 py-3.5 md:px-6"
+                className="py-3.5 pl-4 pr-3"
               >
                 DATE
               </TableHead>
-              <TableHead className="px-4 py-3.5 md:px-6">
+              <TableHead className="px-3 py-3.5">
                 MERCHANT &amp; GROUP
               </TableHead>
-              <TableHead className="px-4 py-3.5 md:px-6">CATEGORY</TableHead>
-              <TableHead className="px-4 py-3.5 md:px-6">PAID BY</TableHead>
-              <TableHead className="px-4 py-3.5 md:px-6">SPLIT</TableHead>
-              <TableHead className="px-4 py-3.5 text-right md:px-6">
+              <TableHead className="px-3 py-3.5">CATEGORY</TableHead>
+              <TableHead className="px-3 py-3.5">PAID BY</TableHead>
+              <TableHead className="px-3 py-3.5">SPLIT</TableHead>
+              <TableHead className="px-3 py-3.5 text-right">
                 YOUR SHARE
               </TableHead>
-              <TableHead className="px-4 py-3.5 text-center md:px-6">
+              <TableHead className="px-3 py-3.5 text-center">
                 STATUS
               </TableHead>
-              <TableHead className="px-4 py-3.5 text-center md:px-6">
+              <TableHead className="py-3.5 pl-2 pr-4 text-center">
                 ACTION
               </TableHead>
             </TableRow>
@@ -1675,12 +1675,12 @@ export function ExpensesClient({
                     key={exp.id}
                     data-testid={`expense-row-${exp.id}`}
                   >
-                    <TableCell className="whitespace-nowrap px-4 py-4 font-medium text-outline md:px-6">
+                    <TableCell className="whitespace-nowrap py-3.5 pl-4 pr-3 font-medium text-outline">
                       {formatShortDate(exp.expenseDate)}
                     </TableCell>
-                    <TableCell className="min-w-[160px] px-4 py-4 md:px-6">
+                    <TableCell className="min-w-[140px] max-w-[200px] px-3 py-3.5">
                       <div className="flex items-center gap-1.5">
-                        <span className="font-semibold text-ink">
+                        <span className="truncate font-semibold text-ink">
                           {exp.description}
                         </span>
                         {exp.adjustmentForExpenseId && (
@@ -1689,11 +1689,11 @@ export function ExpensesClient({
                           </Badge>
                         )}
                       </div>
-                      <div className="text-[12px] text-outline">
+                      <div className="truncate text-[12px] text-outline">
                         {exp.groupName}
                       </div>
                     </TableCell>
-                    <TableCell className="whitespace-nowrap px-4 py-4 md:px-6">
+                    <TableCell className="whitespace-nowrap px-3 py-3.5">
                       <Badge
                         tone="category"
                         size="sm"
@@ -1702,7 +1702,7 @@ export function ExpensesClient({
                         {exp.category}
                       </Badge>
                     </TableCell>
-                    <TableCell className="whitespace-nowrap px-4 py-4 md:px-6">
+                    <TableCell className="whitespace-nowrap px-3 py-3.5">
                       <div className="flex items-center gap-2">
                         <Avatar name={exp.payerName} size="sm" />
                         <span className="font-medium text-ink">
@@ -1710,7 +1710,7 @@ export function ExpensesClient({
                         </span>
                       </div>
                     </TableCell>
-                    <TableCell className="whitespace-nowrap px-4 py-4 font-medium text-on-surface-variant md:px-6">
+                    <TableCell className="whitespace-nowrap px-3 py-3.5 font-medium text-on-surface-variant">
                       {formatSplitLabel(
                         exp.splitMethod,
                         exp.splitBreakdown,
@@ -1718,11 +1718,11 @@ export function ExpensesClient({
                       )}
                     </TableCell>
                     <TableCell
-                      className={`whitespace-nowrap px-4 py-4 text-right font-semibold tabular-nums md:px-6 ${shareColorClass}`}
+                      className={`whitespace-nowrap px-3 py-3.5 text-right font-semibold tabular-nums ${shareColorClass}`}
                     >
                       {shareDisplay}
                     </TableCell>
-                    <TableCell className="whitespace-nowrap px-4 py-4 text-center md:px-6">
+                    <TableCell className="whitespace-nowrap px-3 py-3.5 text-center">
                       {exp.isLocked ? (
                         <Badge tone="neutral" size="sm">
                           <Lock className="h-3 w-3" aria-hidden="true" />
@@ -1738,7 +1738,7 @@ export function ExpensesClient({
                         </Badge>
                       )}
                     </TableCell>
-                    <TableCell className="whitespace-nowrap px-4 py-4 text-center md:px-6">
+                    <TableCell className="whitespace-nowrap py-3.5 pl-2 pr-4 text-center">
                       <Dropdown
                         variant="action-menu"
                         align="right"
