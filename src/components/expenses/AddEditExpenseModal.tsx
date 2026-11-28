@@ -1264,6 +1264,15 @@ function AddEditExpenseModalInner({
       closeOnEscape={!isSubmitting}
       footer={
         <div className="flex w-full flex-col gap-3">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*,application/pdf"
+            aria-label="Upload receipt file"
+            tabIndex={-1}
+            className="sr-only"
+            onChange={handleReceiptFileChange}
+          />
           {receiptError && (
             <AlertBanner
               tone="error"
@@ -1272,81 +1281,71 @@ function AddEditExpenseModalInner({
               onDismiss={() => setReceiptError(null)}
             />
           )}
-          <div className="flex w-full flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*,application/pdf"
-                aria-label="Upload receipt file"
-                tabIndex={-1}
-                className="sr-only"
-                onChange={handleReceiptFileChange}
-              />
-              {!isReceiptRequired && (
-                <>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    disabled={
-                      isSubmitting ||
-                      isLockedExpense ||
-                      isExpenseCreationBlockedByPolicy ||
-                      isFormerMemberInSelectedGroup
-                    }
-                    leftIcon={<Paperclip className="h-4 w-4" aria-hidden="true" />}
-                    onClick={handleAttachReceiptClick}
-                  >
-                    Attach Receipt
-                  </Button>
-                  {attachedFile && (
-                    <span className="inline-flex max-w-[190px] items-center gap-1.5 rounded-pill border border-hairline bg-canvas-parchment py-0.5 pr-1 pl-2.5 text-[11px] font-medium text-ink">
-                      <span className="truncate">{attachedFile.name}</span>
-                      <span className="shrink-0 text-ink-muted-48">
-                        ({formatFileSize(attachedFile.size)})
-                      </span>
-                      <Button
-                        type="button"
-                        variant="icon-circle"
-                        size="sm"
-                        aria-label="Remove attached receipt"
-                        onClick={() => {
-                          uploadedReceiptRef.current = null;
-                          setAttachedFile(null);
-                        }}
-                        className="h-6 w-6 border-transparent bg-transparent text-ink-muted-48 hover:bg-canvas hover:text-red-600"
-                      >
-                        <Trash2 className="h-3 w-3" aria-hidden="true" />
-                      </Button>
+          <div className="flex w-full flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
+            {!isReceiptRequired && (
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={
+                    isSubmitting ||
+                    isLockedExpense ||
+                    isExpenseCreationBlockedByPolicy ||
+                    isFormerMemberInSelectedGroup
+                  }
+                  leftIcon={<Paperclip className="h-4 w-4" aria-hidden="true" />}
+                  onClick={handleAttachReceiptClick}
+                >
+                  Attach Receipt
+                </Button>
+                {attachedFile && (
+                  <span className="inline-flex max-w-[190px] items-center gap-1.5 rounded-pill border border-hairline bg-canvas-parchment py-0.5 pr-1 pl-2.5 text-[11px] font-medium text-ink">
+                    <span className="truncate">{attachedFile.name}</span>
+                    <span className="shrink-0 text-ink-muted-48">
+                      ({formatFileSize(attachedFile.size)})
                     </span>
-                  )}
-                  {!attachedFile && existingReceiptUrl && (
-                    <span className="inline-flex max-w-[190px] items-center gap-1.5 rounded-pill border border-hairline bg-canvas-parchment py-0.5 pr-1 pl-2.5 text-[11px] font-medium text-ink">
-                      <span className="truncate">Existing receipt</span>
-                      <Button
-                        type="button"
-                        variant="icon-circle"
-                        size="sm"
-                        aria-label="Remove existing receipt"
-                        onClick={() => setExistingReceiptUrl(null)}
-                        className="h-6 w-6 border-transparent bg-transparent text-ink-muted-48 hover:bg-canvas hover:text-red-600"
-                      >
-                        <Trash2 className="h-3 w-3" aria-hidden="true" />
-                      </Button>
-                    </span>
-                  )}
-                </>
-              )}
-            </div>
+                    <Button
+                      type="button"
+                      variant="icon-circle"
+                      size="sm"
+                      aria-label="Remove attached receipt"
+                      onClick={() => {
+                        uploadedReceiptRef.current = null;
+                        setAttachedFile(null);
+                      }}
+                      className="h-6 w-6 border-transparent bg-transparent text-ink-muted-48 hover:bg-canvas hover:text-red-600"
+                    >
+                      <Trash2 className="h-3 w-3" aria-hidden="true" />
+                    </Button>
+                  </span>
+                )}
+                {!attachedFile && existingReceiptUrl && (
+                  <span className="inline-flex max-w-[190px] items-center gap-1.5 rounded-pill border border-hairline bg-canvas-parchment py-0.5 pr-1 pl-2.5 text-[11px] font-medium text-ink">
+                    <span className="truncate">Existing receipt</span>
+                    <Button
+                      type="button"
+                      variant="icon-circle"
+                      size="sm"
+                      aria-label="Remove existing receipt"
+                      onClick={() => setExistingReceiptUrl(null)}
+                      className="h-6 w-6 border-transparent bg-transparent text-ink-muted-48 hover:bg-canvas hover:text-red-600"
+                    >
+                      <Trash2 className="h-3 w-3" aria-hidden="true" />
+                    </Button>
+                  </span>
+                )}
+              </div>
+            )}
 
-            <div className="flex items-center gap-2.5">
+            <div className="flex w-full flex-col-reverse gap-2 sm:ml-auto sm:w-auto sm:flex-row sm:items-center sm:gap-2.5">
               <Button
                 type="button"
                 variant="secondary"
                 size="md"
                 disabled={isSubmitting}
                 onClick={handleClose}
+                className="w-full sm:w-auto"
               >
                 Cancel
               </Button>
@@ -1364,7 +1363,7 @@ function AddEditExpenseModalInner({
                     <Plus className="h-4 w-4" aria-hidden="true" />
                   )
                 }
-                className="tabular-nums"
+                className="w-full tabular-nums sm:w-auto"
               >
                 {saveLabel}
               </Button>
