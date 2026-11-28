@@ -10,6 +10,7 @@ import {
   type ExpenseGroupInfo,
   type ExpenseLedgerRecord,
   type ExpenseSettlementRecord,
+  type MemberSettlementHandle,
 } from "./ledger";
 
 export interface ExpensesPageData {
@@ -145,7 +146,12 @@ export async function getExpensesPageData(
 
     const usersById = new Map<
       string,
-      { id: string; full_name: string; instant_settlement_tag: string | null }
+      {
+        id: string;
+        full_name: string;
+        instant_settlement_tag: string | null;
+        settlement_handles: MemberSettlementHandle[];
+      }
     >();
     if (userIds.length > 0) {
       const [{ data: userRows }, handleResult] = await Promise.all([
@@ -154,23 +160,48 @@ export async function getExpensesPageData(
           .then(() =>
             supabase
               .from("settlement_handles")
-              .select("user_id, handle, is_default")
-              .in("user_id", userIds),
+              .select("id, user_id, provider, handle, display_note, is_default")
+              .in("user_id", userIds)
+              .order("is_default", { ascending: false })
+              .order("created_at", { ascending: true }),
           )
-          .catch(() => ({ data: [] as Array<{ user_id: string; handle: string; is_default: boolean }> })),
+          .catch(() => ({
+            data: [] as Array<{
+              id: string;
+              user_id: string;
+              provider: MemberSettlementHandle["provider"];
+              handle: string;
+              display_note: string | null;
+              is_default: boolean;
+            }>,
+          })),
       ]);
       const handleRows = handleResult?.data ?? [];
+      const handlesByUser = new Map<string, MemberSettlementHandle[]>();
       const defaultHandleByUser = new Map<string, string>();
       for (const h of handleRows ?? []) {
+        const list = handlesByUser.get(h.user_id) ?? [];
+        list.push({
+          id: h.id,
+          provider: h.provider,
+          handle: h.handle,
+          displayNote: h.display_note ?? null,
+          isDefault: Boolean(h.is_default),
+        });
+        handlesByUser.set(h.user_id, list);
         if (h.is_default || !defaultHandleByUser.has(h.user_id)) {
           defaultHandleByUser.set(h.user_id, h.handle);
         }
       }
       for (const u of userRows ?? []) {
+        const sortedHandles = (handlesByUser.get(u.id) ?? []).sort((a, b) =>
+          a.isDefault === b.isDefault ? 0 : a.isDefault ? -1 : 1,
+        );
         usersById.set(u.id, {
           id: u.id,
           full_name: u.full_name || "Member",
           instant_settlement_tag: defaultHandleByUser.get(u.id) ?? null,
+          settlement_handles: sortedHandles,
         });
       }
     }
@@ -210,6 +241,7 @@ export async function getExpensesPageData(
             name: u?.full_name ?? "Member",
             status: m.status,
             instantSettlementTag: u?.instant_settlement_tag ?? null,
+            settlementHandles: u?.settlement_handles ?? [],
           };
         }),
       };

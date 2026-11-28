@@ -12,14 +12,21 @@ import {
   Select,
 } from "@/components/ui";
 import type { SelectOption } from "@/components/ui";
-import type { SimplifiedDebtEdge } from "@/lib/expenses/ledger";
+import type {
+  MemberSettlementHandle,
+  SimplifiedDebtEdge,
+} from "@/lib/expenses/ledger";
 import {
   formatMinorUnits,
   getCurrencyMinorDigits,
   getCurrencySymbol,
   parseCurrencyInputToMinorUnits,
 } from "@/lib/money";
-import type { Database, PaymentRail } from "@/types/database";
+import type {
+  Database,
+  PaymentRail,
+  SettlementHandleProvider,
+} from "@/types/database";
 
 export interface RecordSettlementModalProps {
   open: boolean;
@@ -29,14 +36,32 @@ export interface RecordSettlementModalProps {
   initialDebtKey?: string | null;
   defaultPaymentRail?: PaymentRail;
   currentUserInstantTag?: string | null;
-  onSettled?: (settlement: Database["public"]["Tables"]["settlements"]["Row"]) => void;
+  onSettled?: (
+    settlement: Database["public"]["Tables"]["settlements"]["Row"],
+  ) => void;
 }
 
+const MANUAL_HANDLE_VALUE = "__manual__";
+
+const PROVIDER_LABELS: Record<SettlementHandleProvider, string> = {
+  VENMO: "Venmo",
+  ZELLE: "Zelle",
+  CASH_APP: "Cash App",
+};
+
 const PAYMENT_RAIL_OPTIONS: SelectOption[] = [
-  { value: "VENMO", label: "Venmo (@instant_tag / deep link)" },
-  { value: "APPLE_CARD", label: "Apple Card / Apple Cash" },
+  { value: "VENMO", label: "Venmo" },
+  { value: "ZELLE", label: "Zelle" },
+  { value: "CASH_APP", label: "Cash App" },
   { value: "CASH", label: "Cash / In-Person" },
-  { value: "OTHER", label: "Bank Transfer / Other" },
+  { value: "BANK_SETTLEMENT", label: "Bank Transfer" },
+  { value: "OTHER", label: "Other" },
+];
+
+const MANUAL_RAIL_OPTIONS: SelectOption[] = [
+  { value: "CASH", label: "Cash / In-Person" },
+  { value: "BANK_SETTLEMENT", label: "Bank Transfer" },
+  { value: "OTHER", label: "Other" },
 ];
 
 function formatMinorPlain(minorUnits: number, currency: string): string {
@@ -44,13 +69,39 @@ function formatMinorPlain(minorUnits: number, currency: string): string {
   return (minorUnits / 10 ** digits).toFixed(digits);
 }
 
-function formatSettlementTag(tag: string | null | undefined): string | null {
+function formatSettlementTag(
+  tag: string | null | undefined,
+  provider?: SettlementHandleProvider,
+): string | null {
   const trimmed = tag?.trim() ?? "";
   if (!trimmed) return null;
+  if (provider === "ZELLE") return trimmed;
+  if (provider === "CASH_APP") {
+    return trimmed.startsWith("$") ? trimmed : `$${trimmed.replace(/^@+/, "")}`;
+  }
   return trimmed.startsWith("@") ? trimmed : `@${trimmed}`;
 }
 
-export function getSettlementDebtKey(d: Pick<SimplifiedDebtEdge, "groupId" | "payerId" | "recipientId">): string {
+function getSortedRecipientHandles(
+  debt: SimplifiedDebtEdge | null,
+): MemberSettlementHandle[] {
+  const handles = debt?.recipientSettlementHandles ?? [];
+  if (handles.length === 0) return [];
+  return [...handles].sort((a, b) =>
+    a.isDefault === b.isDefault ? 0 : a.isDefault ? -1 : 1,
+  );
+}
+
+function getDefaultHandle(
+  handles: readonly MemberSettlementHandle[],
+): MemberSettlementHandle | null {
+  if (handles.length === 0) return null;
+  return handles.find((h) => h.isDefault) ?? handles[0] ?? null;
+}
+
+export function getSettlementDebtKey(
+  d: Pick<SimplifiedDebtEdge, "groupId" | "payerId" | "recipientId">,
+): string {
   return `${d.groupId}::${d.payerId}::${d.recipientId}`;
 }
 
@@ -86,29 +137,83 @@ function RecordSettlementModalInner({
     debts[0] ??
     null;
 
+  const initialHandles = getSortedRecipientHandles(defaultDebt);
+  const initialDefaultHandle = getDefaultHandle(initialHandles);
+
   const [selectedKey, setSelectedKey] = React.useState<string>(
     defaultDebt ? getSettlementDebtKey(defaultDebt) : "",
   );
   const selectedDebt = React.useMemo(
-    () => debts.find((d) => getSettlementDebtKey(d) === selectedKey) ?? defaultDebt,
+    () =>
+      debts.find((d) => getSettlementDebtKey(d) === selectedKey) ?? defaultDebt,
     [debts, defaultDebt, selectedKey],
   );
 
+  const recipientHandles = React.useMemo(
+    () => getSortedRecipientHandles(selectedDebt),
+    [selectedDebt],
+  );
+
+  const [selectedHandleId, setSelectedHandleId] = React.useState<string>(
+    initialDefaultHandle ? initialDefaultHandle.id : MANUAL_HANDLE_VALUE,
+  );
   const [amountInput, setAmountInput] = React.useState<string>(
     selectedDebt
       ? formatMinorPlain(selectedDebt.amountCents, selectedDebt.currency)
       : "",
   );
-  const [paymentRail, setPaymentRail] =
-    React.useState<PaymentRail>(defaultPaymentRail);
+  const [paymentRail, setPaymentRail] = React.useState<PaymentRail>(
+    initialDefaultHandle ? initialDefaultHandle.provider : defaultPaymentRail,
+  );
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
 
+  const activeHandle = React.useMemo(
+    () =>
+      selectedHandleId !== MANUAL_HANDLE_VALUE
+        ? (recipientHandles.find((h) => h.id === selectedHandleId) ??
+          getDefaultHandle(recipientHandles))
+        : null,
+    [recipientHandles, selectedHandleId],
+  );
+
+  const effectivePaymentRail: PaymentRail = activeHandle
+    ? activeHandle.provider
+    : paymentRail;
+
   const handleDebtChange = (nextKey: string) => {
     setSelectedKey(nextKey);
-    const match = debts.find((d) => getSettlementDebtKey(d) === nextKey);
+    const match = debts.find((d) => getSettlementDebtKey(d) === nextKey) ?? null;
     if (match) {
       setAmountInput(formatMinorPlain(match.amountCents, match.currency));
+      const nextHandles = getSortedRecipientHandles(match);
+      const nextDefault = getDefaultHandle(nextHandles);
+      if (nextDefault) {
+        setSelectedHandleId(nextDefault.id);
+        setPaymentRail(nextDefault.provider);
+      } else {
+        setSelectedHandleId(MANUAL_HANDLE_VALUE);
+        setPaymentRail(defaultPaymentRail);
+      }
+    }
+    setErrorMessage(null);
+  };
+
+  const handleSwitcherChange = (nextVal: string) => {
+    setSelectedHandleId(nextVal);
+    if (nextVal === MANUAL_HANDLE_VALUE) {
+      if (
+        paymentRail === "VENMO" ||
+        paymentRail === "ZELLE" ||
+        paymentRail === "CASH_APP"
+      ) {
+        setPaymentRail("CASH");
+      }
+    } else {
+      const found = recipientHandles.find((h) => h.id === nextVal);
+      if (found) {
+        setPaymentRail(found.provider);
+      }
     }
     setErrorMessage(null);
   };
@@ -116,29 +221,62 @@ function RecordSettlementModalInner({
   const currency = selectedDebt?.currency ?? "USD";
   const parsedAmountCents = parseCurrencyInputToMinorUnits(amountInput, currency);
   const isAmountValid = parsedAmountCents !== null && parsedAmountCents > 0;
+
   const effectiveRecipientTag =
+    activeHandle?.handle ??
     selectedDebt?.recipientInstantTag ??
     (selectedDebt?.recipientId === currentUserId ? currentUserInstantTag : null);
-  const recipientDisplayTag = formatSettlementTag(effectiveRecipientTag);
+  const recipientDisplayTag = formatSettlementTag(
+    effectiveRecipientTag,
+    activeHandle?.provider ??
+      (effectivePaymentRail === "ZELLE" || effectivePaymentRail === "CASH_APP"
+        ? effectivePaymentRail
+        : "VENMO"),
+  );
   const selfPayerDisplayTag =
     selectedDebt?.payerId === currentUserId
       ? formatSettlementTag(currentUserInstantTag)
       : null;
 
-  const venmoDeepLink = React.useMemo(() => {
+  const paymentDeepLink = React.useMemo(() => {
     if (!selectedDebt || !isAmountValid || parsedAmountCents === null) return null;
-    const recipientHandle = effectiveRecipientTag
-      ? effectiveRecipientTag.trim().replace(/^@+/, "")
-      : "";
     const majorAmount = formatMinorPlain(parsedAmountCents, currency);
-    const note = encodeURIComponent(
-      `LedgerSplit settlement — ${selectedDebt.groupName}`,
-    );
-    const recParam = recipientHandle
-      ? `&recipients=${encodeURIComponent(recipientHandle)}`
-      : "";
-    return `venmo://paycharge?txn=pay${recParam}&amount=${majorAmount}&note=${note}`;
-  }, [currency, effectiveRecipientTag, isAmountValid, parsedAmountCents, selectedDebt]);
+
+    if (effectivePaymentRail === "VENMO") {
+      const recipientHandle = effectiveRecipientTag
+        ? effectiveRecipientTag.trim().replace(/^@+/, "")
+        : "";
+      const note = encodeURIComponent(
+        `LedgerSplit settlement — ${selectedDebt.groupName}`,
+      );
+      const recParam = recipientHandle
+        ? `&recipients=${encodeURIComponent(recipientHandle)}`
+        : "";
+      return {
+        href: `venmo://paycharge?txn=pay${recParam}&amount=${majorAmount}&note=${note}`,
+        label: "Open Venmo",
+      };
+    }
+
+    if (effectivePaymentRail === "CASH_APP" && effectiveRecipientTag) {
+      const cleanCashtag = effectiveRecipientTag.trim().replace(/^[\$@]+/, "");
+      if (cleanCashtag) {
+        return {
+          href: `https://cash.app/$${encodeURIComponent(cleanCashtag)}/${majorAmount}`,
+          label: "Open Cash App",
+        };
+      }
+    }
+
+    return null;
+  }, [
+    currency,
+    effectivePaymentRail,
+    effectiveRecipientTag,
+    isAmountValid,
+    parsedAmountCents,
+    selectedDebt,
+  ]);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -151,17 +289,22 @@ function RecordSettlementModalInner({
 
     setIsSubmitting(true);
     try {
+      const requestBody: Record<string, unknown> = {
+        payer_id: selectedDebt.payerId,
+        recipient_id: selectedDebt.recipientId,
+        amount_cents: parsedAmountCents,
+        payment_rail: effectivePaymentRail,
+      };
+      if (activeHandle) {
+        requestBody.settlement_handle_id = activeHandle.id;
+      }
+
       const response = await fetch(
         `/api/groups/${encodeURIComponent(selectedDebt.groupId)}/settlements`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            payer_id: selectedDebt.payerId,
-            recipient_id: selectedDebt.recipientId,
-            amount_cents: parsedAmountCents,
-            payment_rail: paymentRail,
-          }),
+          body: JSON.stringify(requestBody),
         },
       );
 
@@ -192,6 +335,22 @@ function RecordSettlementModalInner({
     description: d.groupName,
   }));
 
+  const handleOptions: SelectOption[] = React.useMemo(() => {
+    if (recipientHandles.length === 0) return [];
+    return [
+      ...recipientHandles.map((h) => ({
+        value: h.id,
+        label: `${PROVIDER_LABELS[h.provider]} · ${formatSettlementTag(h.handle, h.provider) ?? h.handle}${h.isDefault ? " (Default)" : ""}`,
+        description: h.displayNote ?? undefined,
+      })),
+      {
+        value: MANUAL_HANDLE_VALUE,
+        label: "Other / Manual Payment",
+        description: "Cash, bank transfer, or unlinked rail",
+      },
+    ];
+  }, [recipientHandles]);
+
   const settlementProgressHint = React.useMemo(() => {
     if (!selectedDebt || !isAmountValid || parsedAmountCents === null) {
       return null;
@@ -206,6 +365,15 @@ function RecordSettlementModalInner({
     const excess = parsedAmountCents - selectedDebt.amountCents;
     return `Exceeds owed balance of ${formatMinorUnits(selectedDebt.amountCents, currency)} by ${formatMinorUnits(excess, currency)}.`;
   }, [currency, isAmountValid, parsedAmountCents, selectedDebt]);
+
+  const activeProviderLabel =
+    effectivePaymentRail === "VENMO"
+      ? "Venmo"
+      : effectivePaymentRail === "ZELLE"
+        ? "Zelle"
+        : effectivePaymentRail === "CASH_APP"
+          ? "Cash App"
+          : null;
 
   return (
     <Dialog
@@ -274,23 +442,23 @@ function RecordSettlementModalInner({
             {selectedDebt && (
               <Card variant="sub-card" padding="sm" className="flex flex-col gap-2">
                 <div className="flex items-center justify-between gap-2 text-[13px]">
-                  <div className="flex items-center gap-1.5 font-semibold text-ink">
-                    <span>
+                  <div className="flex min-w-0 items-center gap-1.5 font-semibold text-ink">
+                    <span className="truncate">
                       {selectedDebt.payerId === currentUserId
                         ? "You"
                         : selectedDebt.payerName}
                     </span>
                     <ArrowRight
-                      className="h-3.5 w-3.5 text-ink-muted-48"
+                      className="h-3.5 w-3.5 shrink-0 text-ink-muted-48"
                       aria-hidden="true"
                     />
-                    <span>
+                    <span className="truncate">
                       {selectedDebt.recipientId === currentUserId
                         ? "You"
                         : selectedDebt.recipientName}
                     </span>
                   </div>
-                  <Badge tone="neutral" size="sm">
+                  <Badge tone="neutral" size="sm" className="shrink-0">
                     {selectedDebt.groupName}
                   </Badge>
                 </div>
@@ -356,31 +524,73 @@ function RecordSettlementModalInner({
               )}
             </div>
 
-            <Select
-              label="Payment Rail (Log & Link)"
-              aria-label="Payment Rail"
-              options={PAYMENT_RAIL_OPTIONS}
-              value={paymentRail}
-              onChange={(val) => setPaymentRail(val as PaymentRail)}
-            />
+            {recipientHandles.length > 0 ? (
+              <>
+                <Select
+                  label="Recipient Settlement Handle"
+                  aria-label="Settlement Handle"
+                  options={handleOptions}
+                  value={activeHandle ? activeHandle.id : MANUAL_HANDLE_VALUE}
+                  onChange={handleSwitcherChange}
+                />
 
-            {selectedDebt && paymentRail === "VENMO" && (
+                {selectedHandleId === MANUAL_HANDLE_VALUE && (
+                  <Select
+                    label="Manual Payment Rail"
+                    aria-label="Payment Rail"
+                    options={MANUAL_RAIL_OPTIONS}
+                    value={
+                      MANUAL_RAIL_OPTIONS.some((o) => o.value === paymentRail)
+                        ? paymentRail
+                        : "CASH"
+                    }
+                    onChange={(val) => setPaymentRail(val as PaymentRail)}
+                  />
+                )}
+              </>
+            ) : (
+              <Select
+                label="Payment Rail (Log & Link)"
+                aria-label="Payment Rail"
+                options={PAYMENT_RAIL_OPTIONS}
+                value={paymentRail}
+                onChange={(val) => setPaymentRail(val as PaymentRail)}
+              />
+            )}
+
+            {selectedDebt && activeProviderLabel && (
               <div
-                data-testid="venmo-log-and-link"
+                data-testid={
+                  effectivePaymentRail === "VENMO"
+                    ? "venmo-log-and-link"
+                    : "settlement-log-and-link"
+                }
                 className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-hairline bg-surface-pearl px-3.5 py-2.5 text-[12px]"
               >
-                <div className="min-w-0">
-                  <span className="block font-medium text-ink">
-                    Venmo Log &amp; Link
-                  </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="font-medium text-ink">
+                      {activeProviderLabel} Log &amp; Link
+                    </span>
+                    {activeHandle?.isDefault && (
+                      <Badge tone="info" size="sm">
+                        Default
+                      </Badge>
+                    )}
+                  </div>
                   <span
                     data-testid="recipient-settlement-tag"
                     className="block truncate text-ink-muted-48"
                   >
                     {recipientDisplayTag
                       ? `Recipient handle: ${recipientDisplayTag}`
-                      : "No @instant_settlement_tag saved — records ledger settlement only."}
+                      : `No ${activeProviderLabel} handle saved — records ledger settlement only.`}
                   </span>
+                  {activeHandle?.displayNote && (
+                    <span className="block truncate text-[11px] text-ink-muted-48">
+                      {activeHandle.displayNote}
+                    </span>
+                  )}
                   {selfPayerDisplayTag && (
                     <span
                       data-testid="self-settlement-tag"
@@ -390,34 +600,28 @@ function RecordSettlementModalInner({
                     </span>
                   )}
                 </div>
-                {venmoDeepLink && (
+                {paymentDeepLink && (
                   <a
-                    href={venmoDeepLink}
+                    href={paymentDeepLink.href}
                     rel="noopener noreferrer"
-                    className="inline-flex min-h-[28px] items-center gap-1 rounded-pill border border-hairline bg-canvas px-3 py-1.5 text-[12px] font-medium text-[#0066cc] hover:bg-canvas-parchment focus-visible:outline-2 focus-visible:outline-primary-focus focus-visible:outline-offset-2"
+                    target={
+                      paymentDeepLink.href.startsWith("https://")
+                        ? "_blank"
+                        : undefined
+                    }
+                    className="inline-flex min-h-[28px] shrink-0 items-center gap-1 rounded-pill border border-hairline bg-canvas px-3 py-1.5 text-[12px] font-medium text-[#0066cc] hover:bg-canvas-parchment focus-visible:outline-2 focus-visible:outline-primary-focus focus-visible:outline-offset-2"
                   >
-                    <span>Open Venmo</span>
+                    <span>{paymentDeepLink.label}</span>
                     <ExternalLink className="h-3 w-3" aria-hidden="true" />
                   </a>
                 )}
               </div>
             )}
 
-            {selectedDebt && paymentRail === "APPLE_CARD" && (
-              <div className="rounded-md border border-hairline bg-surface-pearl px-3.5 py-2.5 text-[12px]">
-                <span className="block font-medium text-ink">
-                  Apple Card / Apple Cash Log &amp; Link
-                </span>
-                <span className="block text-ink-muted-48">
-                  {recipientDisplayTag
-                    ? `Recipient handle: ${recipientDisplayTag} — complete transfer externally, then click Mark as Settled.`
-                    : "Complete your Apple Cash transfer externally, then click Mark as Settled to log the immutable event."}
-                </span>
-              </div>
-            )}
-
             {selectedDebt &&
-              (paymentRail === "CASH" || paymentRail === "OTHER") && (
+              (effectivePaymentRail === "CASH" ||
+                effectivePaymentRail === "BANK_SETTLEMENT" ||
+                effectivePaymentRail === "OTHER") && (
                 <p className="text-[12px] text-ink-muted-48">
                   Records an immutable settlement event in {currency}. No funds
                   move through LedgerSplit servers.

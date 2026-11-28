@@ -1,9 +1,21 @@
-import type { SplitBreakdownItem } from "@/types/database";
+import type {
+  SettlementHandleProvider,
+  SplitBreakdownItem,
+} from "@/types/database";
+
+export interface MemberSettlementHandle {
+  id: string;
+  provider: SettlementHandleProvider;
+  handle: string;
+  displayNote: string | null;
+  isDefault: boolean;
+}
 
 export interface DebtSimplificationMember {
   userId: string;
   name: string;
   instantSettlementTag: string | null;
+  settlementHandles?: MemberSettlementHandle[];
 }
 
 export interface DebtSimplificationGroupInput {
@@ -37,6 +49,7 @@ export interface SimplifiedDebtEdge {
   recipientId: string;
   recipientName: string;
   recipientInstantTag: string | null;
+  recipientSettlementHandles?: MemberSettlementHandle[];
   amountCents: number;
 }
 
@@ -159,6 +172,9 @@ export function simplifyBipartiteGroupDebts(params: {
       recipientId,
       recipientName: recipientInfo?.name ?? "Member",
       recipientInstantTag: recipientInfo?.instantSettlementTag ?? null,
+      ...(recipientInfo?.settlementHandles
+        ? { recipientSettlementHandles: recipientInfo.settlementHandles }
+        : {}),
       amountCents,
     });
   };
@@ -263,6 +279,9 @@ export function computePairwiseGroupDebtEdges(params: {
       recipientId,
       recipientName: recipientInfo?.name ?? "Member",
       recipientInstantTag: recipientInfo?.instantSettlementTag ?? null,
+      ...(recipientInfo?.settlementHandles
+        ? { recipientSettlementHandles: recipientInfo.settlementHandles }
+        : {}),
       amountCents,
     });
   }

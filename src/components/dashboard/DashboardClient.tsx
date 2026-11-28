@@ -4,25 +4,16 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
+  ArrowRight,
   ArrowUpRight,
-  Car,
-  CheckCircle2,
   Download,
-  Eye,
-  Home,
   Paperclip,
   Pencil,
-  Plus,
   Receipt,
-  ReceiptText,
   RefreshCw,
-  ShoppingBag,
-  Sparkles,
   Trash2,
   TrendingDown,
   TrendingUp,
-  Utensils,
-  Zap,
 } from "lucide-react";
 import {
   AlertBanner,
@@ -32,11 +23,7 @@ import {
   Card,
   ConfirmDialog,
   Dialog,
-  Dropdown,
-  Pagination,
   ProgressBar,
-  SearchInput,
-  Select,
   Table,
   TableBody,
   TableCell,
@@ -46,7 +33,7 @@ import {
   TableRow,
   ToastContainer,
 } from "@/components/ui";
-import type { DropdownItem, SelectOption, ToastItem } from "@/components/ui";
+import type { ToastItem } from "@/components/ui";
 import {
   AddEditExpenseModal,
   RecordSettlementModal,
@@ -218,44 +205,42 @@ function formatCycleRangePill(cycleSlug: string, anchorDay = 1): string {
   return `Cycle: ${startMonth} ${startDay}-${endMonth} ${endDay}`;
 }
 
-function renderCategoryIcon(category: string) {
-  const lower = category.toLowerCase();
-  if (lower.includes("grocer") || lower.includes("food")) {
-    return <ShoppingBag className="h-4 w-4" aria-hidden="true" />;
-  }
-  if (lower.includes("utilit")) {
-    return <Zap className="h-4 w-4" aria-hidden="true" />;
-  }
-  if (lower.includes("dining") || lower.includes("drink")) {
-    return <Utensils className="h-4 w-4" aria-hidden="true" />;
-  }
-  if (
-    lower.includes("transit") ||
-    lower.includes("transport") ||
-    lower.includes("travel")
-  ) {
-    return <Car className="h-4 w-4" aria-hidden="true" />;
-  }
-  if (lower.includes("rent") || lower.includes("hous") || lower.includes("home")) {
-    return <Home className="h-4 w-4" aria-hidden="true" />;
-  }
-  if (lower.includes("entertain")) {
-    return <Sparkles className="h-4 w-4" aria-hidden="true" />;
-  }
-  return <ReceiptText className="h-4 w-4" aria-hidden="true" />;
-}
-
-function formatSplitMethodLabel(
+function formatSplitLabel(
   method: ExpenseSplitMethod,
-  participantCount: number,
+  splitBreakdown: readonly SplitBreakdownItem[],
+  currentUserId: string,
 ): string {
+  const count = splitBreakdown.length;
   if (method === "EQUAL") {
-    return `Split Equally (${participantCount})`;
+    if (count === 2) return "2-Way (50/50)";
+    if (count > 0) {
+      const pct = 100 / count;
+      const pctStr = Number.isInteger(pct) ? String(pct) : pct.toFixed(1);
+      return `${count}-Way Equal (${pctStr}%)`;
+    }
+    return "Equal Split";
   }
   if (method === "PERCENTAGE") {
-    return `By Percentage (${participantCount})`;
+    const userItem = splitBreakdown.find((b) => b.user_id === currentUserId);
+    if (userItem?.percentage !== undefined) {
+      return `${count}-Way Custom (${userItem.percentage}%)`;
+    }
+    return `${count}-Way Percentage`;
   }
-  return `Exact Amounts (${participantCount})`;
+  if (method === "SHARES") {
+    const totalShares = splitBreakdown.reduce(
+      (sum, item) => sum + (item.shares ?? 0),
+      0,
+    );
+    const userShares = splitBreakdown.find(
+      (b) => b.user_id === currentUserId,
+    )?.shares;
+    if (totalShares > 0 && userShares !== undefined) {
+      return `${userShares}/${totalShares} Shares`;
+    }
+    return `${count}-Way Shares`;
+  }
+  return "Itemized Custom";
 }
 
 function formatDateParts(isoDate: string): { date: string; time: string } {
@@ -331,12 +316,7 @@ export function DashboardClient({
     user: shellUser,
     updateReceiptStorageUsedBytes,
     buildNavHref,
-    openAddExpense,
   } = useActiveGroup();
-
-  const [searchQuery, setSearchQuery] = React.useState("");
-  const [selectedCategory, setSelectedCategory] = React.useState("all");
-  const [currentPage, setCurrentPage] = React.useState(1);
 
   const [addedExpenses, setAddedExpenses] = React.useState<ExpenseLedgerRecord[]>(
     [],
@@ -807,60 +787,24 @@ export function DashboardClient({
     [cycle, initialBillingCycles, scopedGroups],
   );
 
-  const categoryOptions = React.useMemo<SelectOption[]>(() => {
-    const categories = Array.from(
-      new Set(kpi.categoryTotals.map((c) => c.category)),
-    );
-    return [
-      { value: "all", label: "All Categories" },
-      ...categories.map((cat) => ({ value: cat, label: cat })),
-    ];
-  }, [kpi.categoryTotals]);
-
-  const visibleExpenses = React.useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-
+  const cycleExpenses = React.useMemo(() => {
     return ledgerExpenses.filter((exp) => {
       if (activeGroupId !== ALL_GROUPS_VALUE && exp.groupId !== activeGroupId) {
         return false;
       }
-
       const { startMs, endMs } = getBillingCycleWindow(
         cycle,
         exp.groupBillingAnchorDay || 1,
       );
       const expMs = Date.parse(exp.expenseDate);
-      if (!Number.isFinite(expMs) || expMs < startMs || expMs >= endMs) {
-        return false;
-      }
-
-      if (selectedCategory !== "all" && exp.category !== selectedCategory) {
-        return false;
-      }
-
-      if (q) {
-        const matchesDesc = exp.description.toLowerCase().includes(q);
-        const matchesCat = exp.category.toLowerCase().includes(q);
-        const matchesGroup = exp.groupName.toLowerCase().includes(q);
-        const matchesPayer = exp.payerName.toLowerCase().includes(q);
-        if (!matchesDesc && !matchesCat && !matchesGroup && !matchesPayer) {
-          return false;
-        }
-      }
-
-      return true;
+      return Number.isFinite(expMs) && expMs >= startMs && expMs < endMs;
     });
-  }, [activeGroupId, cycle, ledgerExpenses, searchQuery, selectedCategory]);
+  }, [activeGroupId, cycle, ledgerExpenses]);
 
-  const totalPages = Math.max(
-    1,
-    Math.ceil(visibleExpenses.length / RECENT_TX_PAGE_SIZE),
+  const recentExpenses = React.useMemo(
+    () => cycleExpenses.slice(0, RECENT_TX_PAGE_SIZE),
+    [cycleExpenses],
   );
-  const safePage = Math.min(Math.max(1, currentPage), totalPages);
-  const paginatedExpenses = React.useMemo(() => {
-    const start = (safePage - 1) * RECENT_TX_PAGE_SIZE;
-    return visibleExpenses.slice(start, start + RECENT_TX_PAGE_SIZE);
-  }, [safePage, visibleExpenses]);
 
   const openSettlementForEdge = (edge?: SimplifiedDebtEdge | null) => {
     if (edge) {
@@ -1246,7 +1190,7 @@ export function DashboardClient({
     const isActiveAdmin =
       userStatus === "ACTIVE" && group.currentUserRole === "ADMIN";
     const canSettle =
-      group.status !== "ARCHIVED" && (isYouOwe || isOwedToYou || isActiveAdmin);
+      group.status !== "ARCHIVED" && (isYouOwe || (!isOwedToYou && isActiveAdmin));
     const canRemind =
       group.status !== "ARCHIVED" && isOwedToYou && userStatus === "ACTIVE";
     const reminderKey = getReminderCooldownKey(edge.groupId, edge.payerId);
@@ -1306,9 +1250,9 @@ export function DashboardClient({
             data-testid={`peer-balance-amount-${edge.payerId}-${edge.recipientId}`}
             className={`text-[13px] font-semibold tabular-nums ${
               isYouOwe
-                ? "text-[#ff3b30]"
+                ? "text-[#dc2626]"
                 : isOwedToYou
-                  ? "text-[#248a3d]"
+                  ? "text-[#166534]"
                   : "text-ink"
             }`}
           >
@@ -1336,7 +1280,7 @@ export function DashboardClient({
                 )
               }
               className={cn(
-                "h-7 px-3 text-[12px]",
+                "h-8 px-3 text-[12px] whitespace-nowrap",
                 reminderCooldown ? "text-ink-muted-48" : "text-[#0066cc]",
               )}
             >
@@ -1348,12 +1292,13 @@ export function DashboardClient({
           {canSettle && (
             <Button
               type="button"
-              variant={isYouOwe ? "danger-soft" : "secondary"}
+              variant={isYouOwe ? "primary" : "secondary"}
               size="sm"
+              data-testid={`settle-peer-btn-${edge.groupId}-${edge.recipientId}`}
               onClick={() => openSettlementForEdge(edge)}
-              className="h-7 px-3 text-[12px]"
+              className="h-8 px-3 text-[12px] whitespace-nowrap"
             >
-              {isYouOwe ? "Settle Up" : "Settle"}
+              {isYouOwe ? "Settle now" : "Settle"}
             </Button>
           )}
         </div>
@@ -1801,343 +1746,146 @@ export function DashboardClient({
         data-testid="recent-shared-transactions-card"
         className="flex flex-col gap-4"
       >
-        <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
-          <div className="flex items-center gap-3">
-            <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-hairline bg-canvas-parchment text-[#0066cc]">
-              <ReceiptText className="h-4 w-4" aria-hidden="true" />
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-[17px] font-semibold tracking-tight text-ink">
+              Recent Shared Transactions
+            </h2>
+            <p className="text-[13px] text-ink-muted-48 tabular-nums">
+              Latest 5 expenses · Click a row for split details
+            </p>
+          </div>
+
+          <Link
+            href={buildNavHref("/expenses")}
+            data-testid="view-all-expenses-link"
+            className="inline-flex h-8 items-center gap-1 rounded-full px-3 text-[13px] font-medium whitespace-nowrap text-[#0066cc] transition-colors hover:bg-surface-pearl"
+          >
+            <span className="tabular-nums">
+              View all {cycleExpenses.length} in Expenses
             </span>
-            <div>
-              <h2 className="text-[17px] font-semibold tracking-tight text-ink">
-                Recent Shared Transactions
-              </h2>
-              <p className="text-[12px] text-ink-muted-48">
-                Itemized shared records for {cycleLabel}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2.5">
-            <SearchInput
-              value={searchQuery}
-              onChange={(e) => {
-                setSearchQuery(e.target.value);
-                setCurrentPage(1);
-              }}
-              onClear={() => {
-                setSearchQuery("");
-                setCurrentPage(1);
-              }}
-              placeholder="Filter by merchant..."
-              containerClassName="w-full sm:w-52"
-              className="text-[13px]"
-            />
-            <Select
-              aria-label="Filter transactions by category"
-              variant="pill-select"
-              options={categoryOptions}
-              value={selectedCategory}
-              onChange={(val) => {
-                setSelectedCategory(val);
-                setCurrentPage(1);
-              }}
-              className="h-9 bg-canvas text-[12px] font-medium"
-            />
-            <Button
-              type="button"
-              variant="primary"
-              size="sm"
-              leftIcon={<Plus className="h-4 w-4" aria-hidden="true" />}
-              onClick={openAddExpense}
-            >
-              Quick Add
-            </Button>
-          </div>
+            <ArrowRight className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          </Link>
         </div>
 
-        <div className="overflow-x-auto rounded-[14px] border border-hairline">
-          <Table aria-label="Recent Shared Transactions">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Date &amp; Time</TableHead>
-                <TableHead>Merchant &amp; Group</TableHead>
-                <TableHead>Category</TableHead>
-                <TableHead>Paid By</TableHead>
-                <TableHead>Split Distribution</TableHead>
-                <TableHead className="text-right">Amount</TableHead>
-                <TableHead className="text-center">Action</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {paginatedExpenses.length === 0 ? (
-                <TableEmpty
-                  colSpan={7}
-                  title="No shared transactions in this period"
-                  description={
-                    effectiveGroups.length === 0
-                      ? "Create a split group first, then use Quick Add to log shared expenses."
-                      : searchQuery || selectedCategory !== "all"
-                        ? "No matching expenses found. Try clearing your filter."
-                        : `No expenses logged for ${cycleLabel}. Use Quick Add to record your first split.`
-                  }
-                  action={
-                    searchQuery || selectedCategory !== "all" ? (
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => {
-                          setSearchQuery("");
-                          setSelectedCategory("all");
-                          setCurrentPage(1);
-                        }}
-                      >
-                        Reset Filters
-                      </Button>
-                    ) : undefined
-                  }
-                />
-              ) : (
-                paginatedExpenses.map((exp) => {
-                  const dateParts = formatDateParts(exp.expenseDate);
-                  const myShareCents = getUserShareCents(exp, currentUserId);
-                  const isUserPayer = exp.paidBy === currentUserId;
-                  const netOwedToUser = isUserPayer
-                    ? exp.amountCents - myShareCents
-                    : myShareCents;
+        <Table aria-label="Recent Shared Transactions">
+          <TableHeader>
+            <TableRow>
+              <TableHead>DATE</TableHead>
+              <TableHead>MERCHANT &amp; GROUP</TableHead>
+              <TableHead>CATEGORY</TableHead>
+              <TableHead>PAID BY</TableHead>
+              <TableHead>SPLIT</TableHead>
+              <TableHead className="text-right">YOUR SHARE</TableHead>
+              <TableHead className="text-center">STATUS</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {recentExpenses.length === 0 ? (
+              <TableEmpty
+                colSpan={7}
+                title="No shared transactions in this period"
+                description={
+                  effectiveGroups.length === 0
+                    ? "Create a split group first, then use + Add Expense to log shared bills."
+                    : `No expenses logged for ${cycleLabel}. Use + Add Expense to record your first split.`
+                }
+              />
+            ) : (
+              recentExpenses.map((exp) => {
+                const dateParts = formatDateParts(exp.expenseDate);
+                const myShareCents = getUserShareCents(exp, currentUserId);
+                const isUserPayer = exp.paidBy === currentUserId;
+                const netDeltaCents = isUserPayer
+                  ? exp.amountCents - myShareCents
+                  : -myShareCents;
+                const isSettled = exp.isSettledForUser || exp.isLocked;
 
-                  const expGroup = effectiveGroups.find(
-                    (g) => g.id === exp.groupId,
-                  );
-                  const currentMember = expGroup?.members.find(
-                    (m) => m.userId === currentUserId,
-                  );
-                  const isActiveMember = currentMember?.status === "ACTIVE";
-                  const isGroupAdmin =
-                    isActiveMember && expGroup?.currentUserRole === "ADMIN";
-                  const isCreator =
-                    isActiveMember && exp.createdBy === currentUserId;
-                  const isGroupArchived = expGroup?.status === "ARCHIVED";
-                  const canModify =
-                    !exp.isLocked &&
-                    !isGroupArchived &&
-                    (isGroupAdmin || isCreator);
-
-                  const rowMenuItems: DropdownItem[] = [
-                    {
-                      id: "inspect",
-                      label: "View Split Details",
-                      icon: <Eye className="h-3.5 w-3.5" aria-hidden="true" />,
-                      onSelect: () => setInspectExpense(exp),
-                    },
-                  ];
-
-                  if (canModify) {
-                    rowMenuItems.push({
-                      id: "edit",
-                      label: "Edit Expense",
-                      icon: <Pencil className="h-3.5 w-3.5" aria-hidden="true" />,
-                      onSelect: () => setEditingExpense(exp),
-                    });
-                  } else if (exp.isLocked && !isGroupArchived && isActiveMember) {
-                    rowMenuItems.push({
-                      id: "adjust",
-                      label: "Log Adjustment",
-                      icon: (
-                        <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
-                      ),
-                      onSelect: () => setAdjustingExpense(exp),
-                    });
-                  }
-
-                  const groupSettleableDebts = settleableDebts.filter(
-                    (d) => d.groupId === exp.groupId,
-                  );
-                  if (groupSettleableDebts.length > 0) {
-                    const preferredDebt =
-                      groupSettleableDebts.find(
-                        (d) =>
-                          (d.payerId === currentUserId &&
-                            d.recipientId === exp.paidBy) ||
-                          (d.recipientId === currentUserId &&
-                            d.payerId === exp.paidBy),
-                      ) ?? groupSettleableDebts[0];
-                    rowMenuItems.push({
-                      id: "settle",
-                      label: "Settle Group Balance",
-                      icon: (
-                        <CheckCircle2
-                          className="h-3.5 w-3.5"
-                          aria-hidden="true"
-                        />
-                      ),
-                      onSelect: () => openSettlementForEdge(preferredDebt),
-                    });
-                  }
-
-                  if (canModify) {
-                    rowMenuItems.push(
-                      { id: "delete-divider", separator: true },
-                      {
-                        id: "delete",
-                        label: "Delete Expense",
-                        danger: true,
-                        icon: (
-                          <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                        ),
-                        onSelect: () => {
-                          setDeleteExpenseError(null);
-                          setDeletingExpense(exp);
-                        },
-                      },
-                    );
-                  }
-
-                  return (
-                    <TableRow
-                      key={exp.id}
-                      data-testid={`dashboard-tx-row-${exp.id}`}
-                    >
-                      <TableCell className="whitespace-nowrap">
-                        <span className="block text-[12px] font-medium text-ink">
-                          {dateParts.date}
+                return (
+                  <TableRow
+                    key={exp.id}
+                    data-testid={`dashboard-tx-row-${exp.id}`}
+                    onClick={() => setInspectExpense(exp)}
+                  >
+                    <TableCell className="whitespace-nowrap text-[12px] text-ink-muted-48 tabular-nums">
+                      <span>{dateParts.date}</span>
+                      {dateParts.time && (
+                        <span className="ml-1.5 text-ink-muted-48">
+                          {dateParts.time}
                         </span>
-                        {dateParts.time && (
-                          <span className="block text-[11px] text-ink-muted-48">
-                            {dateParts.time}
+                      )}
+                    </TableCell>
+                    <TableCell className="min-w-[160px] max-w-[240px]">
+                      <div className="flex min-w-0 flex-col">
+                        <div className="flex items-center gap-1.5">
+                          <span className="truncate text-[13px] font-semibold text-ink">
+                            {exp.description}
                           </span>
+                          {exp.adjustmentForExpenseId && (
+                            <Badge tone="warning" size="sm">
+                              Adjustment
+                            </Badge>
+                          )}
+                        </div>
+                        <span className="truncate text-[11px] font-medium text-ink-muted-48">
+                          {exp.groupName}
+                        </span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap">
+                      <Badge
+                        tone="category"
+                        size="sm"
+                        dotColor={getCategoryColor(exp.category)}
+                      >
+                        {exp.category}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap">
+                      <div className="inline-flex items-center gap-2">
+                        <Avatar name={exp.payerName} size="sm" />
+                        <span className="text-[12px] font-medium text-ink-muted-80">
+                          {isUserPayer ? "You" : exp.payerName}
+                        </span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-[12px] text-ink-muted-80 tabular-nums">
+                      {formatSplitLabel(
+                        exp.splitMethod,
+                        exp.splitBreakdown,
+                        currentUserId,
+                      )}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-right">
+                      <span
+                        className={cn(
+                          "text-[13px] font-semibold tabular-nums",
+                          netDeltaCents > 0
+                            ? "text-[#166534]"
+                            : netDeltaCents < 0
+                              ? "text-[#dc2626]"
+                              : "text-ink-muted-48",
                         )}
-                      </TableCell>
-                      <TableCell className="min-w-[130px] max-w-[155px]">
-                        <div className="flex items-center gap-2.5">
-                          <span
-                            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-hairline bg-canvas-parchment"
-                            style={{ color: getCategoryColor(exp.category) }}
-                          >
-                            {renderCategoryIcon(exp.category)}
-                          </span>
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-1.5">
-                              <span className="truncate text-[13px] font-semibold text-ink">
-                                {exp.description}
-                              </span>
-                              {exp.adjustmentForExpenseId && (
-                                <Badge tone="warning" size="sm">
-                                  Adjustment
-                                </Badge>
-                              )}
-                              {exp.isRecurringGenerated && (
-                                <Badge tone="info" size="sm">
-                                  Auto
-                                </Badge>
-                              )}
-                            </div>
-                            <span className="block truncate text-[11px] text-ink-muted-48">
-                              {exp.groupName}
-                            </span>
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap">
-                        <Badge
-                          tone="category"
-                          size="sm"
-                          dotColor={getCategoryColor(exp.category)}
-                        >
-                          {exp.category}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="max-w-[125px]">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <Avatar name={exp.payerName} size="sm" />
-                          <span className="truncate text-[12px] font-medium text-ink">
-                            {isUserPayer ? "You" : exp.payerName}
-                          </span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap text-[12px] text-ink-muted-80">
-                        <Badge tone="neutral" size="sm">
-                          {formatSplitMethodLabel(
-                            exp.splitMethod,
-                            exp.splitBreakdown.length,
-                          )}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap text-right">
-                        <div className="flex flex-col items-end">
-                          <span className="text-[13px] font-semibold tabular-nums text-ink">
-                            {formatMinorUnits(exp.amountCents, exp.currency)}
-                          </span>
-                          {myShareCents > 0 || (isUserPayer && netOwedToUser > 0) ? (
-                            <span
-                              className={`text-[11px] font-medium tabular-nums ${
-                                !exp.isSettledForUser && !isUserPayer && myShareCents > 0
-                                  ? "text-[#ff3b30]"
-                                  : !exp.isSettledForUser && isUserPayer && netOwedToUser > 0
-                                    ? "text-[#248a3d]"
-                                    : "text-[#0066cc]"
-                              }`}
-                            >
-                              {!exp.isSettledForUser && !isUserPayer
-                                ? `You owe: ${formatMinorUnits(myShareCents, exp.currency)}`
-                                : !exp.isSettledForUser && isUserPayer && netOwedToUser > 0
-                                  ? `Owed to you: ${formatMinorUnits(netOwedToUser, exp.currency)}`
-                                  : `Your share: ${formatMinorUnits(myShareCents, exp.currency)}`}
-                            </span>
-                          ) : null}
-                          {exp.originalAmountCents !== null &&
-                            exp.originalCurrency && (
-                              <span className="text-[11px] tabular-nums text-ink-muted-48">
-                                Orig:{" "}
-                                {formatMinorUnits(
-                                  exp.originalAmountCents,
-                                  exp.originalCurrency,
-                                )}
-                              </span>
-                            )}
-                        </div>
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap text-center">
-                        <div className="inline-flex items-center justify-center gap-1">
-                          {exp.receiptUrl && (
-                            <a
-                              href={`/api/receipts?path=${encodeURIComponent(exp.receiptUrl)}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              aria-label={`View receipt for ${exp.description}`}
-                              className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-ink-muted-48 transition-colors hover:bg-canvas-parchment hover:text-[#0066cc] focus-visible:outline-2 focus-visible:outline-primary-focus focus-visible:outline-offset-2"
-                            >
-                              <Paperclip
-                                className="h-3.5 w-3.5"
-                                aria-hidden="true"
-                              />
-                            </a>
-                          )}
-                          <Dropdown
-                            variant="action-menu"
-                            align="right"
-                            triggerAriaLabel={`Actions for ${exp.description}`}
-                            items={rowMenuItems}
-                          />
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })
-              )}
-            </TableBody>
-          </Table>
-        </div>
-
-        {visibleExpenses.length > 0 && (
-          <Pagination
-            currentPage={safePage}
-            totalPages={totalPages}
-            totalItems={visibleExpenses.length}
-            pageSize={RECENT_TX_PAGE_SIZE}
-            itemLabel="transactions"
-            onPageChange={setCurrentPage}
-          />
-        )}
+                      >
+                        {formatMinorUnits(netDeltaCents, exp.currency, {
+                          showPlus: true,
+                        })}
+                      </span>
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-center">
+                      <Badge
+                        tone={isSettled ? "success" : "warning"}
+                        size="sm"
+                      >
+                        {isSettled ? "Settled" : "Pending"}
+                      </Badge>
+                    </TableCell>
+                  </TableRow>
+                );
+              })
+            )}
+          </TableBody>
+        </Table>
       </Card>
 
       <RecordSettlementModal
@@ -2175,6 +1923,21 @@ export function DashboardClient({
         const inspectGroup = inspectExpense
           ? effectiveGroups.find((g) => g.id === inspectExpense.groupId)
           : null;
+        const inspectMember = inspectGroup?.members.find(
+          (m) => m.userId === currentUserId,
+        );
+        const inspectIsActiveMember = inspectMember?.status === "ACTIVE";
+        const inspectIsAdmin =
+          inspectIsActiveMember && inspectGroup?.currentUserRole === "ADMIN";
+        const inspectIsCreator =
+          inspectIsActiveMember && inspectExpense?.createdBy === currentUserId;
+        const inspectIsArchived = inspectGroup?.status === "ARCHIVED";
+        const canModifyInspect =
+          Boolean(inspectExpense) &&
+          !inspectExpense?.isLocked &&
+          !inspectIsArchived &&
+          (inspectIsAdmin || inspectIsCreator);
+
         return (
           <Dialog
             open={inspectExpense !== null}
@@ -2187,13 +1950,42 @@ export function DashboardClient({
             }
             size="md"
             footer={
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                {canModifyInspect && inspectExpense && (
+                  <>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      leftIcon={<Pencil className="h-3.5 w-3.5" aria-hidden="true" />}
+                      onClick={() => {
+                        const target = inspectExpense;
+                        setInspectExpense(null);
+                        setEditingExpense(target);
+                      }}
+                    >
+                      Edit Expense
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="danger-soft"
+                      size="sm"
+                      leftIcon={<Trash2 className="h-3.5 w-3.5" aria-hidden="true" />}
+                      onClick={() => {
+                        const target = inspectExpense;
+                        setInspectExpense(null);
+                        setDeleteExpenseError(null);
+                        setDeletingExpense(target);
+                      }}
+                    >
+                      Delete Expense
+                    </Button>
+                  </>
+                )}
                 {inspectExpense?.isLocked &&
                   inspectGroup &&
-                  inspectGroup.status !== "ARCHIVED" &&
-                  inspectGroup.members.some(
-                    (m) => m.userId === currentUserId && m.status === "ACTIVE",
-                  ) && (
+                  !inspectIsArchived &&
+                  inspectIsActiveMember && (
                     <Button
                       type="button"
                       variant="primary"
@@ -2257,7 +2049,44 @@ export function DashboardClient({
                         : inspectExpense.payerName}
                     </span>
                   </div>
+                  <div>
+                    <span className="block text-[11px] font-semibold uppercase tracking-wider text-ink-muted-48">
+                      Category
+                    </span>
+                    <span className="font-medium text-ink">
+                      {inspectExpense.category}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="block text-[11px] font-semibold uppercase tracking-wider text-ink-muted-48">
+                      Status
+                    </span>
+                    <Badge
+                      tone={
+                        inspectExpense.isSettledForUser || inspectExpense.isLocked
+                          ? "success"
+                          : "warning"
+                      }
+                      size="sm"
+                    >
+                      {inspectExpense.isSettledForUser || inspectExpense.isLocked
+                        ? "Settled"
+                        : "Pending"}
+                    </Badge>
+                  </div>
                 </div>
+
+                {inspectExpense.receiptUrl && (
+                  <a
+                    href={`/api/receipts?path=${encodeURIComponent(inspectExpense.receiptUrl)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex w-fit items-center gap-1.5 text-[12px] font-medium text-[#0066cc] hover:underline"
+                  >
+                    <Paperclip className="h-3.5 w-3.5" aria-hidden="true" />
+                    <span>View attached receipt</span>
+                  </a>
+                )}
 
                 <div className="flex flex-col gap-2">
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted-48">

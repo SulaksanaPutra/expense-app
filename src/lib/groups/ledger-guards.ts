@@ -1372,6 +1372,9 @@ export async function softDeleteGroupExpense(
 
 const VALID_PAYMENT_RAILS: readonly PaymentRail[] = [
   "VENMO",
+  "ZELLE",
+  "CASH_APP",
+  "BANK_SETTLEMENT",
   "APPLE_CARD",
   "CASH",
   "OTHER",
@@ -1386,6 +1389,7 @@ export async function createGroupSettlement(
     recipientId: string;
     amountCents: number;
     paymentRail?: PaymentRail;
+    settlementHandleId?: string | null;
   },
 ): Promise<
   | { ok: true; settlement: Database["public"]["Tables"]["settlements"]["Row"] }
@@ -1438,7 +1442,7 @@ export async function createGroupSettlement(
       ok: false,
       status: 400,
       code: "INVALID_PAYMENT_RAIL",
-      message: "Payment rail must be VENMO, APPLE_CARD, CASH, or OTHER.",
+      message: "Payment rail must be VENMO, ZELLE, CASH_APP, BANK_SETTLEMENT, APPLE_CARD, CASH, or OTHER.",
     };
   }
 
@@ -1496,16 +1500,48 @@ export async function createGroupSettlement(
     };
   }
 
+  let verifiedHandleId: string | null = null;
+  if (params.settlementHandleId && params.settlementHandleId.trim()) {
+    const candidateHandleId = params.settlementHandleId.trim();
+    const { data: handleRow, error: handleError } = await supabase
+      .from("settlement_handles")
+      .select("id, user_id")
+      .eq("id", candidateHandleId)
+      .eq("user_id", recipientId)
+      .maybeSingle();
+
+    if (handleError) {
+      return {
+        ok: false,
+        status: 500,
+        code: "SERVER_ERROR",
+        message: handleError.message || "Unable to verify settlement handle.",
+      };
+    }
+    if (!handleRow) {
+      return {
+        ok: false,
+        status: 400,
+        code: "INVALID_SETTLEMENT_HANDLE",
+        message: "Selected settlement handle does not belong to the settlement recipient.",
+      };
+    }
+    verifiedHandleId = handleRow.id;
+  }
+
+  const insertPayload: Database["public"]["Tables"]["settlements"]["Insert"] = {
+    group_id: params.groupId,
+    payer_id: payerId,
+    recipient_id: recipientId,
+    amount_cents: amountCents,
+    currency: guard.group.base_currency,
+    payment_rail: paymentRail,
+    ...(verifiedHandleId ? { settlement_handle_id: verifiedHandleId } : {}),
+  };
+
   const { data: inserted, error: insertError } = await supabase
     .from("settlements")
-    .insert({
-      group_id: params.groupId,
-      payer_id: payerId,
-      recipient_id: recipientId,
-      amount_cents: amountCents,
-      currency: guard.group.base_currency,
-      payment_rail: paymentRail,
-    })
+    .insert(insertPayload)
     .select("*")
     .maybeSingle();
 

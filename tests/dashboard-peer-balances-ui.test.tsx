@@ -305,10 +305,21 @@ describe("Dashboard Peer Balances (Always-On Per-Group Simplification)", () => {
       within(aptGroupBox).getByTestId("peer-balance-amount-u-elena-u-alex"),
     ).toHaveTextContent("+$10.00");
 
-    // Tahoe: Alex owes Elena -$20.00 (never netted with Apt 4B's +$10.00!)
+    // Apt 4B positive balance shows Remind (no Settle now)
+    expect(
+      within(aptGroupBox).getByRole("button", { name: /Remind/i }),
+    ).toBeInTheDocument();
+    expect(
+      within(aptGroupBox).queryByRole("button", { name: "Settle now" }),
+    ).not.toBeInTheDocument();
+
+    // Tahoe: Alex owes Elena -$20.00 (never netted with Apt 4B's +$10.00!) and shows Settle now
     expect(
       within(tahoeGroupBox).getByTestId("peer-balance-amount-u-alex-u-elena"),
     ).toHaveTextContent("-$20.00");
+    expect(
+      within(tahoeGroupBox).getByRole("button", { name: "Settle now" }),
+    ).toBeInTheDocument();
 
     // Net summary across groups is +10 - 20 = -$10.00
     expect(screen.getByTestId("overall-net-settlement")).toHaveTextContent(
@@ -355,7 +366,7 @@ describe("Dashboard Peer Balances (Always-On Per-Group Simplification)", () => {
     );
 
     const peerCard = screen.getByTestId("peer-balances-card");
-    await user.click(within(peerCard).getByRole("button", { name: "Settle Up" }));
+    await user.click(within(peerCard).getByRole("button", { name: "Settle now" }));
 
     const dialog = screen.getByRole("dialog", { name: "Record Settlement" });
     await user.click(within(dialog).getByRole("button", { name: /Mark as Settled/i }));

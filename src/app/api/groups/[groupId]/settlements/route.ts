@@ -132,6 +132,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
       typeof record.recipient_id === "string" ? record.recipient_id : "",
     amountCents: Number(record.amount_cents),
     paymentRail,
+    settlementHandleId:
+      typeof record.settlement_handle_id === "string" &&
+      record.settlement_handle_id.trim()
+        ? record.settlement_handle_id.trim()
+        : null,
   });
 
   if (!result.ok) {

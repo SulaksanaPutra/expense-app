@@ -455,7 +455,7 @@ describe("Issue #84 — Dashboard overview: cycle-scoped spend vs cumulative bal
     ).toHaveTextContent("-$50.00");
   });
 
-  it("filters Recent Shared Transactions by merchant/category and enforces locked vs unlocked row actions", async () => {
+  it("opens split details on Recent Shared Transactions row click, preserves group & cycle on View all N in Expenses, and enforces locked vs unlocked actions", async () => {
     const user = userEvent.setup();
 
     render(
@@ -475,37 +475,32 @@ describe("Issue #84 — Dashboard overview: cycle-scoped spend vs cumulative bal
     );
 
     const txCard = screen.getByTestId("recent-shared-transactions-card");
-    const searchInput = within(txCard).getByPlaceholderText("Filter by merchant...");
-    await user.type(searchInput, "Pizza");
+    const viewAllLink = within(txCard).getByTestId("view-all-expenses-link");
+    expect(viewAllLink).toHaveTextContent("View all 3 in Expenses");
+    expect(viewAllLink).toHaveAttribute("href", "/expenses?group=all&cycle=2026-11");
 
-    expect(within(txCard).getByText("November House Pizza")).toBeInTheDocument();
-    expect(within(txCard).queryByText("November Trader Joe's")).not.toBeInTheDocument();
+    // Clicking an unlocked expense row opens split details with Edit Expense & Delete Expense
+    await user.click(within(txCard).getByTestId("dashboard-tx-row-exp-nov-2"));
+    const unlockedDialog = screen.getByRole("dialog", { name: "November House Pizza" });
+    expect(within(unlockedDialog).getByText("Point-in-Time Split Snapshot (EQUAL)")).toBeInTheDocument();
+    expect(within(unlockedDialog).getByRole("button", { name: "Edit Expense" })).toBeInTheDocument();
+    expect(within(unlockedDialog).getByRole("button", { name: "Delete Expense" })).toBeInTheDocument();
+    await user.click(within(unlockedDialog).getByRole("button", { name: "Close" }));
 
-    // Unlocked expense row menu allows Edit Expense & Delete Expense
-    await user.click(
-      within(txCard).getByRole("button", {
-        name: "Actions for November House Pizza",
-      }),
-    );
-    expect(screen.getByRole("menuitem", { name: "View Split Details" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "Edit Expense" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "Delete Expense" })).toBeInTheDocument();
-
-    // Clear search and switch to closed cycle 2026-10
-    await user.click(within(txCard).getByRole("button", { name: "Clear search" }));
+    // Switch to closed cycle 2026-10 and click locked expense row
     await user.click(screen.getByRole("button", { name: "Previous billing cycle" }));
-
-    // Locked expense in closed cycle offers Log Adjustment, never Edit or Delete
-    await user.click(
-      within(txCard).getByRole("button", {
-        name: "Actions for October ConEd Power",
-      }),
+    expect(within(txCard).getByTestId("view-all-expenses-link")).toHaveAttribute(
+      "href",
+      "/expenses?group=all&cycle=2026-10",
     );
+
+    await user.click(within(txCard).getByTestId("dashboard-tx-row-exp-oct-1"));
+    const lockedDialog = screen.getByRole("dialog", { name: "October ConEd Power" });
     await waitFor(() => {
-      expect(screen.getByRole("menuitem", { name: "Log Adjustment" })).toBeInTheDocument();
+      expect(within(lockedDialog).getByRole("button", { name: "Log Adjustment" })).toBeInTheDocument();
     });
-    expect(screen.queryByRole("menuitem", { name: "Edit Expense" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("menuitem", { name: "Delete Expense" })).not.toBeInTheDocument();
+    expect(within(lockedDialog).queryByRole("button", { name: "Edit Expense" })).not.toBeInTheDocument();
+    expect(within(lockedDialog).queryByRole("button", { name: "Delete Expense" })).not.toBeInTheDocument();
   });
 
   it("rolls up All Groups KPIs & Category Breakdown into User.display_currency and keeps single-group strictly in Group.base_currency", async () => {
