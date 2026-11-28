@@ -130,7 +130,8 @@ export function SegmentedControl<T extends string = string>({
             }}
             onKeyDown={(e) => handleKeyDown(e, idx)}
             className={cn(
-              "inline-flex items-center justify-center gap-1.5 rounded-pill py-2 font-medium whitespace-nowrap tabular-nums transition-colors",
+              "inline-flex items-center justify-center gap-1.5 rounded-pill py-2 font-medium whitespace-nowrap tabular-nums",
+              variant === "pill-tabs" ? "transition-none" : "transition-colors",
               fullWidth
                 ? "min-w-0 flex-1 px-2 text-[11.5px] sm:px-4 sm:text-[13px]"
                 : "shrink-0 px-4 text-[13px]",
