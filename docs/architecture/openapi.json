@@ -47,6 +47,32 @@
         }
       }
     },
+    "/api/cron/cycle-reset": {
+      "get": {
+        "operationId": "get_cron_cycle_reset",
+        "tags": [
+          "cron"
+        ],
+        "summary": "GET /api/cron/cycle-reset",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_cron_cycle_reset",
+        "tags": [
+          "cron"
+        ],
+        "summary": "POST /api/cron/cycle-reset",
+        "responses": {
+          "201": {
+            "description": "Created"
+          }
+        }
+      }
+    },
     "/api/expenses/export": {
       "get": {
         "operationId": "get_expenses_export",
@@ -54,7 +80,7 @@
           "expenses"
         ],
         "summary": "Export cycle- and group-scoped ledger transactions in RFC-4180 CSV or JSON.",
-        "description": "Export cycle- and group-scoped ledger transactions in RFC-4180 CSV or JSON. Query params: `group` (`all` or group UUID), `cycle` (`YYYY-MM`), `format` (`csv` | `json`).",
+        "description": "Export cycle- and group-scoped ledger transactions in RFC-4180 CSV or JSON. Query params: `group` (`all` or group UUID), `cycle` (`YYYY-MM`), `format` (`csv` | `json`), and optional ledger filters (`cat`, `ownership`, `status`, `q`, `sort`).",
         "responses": {
           "200": {
             "description": "OK"

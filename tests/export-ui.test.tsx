@@ -163,7 +163,6 @@ describe("Issue #89 — Export UI Triggers across Dashboard, Expenses, and Setti
           initialExpenses={[]}
           initialSettlements={[]}
           initialBillingCycles={[]}
-          initialRecurringRules={[]}
         />
       </AppShell>,
     );

@@ -8,6 +8,7 @@ import {
   filterAndSortExpenses,
   getCycleSlugForDate,
   getNextGroupSettlementDate,
+  matchesExpenseCategory,
   type ExpenseBillingCycleRecord,
   type ExpenseGroupInfo,
   type ExpenseLedgerRecord,
@@ -533,6 +534,60 @@ describe("Expenses Ledger Calculations, Filtering & Sorting", () => {
         amountCents: 2000,
       }),
     ]);
+  });
+
+  it("filters by ownership, status (settled/pending), and category quick-filter buckets", () => {
+    const withStatuses: ExpenseLedgerRecord[] = [
+      { ...SAMPLE_EXPENSES[0], isSettledForUser: true, isLocked: false },
+      { ...SAMPLE_EXPENSES[1], isSettledForUser: false, isLocked: false },
+      { ...SAMPLE_EXPENSES[2], category: "Travel & Fuel", isSettledForUser: false, isLocked: false },
+    ];
+
+    expect(matchesExpenseCategory("Groceries & Food", "Groceries")).toBe(true);
+    expect(matchesExpenseCategory("Housing & Utilities", "Utilities")).toBe(true);
+    expect(matchesExpenseCategory("Dining & Social", "Dining")).toBe(true);
+    expect(matchesExpenseCategory("Travel & Fuel", "Travel")).toBe(true);
+    expect(matchesExpenseCategory("Entertainment", "Travel")).toBe(false);
+
+    const settledOnly = filterAndSortExpenses({
+      expenses: withStatuses,
+      activeGroupId: "all",
+      cycleSlug: "2026-11",
+      currentUserId: "u-alex",
+      ownership: "all",
+      status: "settled",
+      searchQuery: "",
+      category: "all",
+      sortBy: "date-desc",
+    });
+    expect(settledOnly.map((e) => e.id)).toEqual(["exp-1"]);
+
+    const pendingTravel = filterAndSortExpenses({
+      expenses: withStatuses,
+      activeGroupId: "all",
+      cycleSlug: "2026-11",
+      currentUserId: "u-alex",
+      ownership: "split-with-me",
+      status: "pending",
+      searchQuery: "",
+      category: "Travel",
+      sortBy: "date-desc",
+    });
+    expect(pendingTravel.map((e) => e.id)).toEqual(["exp-3"]);
+
+    const kpi = computeExpensesKpiSummary({
+      expenses: withStatuses,
+      groups: GROUPS,
+      settlements: [],
+      activeGroupId: "grp-apt4b",
+      cycleSlug: "2026-11",
+      currentUserId: "u-alex",
+      userBaseCurrency: "USD",
+      personalShareCapCents: 100000,
+    });
+    expect(kpi.personalShareOfTotalPercent).toBe(33.3);
+    expect(kpi.pendingItemsCount).toBe(1);
+    expect(kpi.pendingPeerCount).toBe(1);
   });
 
   it("escapes CSV cells against formula injection and formats amounts in Group.base_currency", () => {

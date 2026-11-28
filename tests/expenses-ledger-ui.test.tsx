@@ -47,7 +47,6 @@ import { ExpensesClient } from "@/components/expenses";
 import type {
   ExpenseGroupInfo,
   ExpenseLedgerRecord,
-  RecurringRuleRecord,
 } from "@/lib/expenses/ledger";
 
 const SHELL_GROUPS: ShellGroupSummary[] = [
@@ -59,7 +58,7 @@ const SHELL_GROUPS: ShellGroupSummary[] = [
     status: "ACTIVE",
     baseCurrency: "USD",
     defaultSplitMode: "EQUAL",
-    activeSplitCount: 9,
+    activeSplitCount: 10,
     members: [
       { id: "u-alex", name: "Alex Rivera", sharePercentage: 50 },
       { id: "u-elena", name: "Elena Rostova", sharePercentage: 50 },
@@ -102,11 +101,19 @@ const SHELL_USER: ShellUserSummary = {
   email: "alex@example.com",
 };
 
+const CATEGORIES_CYCLE = [
+  "Groceries",
+  "Utilities",
+  "Dining",
+  "Travel",
+] as const;
+
 function makeExpenses(count: number): ExpenseLedgerRecord[] {
   return Array.from({ length: count }, (_, idx) => {
     const num = idx + 1;
     const paidByElena = num % 2 === 0;
     const day = String(28 - idx).padStart(2, "0");
+    const cat = CATEGORIES_CYCLE[idx % CATEGORIES_CYCLE.length];
     return {
       id: `exp-${num}`,
       groupId: "grp-apt4b",
@@ -116,10 +123,8 @@ function makeExpenses(count: number): ExpenseLedgerRecord[] {
       createdBy: paidByElena ? "u-elena" : "u-alex",
       paidBy: paidByElena ? "u-elena" : "u-alex",
       payerName: paidByElena ? "Elena Rostova" : "Alex Rivera",
-      description: paidByElena
-        ? `ConEd Utility #${num}`
-        : `Trader Joe's Basket #${num}`,
-      category: paidByElena ? "Utilities" : "Groceries & Food",
+      description: `${cat} Entry #${num}`,
+      category: cat,
       expenseDate: `2026-11-${day}T12:00:00.000Z`,
       amountCents: num * 2000,
       currency: "USD",
@@ -144,25 +149,6 @@ function makeExpenses(count: number): ExpenseLedgerRecord[] {
   });
 }
 
-const RECURRING_RULES: RecurringRuleRecord[] = [
-  {
-    id: "rec-1",
-    groupId: "grp-apt4b",
-    groupName: "Apt 4B Roommates",
-    paidBy: "u-alex",
-    payerName: "Alex Rivera",
-    description: "Fiber Internet",
-    category: "Utilities",
-    amountCents: 9000,
-    currency: "USD",
-    frequency: "MONTHLY",
-    dayOfMonth: 5,
-    splitRule: "EQUAL",
-    isActive: true,
-    nextRunDate: "2026-12-05",
-  },
-];
-
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -176,13 +162,36 @@ beforeEach(() => {
   refreshMock.mockReset();
 });
 
-describe("ExpensesClient & Global Cmd+K Search", () => {
+describe("ExpensesClient v2 & Global Cmd+K Search", () => {
   it(
-    "renders KPI cards with Personal Share ProgressBar, filters by tab/category/search/sort, and paginates",
+    "renders v2 KPIs with Monthly Cap ProgressBar, Category pills, Ownership/Status/Sort dropdowns, 8-column Table + Pagination, CSV export, and removes Recurring & insight cards",
     { timeout: 15000 },
     async () => {
       const user = userEvent.setup();
-      const expenses = makeExpenses(9);
+      // 10 expenses: total = 2000*(1+..+10) = 110000 ($1,100.00); Alex share = $550.00 (50.0% of total, 55.0% of $1,000.00 cap)
+      // Settle up to Nov 22 -> exp-7..10 (Nov 22, 21, 20, 19) become settled/locked; exp-1..6 remain pending
+      const expenses = makeExpenses(10);
+      const settlements = [
+        {
+          id: "set-1",
+          groupId: "grp-apt4b",
+          payerId: "u-alex",
+          recipientId: "u-elena",
+          amountCents: 1000,
+          currency: "USD",
+          settledAt: "2026-11-22T18:00:00.000Z",
+        },
+      ];
+
+      const clickedLinks: Array<{ href: string; download: string }> = [];
+      vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
+        this: HTMLAnchorElement,
+      ) {
+        clickedLinks.push({
+          href: this.getAttribute("href") ?? "",
+          download: this.getAttribute("download") ?? "",
+        });
+      });
 
       render(
         <AppShell groups={SHELL_GROUPS} user={SHELL_USER} initialCycle="2026-11">
@@ -192,91 +201,130 @@ describe("ExpensesClient & Global Cmd+K Search", () => {
             personalShareCapCents={100000} // $1,000.00 cap
             initialGroups={EXPENSE_GROUPS}
             initialExpenses={expenses}
-            initialSettlements={[]}
+            initialSettlements={settlements}
             initialBillingCycles={[]}
-            initialRecurringRules={RECURRING_RULES}
           />
         </AppShell>,
       );
 
-      // Total group spend = 2000*(1+..+9) = 90000 ($900.00); Alex share = $450.00 (45.0% of $1,000.00)
+      // Legacy Recurring tab & bottom insight cards are completely removed
+      expect(
+        screen.queryByRole("tab", { name: /Recurring/i }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(/Household Run-Rate Analysis/i),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(/Smart Split Recommendation/i),
+      ).not.toBeInTheDocument();
+
+      // KPI 1: TOTAL GROUP EXPENSES
       const totalCard = screen.getByTestId("kpi-total-group-expenses");
-      expect(within(totalCard).getByText("$900.00")).toBeInTheDocument();
+      expect(within(totalCard).getByText("$1,100.00")).toBeInTheDocument();
       expect(
-        within(totalCard).getByText(/9 aggregate transactions/i),
+        within(totalCard).getByText(/10 filtered expenses/i),
       ).toBeInTheDocument();
 
+      // KPI 2: YOUR PERSONAL SHARE + % of total + Monthly Cap ProgressBar
       const personalCard = screen.getByTestId("kpi-personal-share");
-      expect(within(personalCard).getByText("$450.00")).toBeInTheDocument();
-      expect(within(personalCard).getByText("45.0%")).toBeInTheDocument();
+      expect(within(personalCard).getByText("$550.00")).toBeInTheDocument();
+      expect(within(personalCard).getByText("50.0% of total")).toBeInTheDocument();
       expect(
-        within(personalCard).getByText(/Monthly limit threshold: \$1,000\.00/i),
+        within(personalCard).getByText("Monthly Cap ($1,000.00)"),
       ).toBeInTheDocument();
-      const progress = within(personalCard).getByRole("progressbar");
-      expect(progress).toHaveAttribute("aria-valuenow", "45");
+      expect(within(personalCard).getByText("55.0%")).toBeInTheDocument();
+      const progress = within(personalCard).getByRole("progressbar", {
+        name: "Monthly Cap",
+      });
+      expect(progress).toHaveAttribute("aria-valuenow", "55");
 
+      // KPI 3: UNSETTLED / PENDING
       const unsettledCard = screen.getByTestId("kpi-unsettled-pending");
+      expect(within(unsettledCard).getByText("Action needed")).toBeInTheDocument();
       expect(
-        within(unsettledCard).getByText(/Next group settlement:/i),
+        within(unsettledCard).getByText(/6 pending items · 1 peer/i),
       ).toBeInTheDocument();
 
-      // Pagination shows page 1 of 2 (7 rows on page 1, 2 on page 2)
-      expect(screen.getByText("Trader Joe's Basket #1")).toBeInTheDocument();
-      expect(screen.queryByText("ConEd Utility #8")).not.toBeInTheDocument();
+      // 8-column Table headers
+      const table = screen.getByRole("table", { name: "Expenses Ledger" });
+      const headers = within(table)
+        .getAllByRole("columnheader")
+        .map((th) => th.textContent?.trim());
+      expect(headers).toEqual([
+        "DATE",
+        "MERCHANT & GROUP",
+        "CATEGORY",
+        "PAID BY",
+        "SPLIT",
+        "YOUR SHARE",
+        "STATUS",
+        "ACTION",
+      ]);
+
+      // Pagination: 8 rows on page 1, 2 rows on page 2
+      expect(screen.getByText("Groceries Entry #1")).toBeInTheDocument();
+      expect(screen.getByText("Travel Entry #8")).toBeInTheDocument();
+      expect(screen.queryByText("Groceries Entry #9")).not.toBeInTheDocument();
 
       await user.click(screen.getByRole("button", { name: "Next" }));
-      expect(screen.getByText("ConEd Utility #8")).toBeInTheDocument();
-      expect(
-        screen.queryByText("Trader Joe's Basket #1"),
-      ).not.toBeInTheDocument();
+      expect(screen.getByText("Groceries Entry #9")).toBeInTheDocument();
+      expect(screen.queryByText("Groceries Entry #1")).not.toBeInTheDocument();
 
-      // Tab filter: Paid by Me (5 odd items -> resets to page 1)
-      await user.click(screen.getByRole("tab", { name: "Paid by Me" }));
-      expect(screen.getByText("Trader Joe's Basket #1")).toBeInTheDocument();
-      expect(screen.queryByText("ConEd Utility #2")).not.toBeInTheDocument();
-
-      // Tab filter: Split with Me (4 even items)
-      await user.click(screen.getByRole("tab", { name: "Split with Me" }));
-      expect(screen.getByText("ConEd Utility #2")).toBeInTheDocument();
-      expect(
-        screen.queryByText("Trader Joe's Basket #1"),
-      ).not.toBeInTheDocument();
-
-      // Back to All Expenses, filter by search query
-      await user.click(screen.getByRole("tab", { name: "All Expenses" }));
-      const searchInput = screen.getByRole("searchbox", {
-        name: "Search expenses",
-      });
-      await user.type(searchInput, "#9");
-      expect(screen.getByText("Trader Joe's Basket #9")).toBeInTheDocument();
-      expect(
-        screen.queryByText("Trader Joe's Basket #1"),
-      ).not.toBeInTheDocument();
-
-      // Category filter pills and sort listbox sit side-by-side inside a shared group container
-      const filterSortGroup = screen.getByTestId("expenses-filter-sort-group");
-      expect(filterSortGroup).toHaveClass("flex-wrap", "items-center");
-      expect(filterSortGroup).not.toHaveClass("justify-between");
-      const categoryGroup = within(filterSortGroup).getByRole("group", {
+      // Category quick-filter pills: All (10), Groceries, Utilities, Dining, Travel
+      const categoryGroup = screen.getByRole("group", {
         name: "Filter by category",
       });
-      const sortButton = within(filterSortGroup).getByRole("button", {
-        name: /Sort transactions/i,
-      });
-      expect(categoryGroup).toBeInTheDocument();
-      expect(sortButton).toBeInTheDocument();
-
-      // Clear search, filter by Utilities category chip
-      await user.click(screen.getByRole("button", { name: "Clear search" }));
-      await user.click(screen.getByRole("button", { name: /Utilities/i }));
-      expect(screen.getByText("ConEd Utility #2")).toBeInTheDocument();
       expect(
-        screen.queryByText("Trader Joe's Basket #1"),
-      ).not.toBeInTheDocument();
+        within(categoryGroup).getByRole("button", { name: "All (10)" }),
+      ).toBeInTheDocument();
+      await user.click(
+        within(categoryGroup).getByRole("button", { name: "Utilities" }),
+      );
+      expect(screen.getByText("Utilities Entry #2")).toBeInTheDocument();
+      expect(screen.getByText("Utilities Entry #6")).toBeInTheDocument();
+      expect(screen.getByText("Utilities Entry #10")).toBeInTheDocument();
+      expect(screen.queryByText("Groceries Entry #1")).not.toBeInTheDocument();
 
-      // Recurring tab shows Fiber Internet rule
-      await user.click(screen.getByRole("tab", { name: "Recurring" }));
-      expect(screen.getByText("Fiber Internet")).toBeInTheDocument();
+      // Reset to All (10)
+      await user.click(
+        within(categoryGroup).getByRole("button", { name: "All (10)" }),
+      );
+
+      // Ownership dropdown: Paid by Me (odd entries)
+      await user.click(screen.getByRole("button", { name: "Ownership" }));
+      await user.click(screen.getByRole("option", { name: "Paid by Me" }));
+      expect(screen.getByText("Groceries Entry #1")).toBeInTheDocument();
+      expect(screen.queryByText("Utilities Entry #2")).not.toBeInTheDocument();
+
+      // Ownership back to All Expenses
+      await user.click(screen.getByRole("button", { name: "Ownership" }));
+      await user.click(screen.getByRole("option", { name: "All Expenses" }));
+
+      // Status dropdown: Pending vs Settled
+      await user.click(screen.getByRole("button", { name: "Status" }));
+      await user.click(screen.getByRole("option", { name: "Settled" }));
+      expect(screen.getByText("Dining Entry #7")).toBeInTheDocument();
+      expect(screen.queryByText("Groceries Entry #1")).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "Status" }));
+      await user.click(screen.getByRole("option", { name: "Pending" }));
+      expect(screen.getByText("Groceries Entry #1")).toBeInTheDocument();
+      expect(screen.queryByText("Dining Entry #7")).not.toBeInTheDocument();
+
+      // Sort dropdown: Amount (Highest) -> Utilities Entry #6 ($120.00) is first among pending 1..6
+      await user.click(screen.getByRole("button", { name: "Sort" }));
+      await user.click(screen.getByRole("option", { name: "Amount (Highest)" }));
+      const bodyRows = within(table).getAllByRole("row").slice(1);
+      expect(bodyRows[0]).toHaveTextContent("Utilities Entry #6");
+
+      // Export CSV includes active filters (status=pending, sort=amount-desc)
+      await user.click(screen.getByRole("button", { name: /Export CSV/i }));
+      expect(clickedLinks).toEqual([
+        {
+          href: "/api/expenses/export?group=grp-apt4b&cycle=2026-11&format=csv&status=pending&sort=amount-desc",
+          download: "ledgersplit-apt-4b-2026-11.csv",
+        },
+      ]);
     },
   );
 
@@ -302,8 +350,8 @@ describe("ExpensesClient & Global Cmd+K Search", () => {
               id: "exp-1",
               groupId: "grp-apt4b",
               groupName: "Apt 4B Roommates",
-              description: "Trader Joe's Basket #1",
-              category: "Groceries & Food",
+              description: "Groceries Entry #1",
+              category: "Groceries",
               amountCents: 2000,
               currency: "USD",
               expenseDate: "2026-11-28T12:00:00.000Z",
@@ -323,7 +371,6 @@ describe("ExpensesClient & Global Cmd+K Search", () => {
             initialExpenses={makeExpenses(2)}
             initialSettlements={[]}
             initialBillingCycles={[]}
-            initialRecurringRules={[]}
           />
         </AppShell>,
       );
@@ -333,22 +380,22 @@ describe("ExpensesClient & Global Cmd+K Search", () => {
       const modalSearch = within(dialog).getByPlaceholderText(
         /Search expenses, merchants, or split groups/i,
       );
-      await user.type(modalSearch, "Trader");
+      await user.type(modalSearch, "Groceries");
 
       await waitFor(() => {
         expect(fetchMock).toHaveBeenCalledWith(
-          "/api/search?q=Trader",
+          "/api/search?q=Groceries",
           expect.objectContaining({ signal: expect.any(AbortSignal) }),
         );
       });
 
       const matchButton = await within(dialog).findByRole("button", {
-        name: /Trader Joe's Basket #1/i,
+        name: /Groceries Entry #1/i,
       });
       await user.click(matchButton);
 
       expect(pushMock).toHaveBeenCalledWith(
-        "/expenses?group=grp-apt4b&cycle=2026-11&q=Trader+Joe%27s+Basket+%231",
+        "/expenses?group=grp-apt4b&cycle=2026-11&q=Groceries+Entry+%231",
       );
     },
   );

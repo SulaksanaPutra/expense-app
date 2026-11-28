@@ -3,6 +3,7 @@ import type {
   GroupCategory,
   GroupStatus,
   GroupType,
+  MemberRole,
   MemberStatus,
   NotificationType,
   PaymentRail,
@@ -15,6 +16,7 @@ export interface ShellGroupMember {
   src?: string | null;
   initials?: string;
   sharePercentage?: number;
+  shareUnits?: number;
 }
 
 export interface ShellGroupSummary {
@@ -27,6 +29,9 @@ export interface ShellGroupSummary {
   baseCurrency: string;
   defaultSplitMode?: SplitMode;
   simplifyDebts?: boolean;
+  allowAnyMemberAddExpense?: boolean;
+  requireReceiptOver100?: boolean;
+  currentUserRole?: MemberRole | null;
   currentUserStatus?: MemberStatus | null;
   activeSplitCount: number;
   members: ShellGroupMember[];

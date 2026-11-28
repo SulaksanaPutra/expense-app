@@ -28,7 +28,8 @@ export type NotificationType =
   | "NEW_EXPENSE"
   | "SETTLEMENT_CONFIRMATION"
   | "REMINDER_NUDGE"
-  | "LEASE_ARCHIVE_PROMPT";
+  | "LEASE_ARCHIVE_PROMPT"
+  | "CYCLE_CLOSE_REMINDER";
 export type GroupAuditEventType =
   | "GROUP_CREATED"
   | "RATIOS_UPDATED"
@@ -719,6 +720,7 @@ export interface Database {
           delta_cents: number | null;
           currency: string | null;
           href: string | null;
+          dedupe_key?: string | null;
           is_read: boolean;
           created_at: string;
         };
@@ -735,6 +737,7 @@ export interface Database {
           delta_cents?: number | null;
           currency?: string | null;
           href?: string | null;
+          dedupe_key?: string | null;
           is_read?: boolean;
           created_at?: string;
         };
@@ -751,6 +754,7 @@ export interface Database {
           delta_cents?: number | null;
           currency?: string | null;
           href?: string | null;
+          dedupe_key?: string | null;
           is_read?: boolean;
           created_at?: string;
         };

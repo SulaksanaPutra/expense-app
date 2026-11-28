@@ -1,7 +1,7 @@
 {
   "crons": [
     {
-      "path": "/api/cron/recurring-expenses",
+      "path": "/api/cron/cycle-reset",
       "schedule": "0 0 * * *"
     }
   ]

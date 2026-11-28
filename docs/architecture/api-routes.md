@@ -3,12 +3,14 @@
 Deterministically generated from `src/app/api/**/route.ts` via `npm run docs:api`.
 
 - **OpenAPI Spec:** [`docs/architecture/openapi.json`](./openapi.json)
-- **Total Endpoints:** 44 operations across 29 paths
+- **Total Endpoints:** 46 operations across 30 paths
 
 | Path | Method | Tag | Path Params | Status Codes | Summary | Source |
 | --- | --- | --- | --- | --- | --- | --- |
 | `/api/account` | `GET` | `account` | - | 200, 401, 500, 503 | GET /api/account | `src/app/api/account/route.ts` |
 | `/api/account` | `DELETE` | `account` | - | 200, 401, 503 | DELETE /api/account | `src/app/api/account/route.ts` |
+| `/api/cron/cycle-reset` | `GET` | `cron` | - | 200 | GET /api/cron/cycle-reset | `src/app/api/cron/cycle-reset/route.ts` |
+| `/api/cron/cycle-reset` | `POST` | `cron` | - | 201 | POST /api/cron/cycle-reset | `src/app/api/cron/cycle-reset/route.ts` |
 | `/api/expenses/export` | `GET` | `expenses` | - | 200, 400, 401, 503 | Export cycle- and group-scoped ledger transactions in RFC-4180 CSV or JSON. | `src/app/api/expenses/export/route.ts` |
 | `/api/fx` | `GET` | `fx` | - | 200, 400 | GET /api/fx | `src/app/api/fx/route.ts` |
 | `/api/groups` | `POST` | `groups` | - | 201, 400, 401, 503 | POST /api/groups | `src/app/api/groups/route.ts` |

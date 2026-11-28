@@ -36,6 +36,7 @@ async function loadShellContext(): Promise<{
     avatarUrl: metaAvatarUrl,
     displayCurrency: "USD",
     baseCurrency: "USD",
+    autoIncludeInExpenses: true,
   };
 
   if (!hasSupabaseEnv()) {
@@ -57,7 +58,7 @@ async function loadShellContext(): Promise<{
         supabase
           .from("groups")
           .select(
-            "id, name, slug, group_type, category, status, base_currency, default_split_mode",
+            "id, name, slug, group_type, category, status, base_currency, default_split_mode, allow_any_member_add_expense, require_receipt_over_100",
           )
           .neq("status", "ARCHIVED")
           .order("created_at", { ascending: true }),
@@ -91,6 +92,8 @@ async function loadShellContext(): Promise<{
       groupRows = (fb.data ?? []).map((g) => ({
         ...g,
         category: g.group_type === "RESIDENTIAL" ? "HOME" : g.group_type === "TRIP" ? "TRIP" : "UTILITIES",
+        allow_any_member_add_expense: true,
+        require_receipt_over_100: false,
       })) as typeof groupRows;
     }
 
@@ -109,7 +112,8 @@ async function loadShellContext(): Promise<{
       const defaultSplitMethod =
         rawSplitMethod === "EQUAL" ||
         rawSplitMethod === "PERCENTAGE" ||
-        rawSplitMethod === "EXACT"
+        rawSplitMethod === "EXACT" ||
+        rawSplitMethod === "SHARES"
           ? rawSplitMethod
           : undefined;
       const rawPaymentMethods = Array.isArray(rawPrefs.payment_methods)
@@ -155,7 +159,6 @@ async function loadShellContext(): Promise<{
             : true,
         defaultSplitMethod,
         defaultPaymentRail,
-        receiptStorageUsedBytes: 0,
       };
     }
 
@@ -165,10 +168,10 @@ async function loadShellContext(): Promise<{
 
     const groupIds = groupRows.map((g) => g.id);
 
-    const [{ data: memberRows }, { data: expenseRows }] = await Promise.all([
+    const [membersRes, { data: expenseRows }] = await Promise.all([
       supabase
         .from("group_members")
-        .select("group_id, user_id, status, share_percentage, joined_at")
+        .select("group_id, user_id, role, status, share_percentage, share_units, joined_at")
         .in("group_id", groupIds)
         .order("joined_at", { ascending: true }),
       supabase
@@ -178,13 +181,28 @@ async function loadShellContext(): Promise<{
         .is("deleted_at", null),
     ]);
 
+    let memberRows = membersRes.data;
+    if (membersRes.error && (membersRes.error.code === "42703" || membersRes.error.code === "PGRST204")) {
+      const fb = await supabase
+        .from("group_members")
+        .select("group_id, user_id, role, status, share_percentage, joined_at")
+        .in("group_id", groupIds)
+        .order("joined_at", { ascending: true });
+      memberRows = (fb.data ?? []).map((m) => ({
+        ...m,
+        share_units: 1,
+      })) as typeof memberRows;
+    }
+
     const activeMemberRows = (memberRows ?? []).filter(
       (m) => m.status === "ACTIVE",
     );
     const currentUserStatusByGroup = new Map<string, "ACTIVE" | "FORMER_MEMBER">();
+    const currentUserRoleByGroup = new Map<string, "ADMIN" | "MEMBER">();
     for (const row of memberRows ?? []) {
       if (row.user_id === authUser.id) {
         currentUserStatusByGroup.set(row.group_id, row.status);
+        currentUserRoleByGroup.set(row.group_id, row.role);
       }
     }
 
@@ -211,6 +229,7 @@ async function loadShellContext(): Promise<{
         id: row.user_id,
         name: memberProfile?.full_name || "Member",
         sharePercentage: Number(row.share_percentage ?? 0),
+        shareUnits: Number(row.share_units ?? 1),
       });
       membersByGroup.set(row.group_id, list);
     }
@@ -233,6 +252,9 @@ async function loadShellContext(): Promise<{
       baseCurrency: g.base_currency,
       defaultSplitMode: g.default_split_mode,
       simplifyDebts: true,
+      allowAnyMemberAddExpense: g.allow_any_member_add_expense !== false,
+      requireReceiptOver100: g.require_receipt_over_100 === true,
+      currentUserRole: currentUserRoleByGroup.get(g.id) ?? null,
       currentUserStatus: currentUserStatusByGroup.get(g.id) ?? null,
       activeSplitCount: splitCountByGroup.get(g.id) ?? 0,
       members: membersByGroup.get(g.id) ?? [],

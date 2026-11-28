@@ -16,7 +16,6 @@ export default async function ExpensesPage() {
         initialExpenses={[]}
         initialSettlements={[]}
         initialBillingCycles={[]}
-        initialRecurringRules={[]}
       />
     );
   }
@@ -33,7 +32,6 @@ export default async function ExpensesPage() {
       initialExpenses={data.expenses}
       initialSettlements={data.settlements}
       initialBillingCycles={data.billingCycles}
-      initialRecurringRules={data.recurringRules}
       loadError={data.loadError}
     />
   );

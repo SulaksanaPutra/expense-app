@@ -38,6 +38,8 @@ export type LedgerWriteGuardResult =
         base_currency: string;
         default_split_mode: SplitMode;
         billing_cycle_anchor_day: number;
+        allow_any_member_add_expense: boolean;
+        require_receipt_over_100: boolean;
       };
       member: {
         role: MemberRole;
@@ -52,6 +54,7 @@ export type LedgerWriteGuardResult =
         | "NOT_MEMBER"
         | "GROUP_ARCHIVED"
         | "FORMER_MEMBER_RESTRICTED"
+        | "EXPENSE_CREATION_RESTRICTED"
         | "FORBIDDEN"
         | "SERVER_ERROR";
       message: string;
@@ -70,7 +73,7 @@ export async function assertGroupWritableForLedger(
   const { data: group, error: groupError } = await supabase
     .from("groups")
     .select(
-      "id, name, status, base_currency, default_split_mode, billing_cycle_anchor_day",
+      "id, name, status, base_currency, default_split_mode, billing_cycle_anchor_day, allow_any_member_add_expense, require_receipt_over_100",
     )
     .eq("id", groupId)
     .maybeSingle();
@@ -135,11 +138,31 @@ export async function assertGroupWritableForLedger(
         status: 403,
         code: "FORMER_MEMBER_RESTRICTED",
         message:
-          "Former members are excluded from new expenses and recurring rules and can only record settlements.",
+          "Former members are excluded from new expenses and can only record settlements.",
       };
     }
   }
 
+  const allowAnyMemberAddExpense =
+    (group as { allow_any_member_add_expense?: boolean | null })
+      .allow_any_member_add_expense !== false;
+  const requireReceiptOver100 =
+    (group as { require_receipt_over_100?: boolean | null })
+      .require_receipt_over_100 === true;
+
+  if (
+    operation === "EXPENSE_CREATE" &&
+    !allowAnyMemberAddExpense &&
+    member.role !== "ADMIN"
+  ) {
+    return {
+      ok: false,
+      status: 403,
+      code: "EXPENSE_CREATION_RESTRICTED",
+      message:
+        "Only group admins can add expenses in this group.",
+    };
+  }
 
   return {
     ok: true,
@@ -150,6 +173,8 @@ export async function assertGroupWritableForLedger(
       base_currency: group.base_currency,
       default_split_mode: group.default_split_mode,
       billing_cycle_anchor_day: group.billing_cycle_anchor_day ?? 1,
+      allow_any_member_add_expense: allowAnyMemberAddExpense,
+      require_receipt_over_100: requireReceiptOver100,
     },
     member: {
       role: member.role,
@@ -231,13 +256,14 @@ async function validateAndNormalizeExpensePayload(
     params.splitMethod !== undefined &&
     params.splitMethod !== "EQUAL" &&
     params.splitMethod !== "PERCENTAGE" &&
-    params.splitMethod !== "EXACT"
+    params.splitMethod !== "EXACT" &&
+    params.splitMethod !== "SHARES"
   ) {
     return {
       ok: false,
       status: 400,
       code: "INVALID_SPLIT_METHOD",
-      message: "Split method must be EQUAL, PERCENTAGE, or EXACT.",
+      message: "Split method must be EQUAL, PERCENTAGE, EXACT, or SHARES.",
     };
   }
 
@@ -245,7 +271,7 @@ async function validateAndNormalizeExpensePayload(
 
   const { data: memberRows, error: membersError } = await supabase
     .from("group_members")
-    .select("user_id, status, share_percentage, joined_at")
+    .select("user_id, status, share_percentage, share_units, joined_at")
     .eq("group_id", params.groupId)
     .order("joined_at", { ascending: true });
 
@@ -262,6 +288,7 @@ async function validateAndNormalizeExpensePayload(
     userId: m.user_id,
     status: m.status,
     sharePercentage: Number(m.share_percentage ?? 0),
+    shareUnits: Number((m as { share_units?: number | null }).share_units ?? 1),
   }));
 
   const payerMember = allMembers.find((m) => m.userId === paidBy);
@@ -280,9 +307,13 @@ async function validateAndNormalizeExpensePayload(
 
   const splitMethod: ExpenseSplitMethod =
     params.splitMethod ??
-    (guard.group.default_split_mode === "CUSTOM_RATIOS"
-      ? "PERCENTAGE"
-      : "EQUAL");
+    (guard.group.default_split_mode === "SHARES"
+      ? "SHARES"
+      : guard.group.default_split_mode === "PERCENTAGE" ||
+          guard.group.default_split_mode === "CUSTOM" ||
+          guard.group.default_split_mode === "CUSTOM_RATIOS"
+        ? "PERCENTAGE"
+        : "EQUAL");
 
   let splitBreakdown: SplitBreakdownItem[];
   if (!params.splitBreakdown || params.splitBreakdown.length === 0) {
@@ -344,6 +375,20 @@ async function validateAndNormalizeExpensePayload(
       : typeof params.receiptUrl === "string" && params.receiptUrl.trim()
         ? params.receiptUrl.trim()
         : null;
+
+  if (
+    guard.group.require_receipt_over_100 &&
+    amountCents > 10_000 &&
+    !receiptUrl
+  ) {
+    return {
+      ok: false,
+      status: 400,
+      code: "RECEIPT_REQUIRED",
+      message:
+        "This group requires a receipt attachment for expenses over $100.00.",
+    };
+  }
 
   return {
     ok: true,
@@ -678,6 +723,7 @@ function buildExpenseRevisionSnapshot(
       share_cents: shareCents,
       [shareKey]: shareCents,
       ...(item.percentage !== undefined ? { percentage: item.percentage } : {}),
+      ...(item.shares !== undefined ? { shares: item.shares } : {}),
     };
   });
 
@@ -693,6 +739,7 @@ function buildExpenseRevisionSnapshot(
       user_id: b.user_id,
       share_cents: Math.trunc(b.share_cents),
       ...(b.percentage !== undefined ? { percentage: b.percentage } : {}),
+      ...(b.shares !== undefined ? { shares: b.shares } : {}),
     })),
     receipt_url: row.receipt_url,
     shares_by_user: sharesByUser,
