@@ -221,6 +221,7 @@ beforeEach(() => {
   pushMock.mockReset();
   refreshMock.mockReset();
   vi.restoreAllMocks();
+
 });
 
 afterEach(() => {
@@ -399,7 +400,7 @@ describe("Spotlight Partition, ADMIN Edit Ratios Modal & Audit Log Drawer", () =
 
     const drawer = screen.getByTestId("audit-log-drawer");
     expect(
-      within(drawer).getByText("Apt 4B Roommates · Audit Log"),
+      screen.getByRole("dialog", { name: "Audit Log · Apt 4B Roommates" }),
     ).toBeInTheDocument();
     expect(
       within(drawer).getByText(
@@ -412,8 +413,22 @@ describe("Spotlight Partition, ADMIN Edit Ratios Modal & Audit Log Drawer", () =
       ),
     ).toBeInTheDocument();
 
-    // Filter to Governance only
-    await user.click(within(drawer).getByRole("tab", { name: "Governance" }));
+    // Filter to Rules (includes ratios & governance events)
+    await user.click(within(drawer).getByRole("tab", { name: "Rules" }));
+    expect(
+      within(drawer).getByText(
+        "Updated split ratios (Custom Ratios) and cleared review flag",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(drawer).getByText(
+        "Samira Patel joined in CUSTOM_RATIOS mode (0% initial share; review required)",
+      ),
+    ).toBeInTheDocument();
+
+    // Search filter narrows events by text
+    const searchInput = within(drawer).getByPlaceholderText("Filter log...");
+    await user.type(searchInput, "joined in CUSTOM_RATIOS");
     expect(
       within(drawer).queryByText(
         "Updated split ratios (Custom Ratios) and cleared review flag",
@@ -424,18 +439,94 @@ describe("Spotlight Partition, ADMIN Edit Ratios Modal & Audit Log Drawer", () =
         "Samira Patel joined in CUSTOM_RATIOS mode (0% initial share; review required)",
       ),
     ).toBeInTheDocument();
+    await user.clear(searchInput);
 
-    // Filter to Ratios & Rules only
-    await user.click(within(drawer).getByRole("tab", { name: "Ratios & Rules" }));
+    // Filter to Expenses and Settlements tabs
+    await user.click(within(drawer).getByRole("tab", { name: "Expenses" }));
+    expect(within(drawer).getByText("No matching audit events")).toBeInTheDocument();
+
+    await user.click(within(drawer).getByRole("tab", { name: "Settlements" }));
+    expect(within(drawer).getByText("No matching audit events")).toBeInTheDocument();
+
+    await user.click(within(drawer).getByRole("tab", { name: "All Events" }));
     expect(
-      within(drawer).getByText(
-        "Updated split ratios (Custom Ratios) and cleared review flag",
+      screen.getByRole("button", { name: "Export Log" }),
+    ).not.toBeDisabled();
+  });
+  it("opens RecordSettlementModal from WHO OWES WHOM Mark Settled and filters/exports Audit Log events", async () => {
+    const user = userEvent.setup();
+    const mixedAuditLogs: GroupAuditLogEntry[] = [
+      {
+        id: "exp-1",
+        groupId: "grp-apt-4b",
+        category: "LEDGER",
+        eventType: "EXPENSE_ADDED",
+        actorId: "usr-1",
+        actorName: "Alex Rivera",
+        summary: 'Alex Rivera added expense "Whole Foods Market"',
+        details: ["$368.40 · 3-Way Equal"],
+        createdAt: "2026-11-26T14:14:00.000Z",
+      },
+      {
+        id: "settle-1",
+        groupId: "grp-apt-4b",
+        category: "LEDGER",
+        eventType: "SETTLEMENT_RECORDED",
+        actorId: "usr-2",
+        actorName: "Elena Rostova",
+        summary: "Elena Rostova settled $120.00 with Alex Rivera",
+        details: ["Payment rail: VENMO"],
+        createdAt: "2026-11-24T11:05:00.000Z",
+      },
+      ...INITIAL_AUDIT_LOGS,
+    ];
+
+    const groupsWithMixedLogs: SplitGroupDetail[] = GROUPS_FIXTURE.map((g, i) =>
+      i === 0 ? { ...g, auditLogs: mixedAuditLogs } : g,
+    );
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          groupId: "grp-apt-4b",
+          entries: mixedAuditLogs,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
       ),
+    );
+
+    renderSplitGroups(groupsWithMixedLogs);
+
+    const spotlight = screen.getByTestId("spotlight-partition");
+    const markSettledBtn = within(spotlight).getByTestId(
+      "who-owes-settle-usr-2-usr-1",
+    );
+    await user.click(markSettledBtn);
+
+    const settleDialog = screen.getByRole("dialog", {
+      name: "Record Settlement",
+    });
+    expect(within(settleDialog).getByDisplayValue("462.50")).toBeInTheDocument();
+    await user.click(within(settleDialog).getByRole("button", { name: "Cancel" }));
+
+    await user.click(within(spotlight).getByRole("button", { name: "Audit Log" }));
+    const auditDrawer = screen.getByTestId("audit-log-drawer");
+
+    await user.click(within(auditDrawer).getByRole("tab", { name: "Expenses" }));
+    expect(
+      within(auditDrawer).getByText('Alex Rivera added expense "Whole Foods Market"'),
     ).toBeInTheDocument();
     expect(
-      within(drawer).queryByText(
-        "Samira Patel joined in CUSTOM_RATIOS mode (0% initial share; review required)",
-      ),
+      within(auditDrawer).queryByText("Elena Rostova settled $120.00 with Alex Rivera"),
+    ).not.toBeInTheDocument();
+
+    await user.click(within(auditDrawer).getByRole("tab", { name: "Settlements" }));
+    expect(
+      within(auditDrawer).getByText("Elena Rostova settled $120.00 with Alex Rivera"),
+    ).toBeInTheDocument();
+    expect(
+      within(auditDrawer).queryByText('Alex Rivera added expense "Whole Foods Market"'),
     ).not.toBeInTheDocument();
   });
 });

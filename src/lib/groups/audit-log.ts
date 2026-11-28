@@ -12,8 +12,11 @@ export type GroupAuditCategory = "RATIOS" | "GOVERNANCE" | "LEDGER";
 
 export type AuditLogDisplayEventType =
   | GroupAuditEventType
+  | "EXPENSE_ADDED"
   | "EXPENSE_REVISION"
   | "SETTLEMENT_RECORDED";
+
+export type AuditLogUiFilter = "ALL" | "EXPENSES" | "RULES" | "SETTLEMENTS";
 
 export interface GroupAuditLogEntry {
   id: string;
@@ -46,6 +49,7 @@ const RATIO_EVENT_TYPES = new Set<AuditLogDisplayEventType>([
 ]);
 
 const LEDGER_EVENT_TYPES = new Set<AuditLogDisplayEventType>([
+  "EXPENSE_ADDED",
   "EXPENSE_REVISION",
   "SETTLEMENT_RECORDED",
 ]);
@@ -56,6 +60,63 @@ export function classifyAuditCategory(
   if (RATIO_EVENT_TYPES.has(eventType)) return "RATIOS";
   if (LEDGER_EVENT_TYPES.has(eventType)) return "LEDGER";
   return "GOVERNANCE";
+}
+
+export function matchesAuditLogFilter(
+  entry: GroupAuditLogEntry,
+  filter: AuditLogUiFilter,
+): boolean {
+  if (filter === "ALL") return true;
+  if (filter === "EXPENSES") {
+    return (
+      entry.eventType === "EXPENSE_ADDED" ||
+      entry.eventType === "EXPENSE_REVISION"
+    );
+  }
+  if (filter === "SETTLEMENTS") {
+    return entry.eventType === "SETTLEMENT_RECORDED";
+  }
+  if (filter === "RULES") {
+    return entry.category === "RATIOS" || entry.category === "GOVERNANCE";
+  }
+  return true;
+}
+
+export function filterAuditLogEntries(
+  entries: readonly GroupAuditLogEntry[],
+  filter: AuditLogUiFilter,
+  searchQuery = "",
+): GroupAuditLogEntry[] {
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  return entries.filter((entry) => {
+    if (!matchesAuditLogFilter(entry, filter)) return false;
+    if (!normalizedQuery) return true;
+    const haystack = [
+      entry.summary,
+      entry.actorName,
+      entry.eventType,
+      ...entry.details,
+    ]
+      .join(" ")
+      .toLowerCase();
+    return haystack.includes(normalizedQuery);
+  });
+}
+
+export function buildAuditLogExportPayload(
+  groupName: string,
+  entries: readonly GroupAuditLogEntry[],
+): string {
+  return JSON.stringify(
+    {
+      groupName,
+      exportedAt: new Date().toISOString(),
+      totalEvents: entries.length,
+      events: entries,
+    },
+    null,
+    2,
+  );
 }
 
 function formatSplitModeLabel(mode: unknown): string {
@@ -433,6 +494,13 @@ export async function getGroupAuditLogs(
     id: string;
     description?: string;
     currency?: string;
+    amount_cents?: number;
+    paid_by?: string;
+    split_method?: string;
+    split_breakdown?: unknown;
+    expense_date?: string;
+    created_at?: string;
+    deleted_at?: string | null;
   }> = [];
   let revisionRows: Array<
     Database["public"]["Tables"]["expense_revisions"]["Row"]
@@ -451,7 +519,9 @@ export async function getGroupAuditLogs(
         }>;
       };
     };
-    const expSel = expensesTable?.select?.("id, description, currency");
+    const expSel = expensesTable?.select?.(
+      "id, description, currency, amount_cents, paid_by, split_method, split_breakdown, expense_date, created_at, deleted_at",
+    );
     if (expSel && typeof expSel.eq === "function") {
       const { data, error } = await expSel.eq("group_id", groupId);
       if (!error && Array.isArray(data)) {
@@ -506,6 +576,9 @@ export async function getGroupAuditLogs(
         }
       }
     }
+  }
+  for (const exp of expenseRows) {
+    if (exp.paid_by) userIds.add(exp.paid_by);
   }
   for (const s of settlementRows) {
     userIds.add(s.payer_id);
@@ -608,6 +681,34 @@ export async function getGroupAuditLogs(
   }
 
   const expensesById = new Map(expenseRows.map((e) => [e.id, e]));
+  for (const exp of expenseRows) {
+    if (exp.deleted_at) continue;
+    if (typeof exp.amount_cents !== "number" || !exp.paid_by) continue;
+    const payer = usersById.get(exp.paid_by);
+    const payerName = payer?.full_name || payer?.email || "Member";
+    const currency = exp.currency || group.base_currency;
+    const formattedAmount = formatMinorUnits(exp.amount_cents, currency);
+    const splitCount = Array.isArray(exp.split_breakdown)
+      ? exp.split_breakdown.length
+      : 0;
+    const methodLabel =
+      exp.split_method === "EQUAL" && splitCount > 0
+        ? `${splitCount}-Way Equal`
+        : exp.split_method
+          ? String(exp.split_method)
+          : "Split";
+    entries.push({
+      id: `expense-${exp.id}`,
+      groupId,
+      category: "LEDGER",
+      eventType: "EXPENSE_ADDED",
+      actorId: exp.paid_by,
+      actorName: payerName,
+      summary: `${payerName} added expense "${exp.description || "Expense"}"`,
+      details: [`${formattedAmount} · ${methodLabel}`],
+      createdAt: exp.created_at || exp.expense_date || new Date().toISOString(),
+    });
+  }
   for (const rev of revisionRows) {
     const actor = usersById.get(rev.updated_by);
     const actorName = actor?.full_name || actor?.email || "Member";

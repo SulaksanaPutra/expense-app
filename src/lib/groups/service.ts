@@ -488,6 +488,7 @@ export function computeGroupLedgerMetrics(params: {
   cycleTurnoverCents: number;
   cycleTransactionCount: number;
   paidThisPeriodByUser: Map<string, number>;
+  shareThisPeriodByUser: Map<string, number>;
   netBalanceByUser: Map<string, number>;
   userNetLedgerCents: number;
   isFullySettled: boolean;
@@ -503,10 +504,12 @@ export function computeGroupLedgerMetrics(params: {
 
   const { startMs, endMs } = getBillingCycleWindow(cycleSlug, anchorDay);
   const paidThisPeriodByUser = new Map<string, number>();
+  const shareThisPeriodByUser = new Map<string, number>();
   const netBalanceByUser = new Map<string, number>();
 
   for (const id of memberIds) {
     paidThisPeriodByUser.set(id, 0);
+    shareThisPeriodByUser.set(id, 0);
     netBalanceByUser.set(id, 0);
   }
 
@@ -541,6 +544,12 @@ export function computeGroupLedgerMetrics(params: {
     for (const part of breakdown) {
       if (!part || typeof part.user_id !== "string") continue;
       const shareCents = Math.trunc(part.share_cents ?? 0);
+      if (inCycle) {
+        shareThisPeriodByUser.set(
+          part.user_id,
+          (shareThisPeriodByUser.get(part.user_id) ?? 0) + shareCents,
+        );
+      }
       netBalanceByUser.set(
         part.user_id,
         (netBalanceByUser.get(part.user_id) ?? 0) - shareCents,
@@ -569,6 +578,7 @@ export function computeGroupLedgerMetrics(params: {
     cycleTurnoverCents,
     cycleTransactionCount,
     paidThisPeriodByUser,
+    shareThisPeriodByUser,
     netBalanceByUser,
     userNetLedgerCents,
     isFullySettled,
@@ -1452,6 +1462,7 @@ export async function getSplitGroupsPageData(
           status: m.status,
           sharePercentage: Number(m.share_percentage),
           paidThisPeriodCents: metrics.paidThisPeriodByUser.get(m.user_id) ?? 0,
+          shareThisPeriodCents: metrics.shareThisPeriodByUser.get(m.user_id) ?? 0,
           netBalanceCents: metrics.netBalanceByUser.get(m.user_id) ?? 0,
           isCurrentUser: m.user_id === currentUserId,
         };
