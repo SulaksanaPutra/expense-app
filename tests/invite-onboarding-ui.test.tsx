@@ -207,6 +207,7 @@ describe("Member Invitation Gateway & NEEDS_RATIO_UPDATE UI", () => {
 
     renderSplitGroups();
 
+    await user.click(screen.getByRole("tab", { name: "Split Rules & Invite" }));
     const gateway = screen.getByTestId("member-invitation-gateway");
     const linkInput = within(gateway).getByLabelText("Group invite link");
     expect(linkInput).toHaveValue(
@@ -238,9 +239,7 @@ describe("Member Invitation Gateway & NEEDS_RATIO_UPDATE UI", () => {
     expect(refreshMock).toHaveBeenCalledTimes(1);
 
     // Switch to Tahoe Ski Cabin where current user is MEMBER
-    await user.click(
-      screen.getByRole("button", { name: "Manage Group Tahoe Ski Cabin" }),
-    );
+    await user.click(screen.getByTestId("group-card-grp-tahoe"));
     expect(
       within(gateway).queryByRole("button", { name: "Regenerate Link" }),
     ).not.toBeInTheDocument();
