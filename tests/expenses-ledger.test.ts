@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { convertMinorUnitsToCurrency, getFallbackFxRate } from "@/lib/money";
 import {
   buildExpensesCsv,
   computeExpensesKpiSummary,
@@ -701,5 +702,178 @@ describe("GET /api/search", () => {
       currency: "USD",
       cycleSlug: "2026-10", // Nov 10 < anchor day 15 -> 2026-10 cycle
     });
+  });
+});
+
+describe("Issue #117 — Display Currency FX rollup & Dashboard KPI arithmetic", () => {
+  it("converts minor units deterministically across 2-digit and 0-digit currencies without float drift", () => {
+    expect(convertMinorUnitsToCurrency(10000, "USD", "USD")).toBe(10000);
+    expect(convertMinorUnitsToCurrency(0, "EUR", "USD")).toBe(0);
+    // EUR -> USD at custom rate 1.10: €100.00 -> $110.00
+    expect(convertMinorUnitsToCurrency(10000, "EUR", "USD", { EUR: 1.1 })).toBe(11000);
+    // Negative offsetting adjustment preserves sign
+    expect(convertMinorUnitsToCurrency(-5000, "EUR", "USD", { EUR: 1.1 })).toBe(-5500);
+    // Zero-decimal JPY -> USD (15000 JPY * 0.006667 = $100.01)
+    expect(convertMinorUnitsToCurrency(15000, "JPY", "USD", { JPY: 0.006667 })).toBe(10001);
+    // USD -> JPY ($100.00 * 150 = ¥15000)
+    expect(convertMinorUnitsToCurrency(10000, "USD", "JPY", { USD: 150 })).toBe(15000);
+    expect(getFallbackFxRate("USD", "USD")).toBe(1);
+    expect(getFallbackFxRate("EUR", "USD")).toBeGreaterThan(0);
+  });
+
+  it("rolls up All Groups KPIs and Category Breakdown into User.display_currency without mutating group ledgers, and keeps single-group strictly in Group.base_currency", () => {
+    const multiCurrencyGroups: ExpenseGroupInfo[] = [
+      {
+        ...GROUPS[0],
+        id: "grp-usd",
+        name: "Apartment 4B Shared",
+        baseCurrency: "USD",
+        operationalBudgetCents: 200000, // $2,000.00
+        cycleResetDay: 1,
+        autoSettleOnReset: true,
+        billingCycleAnchorDay: 1,
+      },
+      {
+        ...GROUPS[1],
+        id: "grp-eur",
+        name: "Lisbon Retreat",
+        baseCurrency: "EUR",
+        simplifyDebts: true,
+        operationalBudgetCents: 100000, // €1,000.00 -> $1,100.00 at 1.10
+        cycleResetDay: 10,
+        autoSettleOnReset: true,
+        billingCycleAnchorDay: 1,
+      },
+    ];
+
+    const multiCurrencyExpenses: ExpenseLedgerRecord[] = [
+      {
+        ...SAMPLE_EXPENSES[0],
+        id: "exp-usd-nov",
+        groupId: "grp-usd",
+        groupName: "Apartment 4B Shared",
+        groupBaseCurrency: "USD",
+        groupBillingAnchorDay: 1,
+        paidBy: "u-alex",
+        category: "Groceries & Food",
+        expenseDate: "2026-11-12T12:00:00.000Z",
+        amountCents: 30000, // $300.00 (Alex paid, split 3 ways -> Elena + Marcus owe Alex $200.00)
+        currency: "USD",
+        splitBreakdown: [
+          { user_id: "u-alex", share_cents: 10000 },
+          { user_id: "u-elena", share_cents: 10000 },
+          { user_id: "u-marcus", share_cents: 10000 },
+        ],
+      },
+      {
+        ...SAMPLE_EXPENSES[2],
+        id: "exp-eur-nov",
+        groupId: "grp-eur",
+        groupName: "Lisbon Retreat",
+        groupBaseCurrency: "EUR",
+        groupBillingAnchorDay: 1,
+        paidBy: "u-elena",
+        category: "Travel & Fuel",
+        expenseDate: "2026-11-15T12:00:00.000Z",
+        amountCents: 20000, // €200.00 -> $220.00 at 1.10 (Alex owes Elena €100.00 -> $110.00)
+        currency: "EUR",
+        splitBreakdown: [
+          { user_id: "u-alex", share_cents: 10000 },
+          { user_id: "u-elena", share_cents: 10000 },
+        ],
+      },
+      {
+        ...SAMPLE_EXPENSES[3],
+        id: "exp-usd-oct",
+        groupId: "grp-usd",
+        groupName: "Apartment 4B Shared",
+        groupBaseCurrency: "USD",
+        groupBillingAnchorDay: 1,
+        paidBy: "u-alex",
+        category: "Groceries & Food",
+        expenseDate: "2026-10-10T12:00:00.000Z",
+        amountCents: 40000, // $400.00 prev cycle
+        currency: "USD",
+        splitBreakdown: [
+          { user_id: "u-alex", share_cents: 20000 },
+          { user_id: "u-elena", share_cents: 20000 },
+        ],
+      },
+    ];
+
+    const frozenEurExpenseSnapshot = JSON.stringify(multiCurrencyExpenses[1]);
+
+    // 1. All Groups mode rolls up into User.display_currency = USD with fxRates { EUR: 1.1 }
+    const allGroupsKpi = computeExpensesKpiSummary({
+      expenses: multiCurrencyExpenses,
+      groups: multiCurrencyGroups,
+      settlements: [],
+      activeGroupId: "all",
+      cycleSlug: "2026-11",
+      currentUserId: "u-alex",
+      userBaseCurrency: "USD",
+      personalShareCapCents: null,
+      fxRates: { EUR: 1.1 },
+      referenceDate: new Date("2026-11-20T00:00:00.000Z"),
+    });
+
+    expect(allGroupsKpi.displayCurrency).toBe("USD");
+    expect(allGroupsKpi.isFxRolledUp).toBe(true);
+    // Nov total: $300.00 + (€200.00 * 1.10 = $220.00) = $520.00 (52000 cents)
+    expect(allGroupsKpi.totalGroupExpensesCents).toBe(52000);
+    // Oct total: $400.00 -> MoM = (520 - 400) / 400 = +30.0%
+    expect(allGroupsKpi.momDeltaPercent).toBe(30);
+    // Personal share: $100.00 + (€100.00 * 1.10 = $110.00) = $210.00 (21000 cents)
+    expect(allGroupsKpi.personalShareCents).toBe(21000);
+    // Operational budget: $2,000.00 + (€1,000.00 * 1.10 = $1,100.00) = $3,100.00 (310000 cents)
+    expect(allGroupsKpi.operationalBudgetCents).toBe(310000);
+    // Utilization: 52000 / 310000 = 16.8%
+    expect(allGroupsKpi.budgetUtilizationPercent).toBe(16.8);
+    // Balances:
+    //   grp-usd: Alex owed $200 (Nov) + $200 (Oct) = $400.00
+    //   grp-eur: Alex owes €100 -> $110.00
+    //   Net settlement balance = +$400.00 - $110.00 = +$290.00
+    expect(allGroupsKpi.owedToYouCents).toBe(40000);
+    expect(allGroupsKpi.youOweCents).toBe(11000);
+    expect(allGroupsKpi.youOweCount).toBe(1);
+    expect(allGroupsKpi.youOwePeerCount).toBe(1);
+    expect(allGroupsKpi.netSettlementCents).toBe(29000);
+    // Earliest upcoming reset day after Nov 20: Dec 1, 2026 (grp-usd cycleResetDay=1)
+    expect(allGroupsKpi.nextSettlementDateLabel).toBe("Dec 1, 2026");
+    // Category totals rolled up into USD
+    expect(allGroupsKpi.categoryTotals).toEqual([
+      { category: "Groceries & Food", amountCents: 30000, count: 1 },
+      { category: "Travel & Fuel", amountCents: 22000, count: 1 },
+    ]);
+
+    // Group ledger record was NEVER mutated
+    expect(JSON.stringify(multiCurrencyExpenses[1])).toBe(frozenEurExpenseSnapshot);
+
+    // 2. Single-group selection displays strictly in Group.base_currency (EUR) with zero FX conversion
+    const eurGroupKpi = computeExpensesKpiSummary({
+      expenses: multiCurrencyExpenses,
+      groups: multiCurrencyGroups,
+      settlements: [],
+      activeGroupId: "grp-eur",
+      cycleSlug: "2026-11",
+      currentUserId: "u-alex",
+      userBaseCurrency: "USD",
+      personalShareCapCents: null,
+      fxRates: { EUR: 1.1 },
+      referenceDate: new Date("2026-11-20T00:00:00.000Z"),
+    });
+
+    expect(eurGroupKpi.displayCurrency).toBe("EUR");
+    expect(eurGroupKpi.isFxRolledUp).toBe(false);
+    expect(eurGroupKpi.totalGroupExpensesCents).toBe(20000); // €200.00 exact
+    expect(eurGroupKpi.personalShareCents).toBe(10000); // €100.00 exact
+    expect(eurGroupKpi.youOweCents).toBe(10000); // €100.00 exact
+    expect(eurGroupKpi.netSettlementCents).toBe(-10000);
+    expect(eurGroupKpi.operationalBudgetCents).toBe(100000); // €1,000.00 exact
+    expect(eurGroupKpi.budgetUtilizationPercent).toBe(20);
+    expect(eurGroupKpi.nextSettlementDateLabel).toBe("Dec 10, 2026");
+    expect(eurGroupKpi.categoryTotals).toEqual([
+      { category: "Travel & Fuel", amountCents: 20000, count: 1 },
+    ]);
   });
 });
