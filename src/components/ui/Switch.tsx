@@ -53,7 +53,7 @@ export function Switch({
   };
 
   const activeTrackClass =
-    tone === "primary" ? "bg-primary" : "bg-[#22c55e]";
+    tone === "primary" ? "bg-primary" : "bg-success";
 
   const trackDimensions =
     size === "sm" ? "h-5 w-9" : "h-6 w-11";
@@ -84,7 +84,7 @@ export function Switch({
               id={labelId}
               htmlFor={switchId}
               className={cn(
-                "text-[14px] font-medium text-ink select-none",
+                "text-[14px] font-medium text-on-surface select-none",
                 disabled ? "opacity-60 cursor-not-allowed" : "cursor-pointer",
               )}
             >
@@ -92,12 +92,12 @@ export function Switch({
             </label>
           )}
           {description && (
-            <span id={descId} className="text-[12px] text-ink-muted-48">
+            <span id={descId} className="text-[12px] text-outline">
               {description}
             </span>
           )}
           {disabled && disabledReason && (
-            <span id={reasonId} className="text-[11px] text-ink-muted-48">
+            <span id={reasonId} className="text-[11px] text-outline">
               {disabledReason}
             </span>
           )}
@@ -119,7 +119,7 @@ export function Switch({
           "relative inline-flex shrink-0 items-center rounded-full transition-colors duration-150",
           "focus-visible:outline-2 focus-visible:outline-primary-focus focus-visible:outline-offset-2",
           trackDimensions,
-          checked ? activeTrackClass : "bg-[#d2d2d7]",
+          checked ? activeTrackClass : "bg-surface-chip-translucent",
           disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer",
         )}
       >

@@ -25,17 +25,17 @@ export interface ProgressBarProps {
 
 function resolveToneColor(tone: ProgressTone, percent: number): string {
   if (tone === "auto") {
-    if (percent >= 90) return "bg-red-600";
-    if (percent >= 75) return "bg-amber-500";
+    if (percent >= 90) return "bg-danger";
+    if (percent >= 75) return "bg-warning";
     return "bg-primary";
   }
   switch (tone) {
     case "success":
-      return "bg-emerald-500";
+      return "bg-success";
     case "warning":
-      return "bg-amber-500";
+      return "bg-warning";
     case "danger":
-      return "bg-red-600";
+      return "bg-danger";
     case "primary":
     default:
       return "bg-primary";
@@ -67,9 +67,9 @@ export function ProgressBar({
   return (
     <div className={cn("flex w-full flex-col gap-1.5", className)}>
       {(showPercentage || valueText) && (
-        <div className="flex items-center justify-between text-[12px] text-ink-muted-48">
+        <div className="flex items-center justify-between text-[12px] text-outline">
           <span>{label}</span>
-          <span className="font-medium text-ink-muted-80">
+          <span className="font-medium text-on-surface-variant tabular-nums">
             {valueText ?? `${percent}%`}
           </span>
         </div>
@@ -212,7 +212,7 @@ export function ProgressRing({
       </svg>
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-0 flex items-center justify-center text-[12px] font-semibold text-ink"
+        className="pointer-events-none absolute inset-0 flex items-center justify-center text-[12px] font-semibold text-on-surface tabular-nums"
       >
         {centerLabel ?? `${percent}%`}
       </div>

@@ -4,19 +4,27 @@ import { cn } from "@/lib/cn";
 
 export interface TableProps extends React.TableHTMLAttributes<HTMLTableElement> {
   wrapperClassName?: string;
+  bordered?: boolean;
 }
 
 export function Table({
   wrapperClassName,
+  bordered = true,
   className,
   children,
   ...props
 }: TableProps) {
   return (
-    <div className={cn("w-full overflow-x-auto", wrapperClassName)}>
+    <div
+      className={cn(
+        "w-full overflow-x-auto",
+        bordered && "rounded-[14px] border border-hairline",
+        wrapperClassName,
+      )}
+    >
       <table
         className={cn(
-          "w-full border-collapse text-left text-[14px] text-ink",
+          "w-full border-collapse text-left text-[14px] text-on-surface",
           className,
         )}
         {...props}
@@ -34,7 +42,7 @@ export function TableHeader({
   return (
     <thead
       className={cn(
-        "border-b border-hairline bg-surface-pearl/60 text-[11px] font-semibold uppercase tracking-wider text-ink-muted-48",
+        "border-b border-hairline bg-surface-pearl text-[11px] font-semibold uppercase tracking-wider text-outline",
         className,
       )}
       {...props}
@@ -56,12 +64,35 @@ export function TableBody({
 
 export function TableRow({
   className,
+  onClick,
+  onKeyDown,
+  tabIndex,
   ...props
 }: React.HTMLAttributes<HTMLTableRowElement>) {
+  const isClickable = Boolean(onClick);
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTableRowElement>) => {
+    onKeyDown?.(e);
+    if (
+      isClickable &&
+      !e.defaultPrevented &&
+      e.target === e.currentTarget &&
+      (e.key === "Enter" || e.key === " ")
+    ) {
+      e.preventDefault();
+      onClick?.(e as unknown as React.MouseEvent<HTMLTableRowElement>);
+    }
+  };
+
   return (
     <tr
+      onClick={onClick}
+      onKeyDown={isClickable || onKeyDown ? handleKeyDown : undefined}
+      tabIndex={tabIndex ?? (isClickable ? 0 : undefined)}
       className={cn(
         "transition-colors hover:bg-surface-pearl/70",
+        isClickable &&
+          "cursor-pointer focus-visible:outline-2 focus-visible:outline-primary-focus focus-visible:outline-offset-[-2px]",
         className,
       )}
       {...props}
@@ -105,7 +136,7 @@ export function TableHead({
         <button
           type="button"
           onClick={onSort}
-          className="inline-flex items-center gap-1.5 uppercase tracking-wider text-inherit hover:text-ink focus-visible:outline-2 focus-visible:outline-primary-focus focus-visible:outline-offset-2"
+          className="inline-flex items-center gap-1.5 uppercase tracking-wider text-inherit hover:text-on-surface focus-visible:outline-2 focus-visible:outline-primary-focus focus-visible:outline-offset-2"
         >
           <span>{children}</span>
           {sortDirection === "asc" ? (
@@ -149,9 +180,9 @@ export function TableEmpty({
     <tr>
       <td colSpan={colSpan} className="px-4 py-10 text-center">
         <div className="mx-auto flex max-w-sm flex-col items-center gap-2">
-          <p className="text-[14px] font-semibold text-ink">{title}</p>
+          <p className="text-[14px] font-semibold text-on-surface">{title}</p>
           {description && (
-            <p className="text-[13px] text-ink-muted-48">{description}</p>
+            <p className="text-[13px] text-outline">{description}</p>
           )}
           {action && <div className="mt-2">{action}</div>}
         </div>

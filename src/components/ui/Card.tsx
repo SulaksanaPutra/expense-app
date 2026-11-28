@@ -12,7 +12,7 @@ export interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
 const VARIANT_CLASSES: Record<CardVariant, string> = {
   kpi: "bg-canvas border border-hairline rounded-[18px]",
   section: "bg-canvas border border-hairline rounded-[18px]",
-  "sub-card": "bg-canvas-parchment border border-hairline rounded-[18px]",
+  "sub-card": "bg-surface-container-low border border-hairline rounded-[18px]",
   spotlight: "bg-canvas border border-hairline rounded-[18px]",
 };
 
@@ -57,7 +57,7 @@ export function CardTitle({
   return (
     <h3
       className={cn(
-        "font-display text-[17px] font-semibold leading-snug tracking-[-0.015em] text-ink",
+        "font-display text-[17px] font-semibold leading-snug tracking-[-0.015em] text-on-surface",
         className,
       )}
       {...props}
@@ -71,7 +71,7 @@ export function CardDescription({
 }: React.HTMLAttributes<HTMLParagraphElement>) {
   return (
     <p
-      className={cn("text-[13px] leading-relaxed text-ink-muted-48", className)}
+      className={cn("text-[13px] leading-relaxed text-outline", className)}
       {...props}
     />
   );

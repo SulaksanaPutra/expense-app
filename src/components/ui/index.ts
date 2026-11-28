@@ -25,7 +25,15 @@ export { Dialog, Modal } from "./Dialog";
 export type { DialogProps, DialogSize } from "./Dialog";
 
 export { Input, SearchInput } from "./Input";
-export type { InputProps, SearchInputProps } from "./Input";
+export type {
+  InputProps,
+  InputShape,
+  SearchInputProps,
+  SearchInputSize,
+} from "./Input";
+
+export { MaterialIcon } from "./MaterialIcon";
+export type { MaterialIconProps } from "./MaterialIcon";
 
 export { Pagination } from "./Pagination";
 export type { PaginationProps } from "./Pagination";
@@ -41,6 +49,7 @@ export type {
 export { SegmentedControl, TabPanel, Tabs } from "./SegmentedControl";
 export type {
   SegmentedControlProps,
+  SegmentedControlRole,
   SegmentedControlVariant,
   SegmentedOption,
   TabPanelProps,

@@ -19,21 +19,21 @@ export interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
 }
 
 const TONE_CLASSES: Record<BadgeTone, string> = {
-  neutral: "bg-canvas-parchment text-ink-muted-80 border-hairline",
-  info: "bg-[#0066cc]/10 text-[#0066cc] border-[#0066cc]/20",
+  neutral: "bg-surface-container-low text-on-surface-variant border-hairline",
+  info: "bg-primary/10 text-primary border-primary/20",
   success: "bg-emerald-50 text-emerald-700 border-emerald-200",
   warning: "bg-amber-50 text-amber-800 border-amber-200",
   danger: "bg-red-50 text-red-700 border-red-200",
-  category: "bg-surface-pearl text-ink-muted-80 border-hairline",
+  category: "bg-surface-pearl text-on-surface-variant border-hairline",
 };
 
 const DOT_COLOR_CLASSES: Record<BadgeTone, string> = {
-  neutral: "bg-ink-muted-48",
-  info: "bg-[#0066cc]",
+  neutral: "bg-outline",
+  info: "bg-primary",
   success: "bg-emerald-500",
   warning: "bg-amber-500",
   danger: "bg-red-500",
-  category: "bg-[#0066cc]",
+  category: "bg-primary",
 };
 
 const SIZE_CLASSES: Record<BadgeSize, string> = {
@@ -55,7 +55,7 @@ export function Badge({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-pill border font-medium leading-none whitespace-nowrap",
+        "inline-flex items-center gap-1.5 rounded-pill border font-medium leading-none whitespace-nowrap tabular-nums",
         TONE_CLASSES[tone],
         SIZE_CLASSES[size],
         className,
