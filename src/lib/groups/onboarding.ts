@@ -106,6 +106,7 @@ export async function regenerateGroupInviteLink(
     groupId: group.id,
     slug: group.slug,
     version: nextVersion,
+    expiresInMs: 14 * 24 * 60 * 60 * 1000,
   });
 
   const { error: updateError } = await supabase
@@ -810,5 +811,148 @@ export async function updateGroupSplitRatios(
       sharePercentage: resolvedMap.get(memberId) ?? 0,
     })),
     auditEntry,
+  };
+}
+
+
+export type SendEmailInviteResult =
+  | {
+      ok: true;
+      invite: {
+        id: string;
+        groupId: string;
+        invitedEmail: string;
+        status: "PENDING";
+        expiresAt: string;
+        createdAt: string;
+        invitePath: string;
+      };
+    }
+  | { ok: false; status: number; message: string };
+
+const EMAIL_INVITE_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export async function sendGroupEmailInvite(
+  supabase: SupabaseClient<Database>,
+  actor: InviteAuthUser,
+  groupId: string,
+  rawEmail: string,
+): Promise<SendEmailInviteResult> {
+  const normalizedEmail = rawEmail.trim().toLowerCase();
+  if (!normalizedEmail || !EMAIL_INVITE_REGEX.test(normalizedEmail)) {
+    return {
+      ok: false,
+      status: 400,
+      message: "Please enter a valid email address.",
+    };
+  }
+
+  const normalizedActorEmail = (actor.email ?? "").trim().toLowerCase();
+  if (normalizedActorEmail && normalizedEmail === normalizedActorEmail) {
+    return {
+      ok: false,
+      status: 400,
+      message: "You are already a member of this group.",
+    };
+  }
+
+  const { data: membership, error: memberError } = await supabase
+    .from("group_members")
+    .select("role, status")
+    .eq("group_id", groupId)
+    .eq("user_id", actor.id)
+    .maybeSingle();
+
+  if (memberError) {
+    return {
+      ok: false,
+      status: 500,
+      message: memberError.message || "Unable to verify group permissions.",
+    };
+  }
+
+  if (
+    !membership ||
+    membership.status !== "ACTIVE" ||
+    membership.role !== "ADMIN"
+  ) {
+    return {
+      ok: false,
+      status: 403,
+      message: "Only active group admins can send email invites.",
+    };
+  }
+
+  const { data: group, error: groupError } = await supabase
+    .from("groups")
+    .select("id, name, slug, status, invite_token_version")
+    .eq("id", groupId)
+    .maybeSingle();
+
+  if (groupError) {
+    return {
+      ok: false,
+      status: 500,
+      message: groupError.message || "Unable to load group details.",
+    };
+  }
+
+  if (!group) {
+    return {
+      ok: false,
+      status: 404,
+      message: "Split group not found.",
+    };
+  }
+
+  if (group.status === "ARCHIVED") {
+    return {
+      ok: false,
+      status: 409,
+      message: "Archived groups cannot send new invitations.",
+    };
+  }
+
+  const nowMs = Date.now();
+  const expiresAtIso = new Date(nowMs + 14 * 24 * 60 * 60 * 1000).toISOString();
+  const createdAtIso = new Date(nowMs).toISOString();
+  const inviteId = crypto.randomUUID();
+  const token = createSignedInviteToken({
+    groupId: group.id,
+    slug: group.slug,
+    version: group.invite_token_version ?? 1,
+    issuedAtMs: nowMs,
+    expiresInMs: 14 * 24 * 60 * 60 * 1000,
+  });
+
+  const { error: insertError } = await supabase.from("group_invites").insert({
+    id: inviteId,
+    group_id: group.id,
+    invited_email: normalizedEmail,
+    invited_by: actor.id,
+    token,
+    status: "PENDING",
+    expires_at: expiresAtIso,
+  });
+
+  if (insertError) {
+    return {
+      ok: false,
+      status: 500,
+      message: insertError.message || "Failed to create email invitation.",
+    };
+  }
+
+  return {
+    ok: true,
+    invite: {
+      id: inviteId,
+      groupId: group.id,
+      invitedEmail: normalizedEmail,
+      status: "PENDING",
+      expiresAt: expiresAtIso,
+      createdAt: createdAtIso,
+      invitePath: buildInviteJoinPath(group.slug, token),
+    },
   };
 }
