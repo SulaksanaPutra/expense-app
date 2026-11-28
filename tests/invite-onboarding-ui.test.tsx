@@ -215,7 +215,7 @@ describe("Member Invitation Gateway & NEEDS_RATIO_UPDATE UI", () => {
     );
 
     // Copy invite link without disabling the Copy button
-    const copyButton = within(gateway).getByRole("button", { name: "Copy" });
+    const copyButton = within(gateway).getByRole("button", { name: "Copy Link" });
     await user.click(copyButton);
     expect(writeTextMock).toHaveBeenCalledWith(
       "http://localhost:3000/join/apt-4b?token=signed-token-v1",
@@ -240,11 +240,12 @@ describe("Member Invitation Gateway & NEEDS_RATIO_UPDATE UI", () => {
 
     // Switch to Tahoe Ski Cabin where current user is MEMBER
     await user.click(screen.getByTestId("group-card-grp-tahoe"));
+    const tahoeGateway = screen.getByTestId("member-invitation-gateway");
     expect(
-      within(gateway).queryByRole("button", { name: "Regenerate Link" }),
+      within(tahoeGateway).queryByRole("button", { name: "Regenerate Link" }),
     ).not.toBeInTheDocument();
-    expect(within(gateway).getByText(/Member view · Copy only/i)).toBeInTheDocument();
-    expect(within(gateway).getByRole("button", { name: "Copy" })).toBeInTheDocument();
+    expect(within(tahoeGateway).getByText(/Member view · Copy only/i)).toBeInTheDocument();
+    expect(within(tahoeGateway).getByRole("button", { name: "Copy Link" })).toBeInTheDocument();
   });
 
   it("displays NEEDS_RATIO_UPDATE warning AlertBanner and allows ADMIN to save valid 100% custom ratios", async () => {

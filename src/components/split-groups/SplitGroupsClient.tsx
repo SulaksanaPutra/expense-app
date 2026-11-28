@@ -6,15 +6,8 @@ import {
   Archive,
   ArrowRight,
   Check,
-  Copy,
-  Eye,
-  Link2,
-  Lock,
-  LogOut,
   Plus,
   RefreshCw,
-  Share2,
-  SlidersHorizontal,
   UserMinus,
   Users,
 } from "lucide-react";
@@ -25,7 +18,6 @@ import {
   Button,
   Card,
   ConfirmDialog,
-  Input,
   SegmentedControl,
   ToastContainer,
 } from "@/components/ui";
@@ -57,6 +49,7 @@ import type { GroupStatus, MemberStatus, SplitMode } from "@/types/database";
 import { AuditLogDrawer } from "./AuditLogDrawer";
 import { CreateGroupModal } from "./CreateGroupModal";
 import { EditRatiosModal } from "./EditRatiosModal";
+import { SplitRulesInviteTab } from "./SplitRulesInviteTab";
 import {
   formatSplitRuleLabel,
   GROUP_CATEGORY_LABELS,
@@ -170,6 +163,7 @@ export function SplitGroupsClient({
   } | null>(null);
 
   const [actionLoading, setActionLoading] = React.useState(false);
+  const [savingRules, setSavingRules] = React.useState(false);
   const [copiedGroupId, setCopiedGroupId] = React.useState<string | null>(null);
   const [copyStatusText, setCopyStatusText] = React.useState("");
   const [regeneratingGroupId, setRegeneratingGroupId] = React.useState<
@@ -478,6 +472,56 @@ export function SplitGroupsClient({
       router.refresh();
     },
     [activeGroups, pushToast, router],
+  );
+
+  const handleRulesSaved = React.useCallback(
+    (updatedGroup: SplitGroupDetail, shellGroup: ShellGroupSummary) => {
+      setGroupOverrides((prev) => {
+        const existing = allGroups.find((g) => g.id === updatedGroup.id);
+        const existingMemberMap = new Map(
+          (existing?.members ?? []).map((m) => [m.userId, m]),
+        );
+        const mergedMembers =
+          updatedGroup.members.length > 0
+            ? updatedGroup.members.map((m) => {
+                const prevMember = existingMemberMap.get(m.userId);
+                return {
+                  ...m,
+                  paidThisPeriodCents:
+                    prevMember?.paidThisPeriodCents ?? m.paidThisPeriodCents,
+                  netBalanceCents:
+                    prevMember?.netBalanceCents ?? m.netBalanceCents,
+                };
+              })
+            : (existing?.members ?? []);
+
+        return {
+          ...prev,
+          [updatedGroup.id]: {
+            ...prev[updatedGroup.id],
+            status: updatedGroup.status,
+            baseCurrency: updatedGroup.baseCurrency,
+            defaultSplitMode: updatedGroup.defaultSplitMode,
+            billingCycleAnchorDay: updatedGroup.billingCycleAnchorDay,
+            cycleResetDay: updatedGroup.cycleResetDay,
+            autoSettleOnReset: updatedGroup.autoSettleOnReset,
+            allowAnyMemberAddExpense: updatedGroup.allowAnyMemberAddExpense,
+            requireReceiptOver100: updatedGroup.requireReceiptOver100,
+            sendCycleCloseReminders: updatedGroup.sendCycleCloseReminders,
+            members: mergedMembers,
+          },
+        };
+      });
+
+      upsertGroup(shellGroup);
+      pushToast({
+        tone: "success",
+        title: "Split rules saved",
+        description: `Updated split rules and policies for ${updatedGroup.name}.`,
+      });
+      router.refresh();
+    },
+    [allGroups, pushToast, router, upsertGroup],
   );
 
   const handleGroupCreated = React.useCallback(
@@ -1289,6 +1333,22 @@ export function SplitGroupsClient({
                   Edit Group
                 </Button>
               )}
+              {spotlightTab === "rules" &&
+                selectedGroup.currentUserRole === "ADMIN" &&
+                selectedGroup.status !== "ARCHIVED" && (
+                  <Button
+                    type="submit"
+                    form="split-rules-form"
+                    variant="primary"
+                    size="sm"
+                    loading={savingRules}
+                    leftIcon={
+                      <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                    }
+                  >
+                    Save Rules
+                  </Button>
+                )}
             </div>
           </div>
 
@@ -1582,190 +1642,22 @@ export function SplitGroupsClient({
 
           {/* Tab 2: Split Rules & Invite */}
           {spotlightTab === "rules" && (
-            <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-              <Card
-                variant="sub-card"
-                padding="md"
-                className="flex flex-col justify-between gap-4 lg:col-span-6"
-              >
-                <div className="flex flex-col gap-2">
-                  <span className="text-[11px] font-semibold uppercase tracking-wider text-outline">
-                    Split Rules &amp; Cycle Governance
-                  </span>
-                  <h3 className="text-[16px] font-semibold text-on-surface">
-                    {formatSplitRuleLabel(selectedGroup)}
-                  </h3>
-                  <p className="text-[13px] text-outline">
-                    Base currency {selectedGroup.baseCurrency} · Cycle resets on
-                    day {selectedGroup.billingCycleAnchorDay} of each month.
-                  </p>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2 border-t border-outline-variant/50 pt-3">
-                  {selectedGroup.currentUserRole === "ADMIN" &&
-                  selectedGroup.status !== "ARCHIVED" ? (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      leftIcon={
-                        <SlidersHorizontal
-                          className="h-3.5 w-3.5"
-                          aria-hidden="true"
-                        />
-                      }
-                      onClick={() => setEditRatiosModalOpen(true)}
-                    >
-                      Edit Ratios
-                    </Button>
-                  ) : (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      leftIcon={<Eye className="h-3.5 w-3.5" aria-hidden="true" />}
-                      onClick={() => setEditRatiosModalOpen(true)}
-                    >
-                      View Ratios
-                    </Button>
-                  )}
-
-                  {selectedGroup.currentUserRole === "ADMIN" &&
-                    selectedGroup.status !== "ARCHIVED" &&
-                    (selectedGroup.isCurrentCycleClosed ? (
-                      <Badge tone="warning" size="sm">
-                        Cycle Closed
-                      </Badge>
-                    ) : (
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        leftIcon={
-                          <Lock className="h-3.5 w-3.5" aria-hidden="true" />
-                        }
-                        onClick={() => setCloseCycleTargetGroup(selectedGroup)}
-                      >
-                        Close &amp; Lock Cycle
-                      </Button>
-                    ))}
-                </div>
-
-                {selectedGroup.status !== "ARCHIVED" && (
-                  <div className="flex flex-wrap items-center gap-2 border-t border-outline-variant/50 pt-3">
-                    {selectedGroup.currentUserRole === "ADMIN" && (
-                      <Button
-                        type="button"
-                        variant="danger-soft"
-                        size="sm"
-                        leftIcon={
-                          <Archive className="h-3.5 w-3.5" aria-hidden="true" />
-                        }
-                        onClick={() => setArchiveTargetGroup(selectedGroup)}
-                      >
-                        Archive Group
-                      </Button>
-                    )}
-                    <Button
-                      type="button"
-                      variant="danger-soft"
-                      size="sm"
-                      leftIcon={
-                        <LogOut className="h-3.5 w-3.5" aria-hidden="true" />
-                      }
-                      onClick={() => setLeaveTargetGroup(selectedGroup)}
-                    >
-                      Leave Group
-                    </Button>
-                  </div>
-                )}
-              </Card>
-
-              <Card
-                variant="sub-card"
-                padding="md"
-                data-testid="member-invitation-gateway"
-                className="flex flex-col justify-between gap-3 lg:col-span-6"
-              >
-                <div className="flex flex-col gap-1">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[12px] font-semibold uppercase tracking-wider text-on-surface">
-                      Shareable Invite Link
-                    </span>
-                    <Share2
-                      className="h-4 w-4 text-primary"
-                      aria-hidden="true"
-                    />
-                  </div>
-                  <p className="text-[12px] leading-relaxed text-outline">
-                    Members joining via this signed link are onboarded into{" "}
-                    {selectedGroup.name} using{" "}
-                    {selectedGroup.defaultSplitMode === "EQUAL"
-                      ? "equal split shares"
-                      : "custom split ratios (0% initial share until reviewed)"}
-                    .
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <div className="min-w-0 flex-1">
-                    <Input
-                      id="invite-link-input"
-                      type="text"
-                      readOnly
-                      aria-label="Group invite link"
-                      prefix={
-                        <Link2
-                          className="h-4 w-4 text-outline"
-                          aria-hidden="true"
-                        />
-                      }
-                      value={buildInvitePath(selectedGroup)}
-                      className="font-mono text-[12px]"
-                    />
-                  </div>
-                  <Button
-                    type="button"
-                    variant="primary"
-                    size="md"
-                    onClick={() => void handleCopyInviteLink(selectedGroup)}
-                    leftIcon={
-                      copiedGroupId === selectedGroup.id ? (
-                        <Check className="h-3.5 w-3.5" aria-hidden="true" />
-                      ) : (
-                        <Copy className="h-3.5 w-3.5" aria-hidden="true" />
-                      )
-                    }
-                  >
-                    {copiedGroupId === selectedGroup.id ? "Copied" : "Copy"}
-                  </Button>
-                  <span role="status" aria-live="polite" className="sr-only">
-                    {copyStatusText}
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between border-t border-outline-variant/50 pt-2 text-[11px] text-outline">
-                  <span>Slug: {selectedGroup.slug}</span>
-                  {selectedGroup.currentUserRole === "ADMIN" &&
-                  selectedGroup.status !== "ARCHIVED" ? (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      loading={regeneratingGroupId === selectedGroup.id}
-                      onClick={() =>
-                        void handleRegenerateInviteLink(selectedGroup)
-                      }
-                      className="h-7 px-2.5 text-[11px] font-semibold text-primary"
-                    >
-                      Regenerate Link
-                    </Button>
-                  ) : (
-                    <span>Member view · Copy only</span>
-                  )}
-                </div>
-              </Card>
-            </div>
+            <SplitRulesInviteTab
+              key={`${selectedGroup.id}-${selectedGroup.defaultSplitMode}-${selectedGroup.baseCurrency}-${selectedGroup.cycleResetDay ?? selectedGroup.billingCycleAnchorDay}-${selectedGroup.autoSettleOnReset ?? true}-${selectedGroup.allowAnyMemberAddExpense ?? true}-${selectedGroup.requireReceiptOver100 ?? false}-${selectedGroup.sendCycleCloseReminders ?? true}-${selectedGroup.members.map((m) => `${m.userId}:${m.status}:${m.sharePercentage}:${m.shareUnits ?? 1}`).join(",")}`}
+              group={selectedGroup}
+              inviteLinkUrl={buildInvitePath(selectedGroup)}
+              copiedGroupId={copiedGroupId}
+              copyStatusText={copyStatusText}
+              regeneratingGroupId={regeneratingGroupId}
+              onCopyInviteLink={(g) => void handleCopyInviteLink(g)}
+              onRegenerateInviteLink={(g) => void handleRegenerateInviteLink(g)}
+              onArchiveGroup={(g) => setArchiveTargetGroup(g)}
+              onLeaveGroup={(g) => setLeaveTargetGroup(g)}
+              onRemoveMember={(g, member) => setRemoveTarget({ group: g, member })}
+              onRulesSaved={handleRulesSaved}
+              onSavingChange={setSavingRules}
+              onNotify={pushToast}
+            />
           )}
         </Card>
       )}

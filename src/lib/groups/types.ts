@@ -21,11 +21,23 @@ export interface CreateGroupInput {
   member_emails: string[];
 }
 
+export interface GroupAllocationInput {
+  user_id: string;
+  share_percentage?: number;
+  share_units?: number;
+}
+
 export interface UpdateGroupInput {
   name?: string;
   category?: GroupCategory;
   base_currency?: string;
   default_split_mode?: SplitMode;
+  cycle_reset_day?: number;
+  auto_settle_on_reset?: boolean;
+  allow_any_member_add_expense?: boolean;
+  require_receipt_over_100?: boolean;
+  send_cycle_close_reminders?: boolean;
+  allocations?: GroupAllocationInput[];
   add_member_emails?: string[];
   remove_member_ids?: string[];
 }
@@ -37,6 +49,7 @@ export interface SplitGroupMemberDetail {
   role: MemberRole;
   status: MemberStatus;
   sharePercentage: number;
+  shareUnits?: number;
   paidThisPeriodCents: number;
   netBalanceCents: number;
   isCurrentUser: boolean;
@@ -54,6 +67,11 @@ export interface SplitGroupDetail {
   simplifyDebts: boolean;
   operationalBudgetCents: number | null;
   billingCycleAnchorDay: number;
+  cycleResetDay?: number;
+  autoSettleOnReset?: boolean;
+  allowAnyMemberAddExpense?: boolean;
+  requireReceiptOver100?: boolean;
+  sendCycleCloseReminders?: boolean;
   leaseEndDate: string | null;
   tripAutoArchiveEnabled?: boolean;
   tripAutoArchiveDays?: number;

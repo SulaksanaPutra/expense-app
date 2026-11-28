@@ -261,34 +261,25 @@ describe("Spotlight Partition, ADMIN Edit Ratios Modal & Audit Log Drawer", () =
       within(spotlight).queryByRole("button", { name: "Edit Ratios" }),
     ).not.toBeInTheDocument();
 
-    const viewRatiosBtn = within(spotlight).getByRole("button", {
-      name: "View Ratios",
-    });
-    await user.click(viewRatiosBtn);
-
-    const dialog = screen.getByRole("dialog", {
-      name: "Split Rules & Ratios (View Only)",
-    });
-    expect(within(dialog).getByText("View-only split ratios")).toBeInTheDocument();
-    expect(within(dialog).getByText("35%")).toBeInTheDocument();
-    expect(within(dialog).getByText("65%")).toBeInTheDocument();
-
-    // Mode tabs are disabled and Save Ratios button is absent
+    // Save Rules CTA is hidden for MEMBER role and inline controls are disabled
     expect(
-      within(dialog).getByRole("tab", { name: "Equal Split" }),
-    ).toBeDisabled();
-    expect(
-      within(dialog).getByRole("tab", { name: "Custom Ratios" }),
-    ).toBeDisabled();
-    expect(
-      within(dialog).queryByRole("button", { name: "Save Ratios" }),
+      within(spotlight).queryByRole("button", { name: "Save Rules" }),
     ).not.toBeInTheDocument();
 
-    await user.click(within(dialog).getByRole("button", { name: "Close" }));
-    expect(fetchSpy).not.toHaveBeenCalledWith(
-      expect.stringContaining("/ratios"),
-      expect.anything(),
-    );
+    expect(
+      within(spotlight).getByLabelText("Alex Rivera split percentage"),
+    ).toBeDisabled();
+    expect(
+      within(spotlight).getByLabelText("Marcus Vance split percentage"),
+    ).toBeDisabled();
+    expect(
+      within(spotlight).getByRole("radio", { name: "Equal" }),
+    ).toBeDisabled();
+    expect(
+      within(spotlight).getByRole("radio", { name: "Custom" }),
+    ).toBeDisabled();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("rejects totals != 100% in Edit Ratios modal and clears NEEDS_RATIO_UPDATE on valid ADMIN save while updating Audit Log", async () => {

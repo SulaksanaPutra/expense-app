@@ -15,12 +15,18 @@ import type {
 } from "@/types/database";
 import type {
   CreateGroupInput,
+  GroupAllocationInput,
   SplitGroupDetail,
   SplitGroupMemberDetail,
   SplitGroupsPageData,
   UpdateGroupInput,
 } from "./types";
 import { createSignedInviteToken } from "./invite-token";
+import {
+  computeEqualSharePercentages,
+  validateCustomRatios,
+  validateShareUnits,
+} from "./invite-utils";
 import {
   DEFAULT_TRIP_AUTO_ARCHIVE_DAYS,
   evaluateResidentialLeasePrompt,
@@ -403,6 +409,93 @@ export function validateUpdateGroupPayload(
     );
   }
 
+  if (input.cycle_reset_day !== undefined) {
+    const day = Number(input.cycle_reset_day);
+    if (!Number.isInteger(day) || day < 1 || day > 28) {
+      errors.cycle_reset_day =
+        "Cycle reset day must be a whole number between 1 and 28.";
+    } else {
+      data.cycle_reset_day = day;
+    }
+  }
+
+  if (input.auto_settle_on_reset !== undefined) {
+    if (typeof input.auto_settle_on_reset !== "boolean") {
+      errors.auto_settle_on_reset = "auto_settle_on_reset must be a boolean.";
+    } else {
+      data.auto_settle_on_reset = input.auto_settle_on_reset;
+    }
+  }
+
+  if (input.allow_any_member_add_expense !== undefined) {
+    if (typeof input.allow_any_member_add_expense !== "boolean") {
+      errors.allow_any_member_add_expense =
+        "allow_any_member_add_expense must be a boolean.";
+    } else {
+      data.allow_any_member_add_expense = input.allow_any_member_add_expense;
+    }
+  }
+
+  if (input.require_receipt_over_100 !== undefined) {
+    if (typeof input.require_receipt_over_100 !== "boolean") {
+      errors.require_receipt_over_100 =
+        "require_receipt_over_100 must be a boolean.";
+    } else {
+      data.require_receipt_over_100 = input.require_receipt_over_100;
+    }
+  }
+
+  if (input.send_cycle_close_reminders !== undefined) {
+    if (typeof input.send_cycle_close_reminders !== "boolean") {
+      errors.send_cycle_close_reminders =
+        "send_cycle_close_reminders must be a boolean.";
+    } else {
+      data.send_cycle_close_reminders = input.send_cycle_close_reminders;
+    }
+  }
+
+  if (input.allocations !== undefined) {
+    if (!Array.isArray(input.allocations)) {
+      errors.allocations = "Allocations must be an array.";
+    } else {
+      const parsedAllocations: GroupAllocationInput[] = [];
+      for (const item of input.allocations) {
+        if (!item || typeof item !== "object") {
+          errors.allocations = "Each allocation must be an object.";
+          break;
+        }
+        const obj = item as Record<string, unknown>;
+        const userId =
+          typeof obj.user_id === "string" ? obj.user_id.trim() : "";
+        if (!userId) {
+          errors.allocations = "Each allocation requires a user_id.";
+          break;
+        }
+        const alloc: GroupAllocationInput = { user_id: userId };
+        if (obj.share_percentage !== undefined) {
+          const pct = Number(obj.share_percentage);
+          if (!Number.isFinite(pct)) {
+            errors.allocations = "share_percentage must be a valid number.";
+            break;
+          }
+          alloc.share_percentage = pct;
+        }
+        if (obj.share_units !== undefined) {
+          const units = Number(obj.share_units);
+          if (!Number.isFinite(units)) {
+            errors.allocations = "share_units must be a valid number.";
+            break;
+          }
+          alloc.share_units = units;
+        }
+        parsedAllocations.push(alloc);
+      }
+      if (!errors.allocations) {
+        data.allocations = parsedAllocations;
+      }
+    }
+  }
+
   if (input.remove_member_ids !== undefined) {
     if (!Array.isArray(input.remove_member_ids)) {
       errors.remove_member_ids = "Removed member IDs must be an array.";
@@ -618,6 +711,7 @@ export async function createSplitGroup(
     groupId,
     slug,
     version: inviteTokenVersion,
+    expiresInMs: 14 * 24 * 60 * 60 * 1000,
   });
 
   let { error: groupInsertError } = await supabase.from("groups").insert({
@@ -793,6 +887,11 @@ export async function createSplitGroup(
     simplifyDebts: true,
     operationalBudgetCents: input.operational_budget_cents,
     billingCycleAnchorDay: input.billing_cycle_anchor_day,
+    cycleResetDay: input.billing_cycle_anchor_day,
+    autoSettleOnReset: true,
+    allowAnyMemberAddExpense: true,
+    requireReceiptOver100: false,
+    sendCycleCloseReminders: true,
     leaseEndDate: input.lease_end_date,
     tripAutoArchiveEnabled: true,
     tripAutoArchiveDays: DEFAULT_TRIP_AUTO_ARCHIVE_DAYS,
@@ -847,7 +946,7 @@ export async function updateSplitGroup(
   let { data: existingGroup, error: fetchError } = await supabase
     .from("groups")
     .select(
-      "id, name, slug, group_type, category, status, base_currency, default_split_mode, operational_budget_cents, billing_cycle_anchor_day, trip_auto_archive_enabled, trip_auto_archive_days, residential_lease_prompt_enabled, zero_balance_since, lease_prompt_snoozed_until, archived_at, invite_token, invite_token_version",
+      "id, name, slug, group_type, category, status, base_currency, default_split_mode, operational_budget_cents, billing_cycle_anchor_day, cycle_reset_day, auto_settle_on_reset, allow_any_member_add_expense, require_receipt_over_100, send_cycle_close_reminders, trip_auto_archive_enabled, trip_auto_archive_days, residential_lease_prompt_enabled, zero_balance_since, lease_prompt_snoozed_until, archived_at, invite_token, invite_token_version",
     )
     .eq("id", groupId)
     .maybeSingle();
@@ -926,6 +1025,146 @@ export async function updateSplitGroup(
   if (input.default_split_mode !== undefined) {
     updatePatch.default_split_mode = input.default_split_mode;
   }
+  if (input.cycle_reset_day !== undefined) {
+    updatePatch.cycle_reset_day = input.cycle_reset_day;
+    updatePatch.billing_cycle_anchor_day = input.cycle_reset_day;
+  }
+  if (input.auto_settle_on_reset !== undefined) {
+    updatePatch.auto_settle_on_reset = input.auto_settle_on_reset;
+  }
+  if (input.allow_any_member_add_expense !== undefined) {
+    updatePatch.allow_any_member_add_expense = input.allow_any_member_add_expense;
+  }
+  if (input.require_receipt_over_100 !== undefined) {
+    updatePatch.require_receipt_over_100 = input.require_receipt_over_100;
+  }
+  if (input.send_cycle_close_reminders !== undefined) {
+    updatePatch.send_cycle_close_reminders = input.send_cycle_close_reminders;
+  }
+
+  const effectiveSplitMode =
+    input.default_split_mode ?? existingGroup.default_split_mode;
+
+  let validatedSharePercentages: Map<string, number> | null = null;
+  let validatedShareUnits: Map<string, number> | null = null;
+  let activeMemberIdsForSplit: string[] = [];
+
+  if (
+    input.allocations !== undefined ||
+    (input.default_split_mode !== undefined &&
+      input.default_split_mode !== existingGroup.default_split_mode)
+  ) {
+    let resolvedActiveRows: Array<{
+      user_id: string;
+      status: string;
+      share_percentage: number;
+      share_units?: number;
+    }> | null = null;
+    try {
+      const { data: activeRows, error: activeErr } = await supabase
+        .from("group_members")
+        .select("user_id, status, share_percentage, share_units, joined_at")
+        .eq("group_id", groupId)
+        .eq("status", "ACTIVE")
+        .order("joined_at", { ascending: true });
+
+      resolvedActiveRows = activeRows;
+      if (isMissingSchemaColumnError(activeErr)) {
+        const fallbackActive = await supabase
+          .from("group_members")
+          .select("user_id, status, share_percentage, joined_at")
+          .eq("group_id", groupId)
+          .eq("status", "ACTIVE")
+          .order("joined_at", { ascending: true });
+        resolvedActiveRows = (fallbackActive.data ?? []).map((row) => ({
+          ...row,
+          share_units: 1,
+        }));
+      } else if (activeErr) {
+        return {
+          ok: false,
+          message: activeErr.message || "Unable to load active group members.",
+          status: 500,
+        };
+      }
+    } catch {
+      resolvedActiveRows = null;
+    }
+
+    activeMemberIdsForSplit = (resolvedActiveRows ?? []).map((m) => m.user_id);
+
+    if (activeMemberIdsForSplit.length > 0) {
+      if (effectiveSplitMode === "EQUAL") {
+        validatedSharePercentages = computeEqualSharePercentages(
+          activeMemberIdsForSplit,
+        );
+        validatedShareUnits = new Map(
+          activeMemberIdsForSplit.map((id) => [id, 1]),
+        );
+        if (existingGroup.status === "NEEDS_RATIO_UPDATE") {
+          updatePatch.status = "ACTIVE";
+        }
+      } else if (effectiveSplitMode === "SHARES") {
+        const shareInputs =
+          input.allocations && input.allocations.length > 0
+            ? input.allocations.map((a) => ({
+                userId: a.user_id,
+                shareUnits: a.share_units ?? 1,
+              }))
+            : (resolvedActiveRows ?? []).map((m) => ({
+                userId: m.user_id,
+                shareUnits: Number(m.share_units ?? 1),
+              }));
+        const shareValidation = validateShareUnits(
+          shareInputs,
+          activeMemberIdsForSplit,
+        );
+        if (!shareValidation.ok) {
+          return {
+            ok: false,
+            message: shareValidation.message,
+            status: 400,
+          };
+        }
+        validatedShareUnits = shareValidation.unitsByUser;
+        validatedSharePercentages = shareValidation.percentagesByUser;
+        if (existingGroup.status === "NEEDS_RATIO_UPDATE") {
+          updatePatch.status = "ACTIVE";
+        }
+      } else if (
+        input.allocations !== undefined ||
+        effectiveSplitMode === "PERCENTAGE" ||
+        effectiveSplitMode === "CUSTOM" ||
+        effectiveSplitMode === "CUSTOM_RATIOS"
+      ) {
+        const pctInputs =
+          input.allocations && input.allocations.length > 0
+            ? input.allocations.map((a) => ({
+                userId: a.user_id,
+                sharePercentage: a.share_percentage ?? 0,
+              }))
+            : (resolvedActiveRows ?? []).map((m) => ({
+                userId: m.user_id,
+                sharePercentage: Number(m.share_percentage ?? 0),
+              }));
+        const ratioValidation = validateCustomRatios(
+          pctInputs,
+          activeMemberIdsForSplit,
+        );
+        if (!ratioValidation.ok) {
+          return {
+            ok: false,
+            message: ratioValidation.message,
+            status: 400,
+          };
+        }
+        validatedSharePercentages = ratioValidation.normalized;
+        if (existingGroup.status === "NEEDS_RATIO_UPDATE") {
+          updatePatch.status = "ACTIVE";
+        }
+      }
+    }
+  }
 
   if (Object.keys(updatePatch).length > 0) {
     let { error: updateError } = await supabase
@@ -941,6 +1180,11 @@ export async function updateSplitGroup(
         ...updatePatch,
       };
       delete legacyPatch.category;
+      delete legacyPatch.cycle_reset_day;
+      delete legacyPatch.auto_settle_on_reset;
+      delete legacyPatch.allow_any_member_add_expense;
+      delete legacyPatch.require_receipt_over_100;
+      delete legacyPatch.send_cycle_close_reminders;
       if (legacyPatch.default_split_mode) {
         legacyPatch.default_split_mode = toLegacySplitMode(
           legacyPatch.default_split_mode,
@@ -963,6 +1207,41 @@ export async function updateSplitGroup(
         message: updateError.message || "Failed to update group.",
         status: 500,
       };
+    }
+  }
+
+  if (validatedSharePercentages && activeMemberIdsForSplit.length > 0) {
+    for (const memberId of activeMemberIdsForSplit) {
+      const memberPatch: Database["public"]["Tables"]["group_members"]["Update"] =
+        {
+          share_percentage: validatedSharePercentages.get(memberId) ?? 0,
+        };
+      if (validatedShareUnits && validatedShareUnits.has(memberId)) {
+        memberPatch.share_units = validatedShareUnits.get(memberId);
+      }
+      let { error: memUpdateErr } = await supabase
+        .from("group_members")
+        .update(memberPatch)
+        .eq("group_id", groupId)
+        .eq("user_id", memberId);
+
+      if (isMissingSchemaColumnError(memUpdateErr)) {
+        const retryMem = await supabase
+          .from("group_members")
+          .update({ share_percentage: memberPatch.share_percentage })
+          .eq("group_id", groupId)
+          .eq("user_id", memberId);
+        memUpdateErr = retryMem.error;
+      }
+
+      if (memUpdateErr) {
+        return {
+          ok: false,
+          message:
+            memUpdateErr.message || "Failed to update member split shares.",
+          status: 500,
+        };
+      }
     }
   }
 
@@ -1046,11 +1325,23 @@ export async function updateSplitGroup(
   // Hydrate updated members list cleanly
   let members: SplitGroupMemberDetail[] = [];
   try {
-    const { data: memberRows } = await supabase
+    const { data: memberRowsInitial, error: memHydrateErr } = await supabase
       .from("group_members")
-      .select("group_id, user_id, role, status, share_percentage, joined_at")
+      .select("group_id, user_id, role, status, share_percentage, share_units, joined_at")
       .eq("group_id", groupId)
       .order("joined_at", { ascending: true });
+    let memberRows = memberRowsInitial;
+    if (isMissingSchemaColumnError(memHydrateErr)) {
+      const fallbackMem = await supabase
+        .from("group_members")
+        .select("group_id, user_id, role, status, share_percentage, joined_at")
+        .eq("group_id", groupId)
+        .order("joined_at", { ascending: true });
+      memberRows = (fallbackMem.data ?? []).map((row) => ({
+        ...row,
+        share_units: 1,
+      }));
+    }
 
     const userIds = Array.from(
       new Set((memberRows ?? []).map((m) => m.user_id)),
@@ -1078,6 +1369,7 @@ export async function updateSplitGroup(
         role: m.role,
         status: m.status,
         sharePercentage: Number(m.share_percentage),
+        shareUnits: Number((m as { share_units?: number }).share_units ?? 1),
         paidThisPeriodCents: 0,
         netBalanceCents: 0,
         isCurrentUser: m.user_id === authUser.id,
@@ -1093,12 +1385,37 @@ export async function updateSplitGroup(
     slug: existingGroup.slug,
     groupType: nextGroupType,
     category: nextCategory,
-    status: existingGroup.status,
+    status: updatePatch.status ?? existingGroup.status,
     baseCurrency: nextCurrency,
     defaultSplitMode: nextSplitMode,
     simplifyDebts: true,
     operationalBudgetCents: existingGroup.operational_budget_cents,
-    billingCycleAnchorDay: existingGroup.billing_cycle_anchor_day,
+    billingCycleAnchorDay:
+      input.cycle_reset_day ?? existingGroup.billing_cycle_anchor_day,
+    cycleResetDay:
+      input.cycle_reset_day ??
+      (existingGroup as { cycle_reset_day?: number }).cycle_reset_day ??
+      existingGroup.billing_cycle_anchor_day,
+    autoSettleOnReset:
+      input.auto_settle_on_reset ??
+      (existingGroup as { auto_settle_on_reset?: boolean })
+        .auto_settle_on_reset ??
+      true,
+    allowAnyMemberAddExpense:
+      input.allow_any_member_add_expense ??
+      (existingGroup as { allow_any_member_add_expense?: boolean })
+        .allow_any_member_add_expense ??
+      true,
+    requireReceiptOver100:
+      input.require_receipt_over_100 ??
+      (existingGroup as { require_receipt_over_100?: boolean })
+        .require_receipt_over_100 ??
+      false,
+    sendCycleCloseReminders:
+      input.send_cycle_close_reminders ??
+      (existingGroup as { send_cycle_close_reminders?: boolean })
+        .send_cycle_close_reminders ??
+      true,
     leaseEndDate: null,
     tripAutoArchiveEnabled: existingGroup.trip_auto_archive_enabled ?? true,
     tripAutoArchiveDays:
@@ -1138,7 +1455,7 @@ export async function getSplitGroupsPageData(
     let { data: groupRows, error: groupsError } = await supabase
       .from("groups")
       .select(
-        "id, name, slug, group_type, category, status, base_currency, default_split_mode, operational_budget_cents, billing_cycle_anchor_day, trip_auto_archive_enabled, trip_auto_archive_days, residential_lease_prompt_enabled, zero_balance_since, lease_prompt_snoozed_until, archived_at, invite_token, invite_token_version, created_at",
+        "id, name, slug, group_type, category, status, base_currency, default_split_mode, operational_budget_cents, billing_cycle_anchor_day, cycle_reset_day, auto_settle_on_reset, allow_any_member_add_expense, require_receipt_over_100, send_cycle_close_reminders, trip_auto_archive_enabled, trip_auto_archive_days, residential_lease_prompt_enabled, zero_balance_since, lease_prompt_snoozed_until, archived_at, invite_token, invite_token_version, created_at",
       )
       .order("created_at", { ascending: true });
 
@@ -1177,7 +1494,7 @@ export async function getSplitGroupsPageData(
     const groupIds = groupRows.map((g) => g.id);
 
     const [
-      { data: memberRows, error: membersError },
+      memberResInitial,
       { data: expenseRows, error: expensesError },
       { data: settlementRows, error: settlementsError },
       { data: billingCycleRows },
@@ -1209,6 +1526,21 @@ export async function getSplitGroupsPageData(
         .catch(() => ({ data: [] })),
       getActiveReminderCooldowns(supabase, currentUserId, groupIds),
     ]);
+
+    let memberRows = memberResInitial.data;
+    let membersError = memberResInitial.error;
+    if (isMissingSchemaColumnError(membersError)) {
+      const fallbackMembers = await supabase
+        .from("group_members")
+        .select("group_id, user_id, role, status, share_percentage, joined_at")
+        .in("group_id", groupIds)
+        .order("joined_at", { ascending: true });
+      memberRows = (fallbackMembers.data ?? []).map((row) => ({
+        ...row,
+        share_units: 1,
+      }));
+      membersError = fallbackMembers.error;
+    }
 
     if (membersError || expensesError || settlementsError) {
       const firstErr = membersError || expensesError || settlementsError;
@@ -1451,6 +1783,7 @@ export async function getSplitGroupsPageData(
           role: m.role,
           status: m.status,
           sharePercentage: Number(m.share_percentage),
+          shareUnits: Number((m as { share_units?: number }).share_units ?? 1),
           paidThisPeriodCents: metrics.paidThisPeriodByUser.get(m.user_id) ?? 0,
           netBalanceCents: metrics.netBalanceByUser.get(m.user_id) ?? 0,
           isCurrentUser: m.user_id === currentUserId,
@@ -1490,6 +1823,21 @@ export async function getSplitGroupsPageData(
         simplifyDebts: true,
         operationalBudgetCents: g.operational_budget_cents,
         billingCycleAnchorDay: g.billing_cycle_anchor_day,
+        cycleResetDay:
+          (g as { cycle_reset_day?: number }).cycle_reset_day ??
+          g.billing_cycle_anchor_day,
+        autoSettleOnReset:
+          (g as { auto_settle_on_reset?: boolean }).auto_settle_on_reset ??
+          true,
+        allowAnyMemberAddExpense:
+          (g as { allow_any_member_add_expense?: boolean })
+            .allow_any_member_add_expense ?? true,
+        requireReceiptOver100:
+          (g as { require_receipt_over_100?: boolean })
+            .require_receipt_over_100 ?? false,
+        sendCycleCloseReminders:
+          (g as { send_cycle_close_reminders?: boolean })
+            .send_cycle_close_reminders ?? true,
         leaseEndDate: null,
         tripAutoArchiveEnabled,
         tripAutoArchiveDays,

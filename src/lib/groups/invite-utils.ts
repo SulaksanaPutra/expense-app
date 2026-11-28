@@ -216,3 +216,119 @@ export function buildDefaultSplitExcludingFormerMembers(params: {
     activeMembers,
   });
 }
+
+export interface MemberShareUnitsInput {
+  userId: string;
+  shareUnits: number;
+}
+
+export type ValidateShareUnitsResult =
+  | {
+      ok: true;
+      unitsByUser: Map<string, number>;
+      percentagesByUser: Map<string, number>;
+    }
+  | { ok: false; message: string };
+
+/**
+ * Validates proportional share units across all active members (non-negative,
+ * positive total) and computes normalized share percentages summing strictly
+ * to 100.00% using integer basis points.
+ */
+export function validateShareUnits(
+  allocations: readonly MemberShareUnitsInput[],
+  activeMemberIds: readonly string[],
+): ValidateShareUnitsResult {
+  if (activeMemberIds.length === 0) {
+    return { ok: false, message: "Group has no active members to allocate." };
+  }
+
+  const activeSet = new Set(activeMemberIds);
+  const unitsByUser = new Map<string, number>();
+
+  for (const entry of allocations) {
+    if (!entry || typeof entry.userId !== "string") {
+      return { ok: false, message: "Invalid member share allocation entry." };
+    }
+    if (!activeSet.has(entry.userId)) {
+      return {
+        ok: false,
+        message: "Allocations may only include active group members.",
+      };
+    }
+    if (unitsByUser.has(entry.userId)) {
+      return {
+        ok: false,
+        message: "Duplicate member share allocation provided.",
+      };
+    }
+
+    const rawUnits = entry.shareUnits;
+    if (typeof rawUnits !== "number" || !Number.isFinite(rawUnits)) {
+      return {
+        ok: false,
+        message: "Each member share weight must be a valid number.",
+      };
+    }
+    if (rawUnits < 0) {
+      return {
+        ok: false,
+        message: "Share weights must be zero or greater.",
+      };
+    }
+    unitsByUser.set(entry.userId, Math.round(rawUnits * 10000) / 10000);
+  }
+
+  for (const activeId of activeMemberIds) {
+    if (!unitsByUser.has(activeId)) {
+      return {
+        ok: false,
+        message: "Every active group member must have an assigned share weight.",
+      };
+    }
+  }
+
+  let totalUnits = 0;
+  for (const activeId of activeMemberIds) {
+    totalUnits += unitsByUser.get(activeId) ?? 0;
+  }
+
+  if (totalUnits <= 0) {
+    return {
+      ok: false,
+      message: "Total share weights must be greater than zero.",
+    };
+  }
+
+  const totalBps = 10_000;
+  const percentagesByUser = new Map<string, number>();
+  let assignedBps = 0;
+
+  activeMemberIds.forEach((memberId) => {
+    const units = unitsByUser.get(memberId) ?? 0;
+    const bps = Math.floor((totalBps * units) / totalUnits);
+    percentagesByUser.set(memberId, bps);
+    assignedBps += bps;
+  });
+
+  let remainder = totalBps - assignedBps;
+  for (const memberId of activeMemberIds) {
+    if (remainder <= 0) break;
+    if ((unitsByUser.get(memberId) ?? 0) > 0) {
+      percentagesByUser.set(
+        memberId,
+        (percentagesByUser.get(memberId) ?? 0) + 1,
+      );
+      remainder -= 1;
+    }
+  }
+
+  for (const memberId of activeMemberIds) {
+    percentagesByUser.set(
+      memberId,
+      (percentagesByUser.get(memberId) ?? 0) / 100,
+    );
+  }
+
+  return { ok: true, unitsByUser, percentagesByUser };
+}
