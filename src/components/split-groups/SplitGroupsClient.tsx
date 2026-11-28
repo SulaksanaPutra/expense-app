@@ -1261,13 +1261,14 @@ export function SplitGroupsClient({
               </p>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
               <SegmentedControl
                 variant="pill-tabs"
                 ariaLabel="Group detail tabs"
                 options={spotlightTabOptions}
                 value={spotlightTab}
                 onChange={setSpotlightTab}
+                className="w-full sm:w-auto [&>button]:flex-1 [&>button]:px-2.5 [&>button]:text-[12px] sm:[&>button]:flex-initial sm:[&>button]:px-4 sm:[&>button]:text-[13px]"
               />
               <Button
                 type="button"
