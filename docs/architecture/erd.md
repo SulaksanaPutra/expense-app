@@ -103,6 +103,7 @@ erDiagram
         uuid actor_id FK
         timestamptz created_at
         varchar currency
+        text dedupe_key
         bigint delta_cents
         text description
         uuid expense_id FK
@@ -201,7 +202,7 @@ erDiagram
 | `group_invites` | `public` | 8 | `id` | `group_id`, `invited_by` |
 | `group_members` | `public` | 7 | `group_id`, `user_id` | `group_id`, `user_id` |
 | `groups` | `public` | 27 | `id` | `archived_by`, `created_by` |
-| `notifications` | `public` | 14 | `id` | `actor_id`, `expense_id`, `group_id`, `revision_id`, `user_id` |
+| `notifications` | `public` | 15 | `id` | `actor_id`, `expense_id`, `group_id`, `revision_id`, `user_id` |
 | `reminder_logs` | `public` | 6 | `id` | `creditor_id`, `debtor_id`, `group_id` |
 | `settlement_handles` | `public` | 8 | `id` | `user_id` |
 | `settlements` | `public` | 9 | `id` | `group_id`, `payer_id`, `recipient_id`, `settlement_handle_id` |
