@@ -149,6 +149,10 @@ async function loadShellContext(): Promise<{
           profile.personal_share_cap_cents !== undefined
             ? Number(profile.personal_share_cap_cents)
             : null,
+        autoIncludeInExpenses:
+          typeof profile.auto_include_in_expenses === "boolean"
+            ? profile.auto_include_in_expenses
+            : true,
         defaultSplitMethod,
         defaultPaymentRail,
         receiptStorageUsedBytes: 0,

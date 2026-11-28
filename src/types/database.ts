@@ -56,10 +56,14 @@ export interface SavedPaymentMethod {
 }
 
 export interface NotificationPrefs {
-  new_expense: boolean;
-  settlement_confirmation: boolean;
-  monthly_recap: boolean;
-  sms_nudges_opt_in: boolean;
+  new_expense_added?: boolean;
+  settlement_recorded?: boolean;
+  cycle_close_reminder?: boolean;
+  monthly_summary_digest?: boolean;
+  new_expense?: boolean;
+  settlement_confirmation?: boolean;
+  monthly_recap?: boolean;
+  sms_nudges_opt_in?: boolean;
   auto_settlement_reminders?: boolean;
   default_split_method?: ExpenseSplitMethod;
   payment_methods?: SavedPaymentMethod[];

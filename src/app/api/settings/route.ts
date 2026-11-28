@@ -52,7 +52,7 @@ export async function GET() {
     {
       ok: true,
       profile: data.profile,
-      groups: data.groups,
+      groupCount: data.groupCount,
     },
     { status: 200 },
   );
