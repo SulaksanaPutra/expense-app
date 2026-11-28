@@ -59,12 +59,15 @@ import type {
   PaymentRail,
   SavedPaymentMethod,
 } from "@/types/database";
+import type { SecuritySessionsData } from "@/lib/settings/security";
 import { AccountDangerZone } from "./AccountDangerZone";
+import { SecuritySessionsCard } from "./SecuritySessionsCard";
 
 export interface SettingsClientProps {
   initialProfile: SettingsUserProfile;
   groups: SettingsGroupSummary[];
   balances: UserGroupBalanceSummary[];
+  initialSecurity?: SecuritySessionsData;
   loadError?: string | null;
 }
 
@@ -163,6 +166,7 @@ export function SettingsClient({
   initialProfile,
   groups,
   balances,
+  initialSecurity,
   loadError = null,
 }: SettingsClientProps) {
   const router = useRouter();
@@ -772,6 +776,35 @@ export function SettingsClient({
 
   const currencySymbol = getCurrencySymbol(baseCurrency);
 
+  const resolvedSecurity = React.useMemo<SecuritySessionsData>(
+    () =>
+      initialSecurity ?? {
+        sso: {
+          googleConnected: false,
+          email: initialProfile.email,
+          providerLabel: "Google Workspace SSO",
+          statusLabel: "Available",
+          twoFactorEnforced: false,
+        },
+        passkeys: [],
+        sessions: [
+          {
+            id: `session-current-${initialProfile.id.slice(0, 8)}`,
+            deviceLabel: "Web Browser · Current Session",
+            browser: "Browser",
+            os: "Desktop",
+            deviceType: "desktop",
+            location: "Current session",
+            ipAddress: "127.0.0.1",
+            createdAt: initialProfile.createdAt,
+            lastActiveAt: new Date().toISOString(),
+            isCurrent: true,
+          },
+        ],
+      },
+    [initialProfile.createdAt, initialProfile.email, initialProfile.id, initialSecurity],
+  );
+
   return (
     <div className="flex flex-col gap-6 pb-8">
       {loadError && (
@@ -1131,6 +1164,12 @@ export function SettingsClient({
                 </Card>
               </div>
             </Card>
+
+            {/* Section 3: Security & Active Sessions */}
+            <SecuritySessionsCard
+              initialData={resolvedSecurity}
+              onToast={pushToast}
+            />
           </div>
 
           {/* Right Column (5 cols): Payment Methods, Notifications, Quota */}
