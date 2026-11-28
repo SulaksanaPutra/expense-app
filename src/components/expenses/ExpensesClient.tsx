@@ -1339,12 +1339,12 @@ export function ExpensesClient({
       <Card
         variant="section"
         padding="sm"
-        className="flex flex-col gap-2.5 xl:flex-row xl:items-center xl:justify-between"
+        className="flex flex-col gap-3 2xl:flex-row 2xl:items-center 2xl:justify-between"
       >
         <div
           role="group"
           aria-label="Filter by category"
-          className="flex flex-wrap items-center gap-1.5 xl:flex-nowrap"
+          className="flex flex-wrap items-center gap-2"
         >
           <Button
             type="button"
@@ -1396,7 +1396,7 @@ export function ExpensesClient({
 
         <div
           data-testid="expenses-filter-controls"
-          className="flex flex-wrap items-center gap-1.5 xl:flex-nowrap"
+          className="flex flex-wrap items-center gap-2"
         >
           <Select
             aria-label="Ownership"
