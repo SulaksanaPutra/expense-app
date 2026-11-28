@@ -41,6 +41,7 @@ export interface ShellUserSummary {
   baseCurrency?: string;
   instantSettlementTag?: string | null;
   personalShareCapCents?: number | null;
+  autoIncludeInExpenses?: boolean;
   defaultSplitMethod?: ExpenseSplitMethod;
   defaultPaymentRail?: PaymentRail;
   receiptStorageUsedBytes?: number;

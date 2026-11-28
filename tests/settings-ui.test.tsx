@@ -40,69 +40,34 @@ vi.mock("next/link", () => ({
   ),
 }));
 
-import { AppShell, useActiveGroup } from "@/components/shell";
+import { AppShell } from "@/components/shell";
 import type { ShellGroupSummary, ShellUserSummary } from "@/components/shell";
 import { SettingsClient } from "@/components/settings";
-import {
-  ExpensesClient,
-  RecordSettlementModal,
-} from "@/components/expenses";
+import { ExpensesClient } from "@/components/expenses";
 import type {
   ExpenseGroupInfo,
   ExpenseLedgerRecord,
-  SimplifiedDebtEdge,
 } from "@/lib/expenses/ledger";
-import type {
-  SettingsGroupSummary,
-  SettingsUserProfile,
-} from "@/lib/settings/service";
+import type { SettingsUserProfile } from "@/lib/settings/service";
 
 const INITIAL_PROFILE: SettingsUserProfile = {
   id: "u-alex",
-  fullName: "Alex Rivera",
-  email: "alex@example.com",
+  fullName: "Jordan Doe",
+  email: "jordan.davis@fastmail.com",
   avatarUrl: null,
-  phoneNumber: "+1 (555) 234-8901",
-  phoneVerified: false,
-  instantSettlementTag: null,
-  baseCurrency: "USD",
-  personalShareCapCents: null,
-  receiptStorageUsedBytes: 94_371_840, // 90.0 MB -> 18% of 500 MB
-  receiptStorageQuotaBytes: 524_288_000,
+  phoneNumber: "+1 (415) 890-3412",
+  timezone: "America/Los_Angeles",
+  displayCurrency: "USD",
+  personalShareCapCents: 160_000,
+  autoIncludeInExpenses: true,
   notificationPrefs: {
-    new_expense: true,
-    settlement_confirmation: true,
-    monthly_recap: true,
-    sms_nudges_opt_in: false,
-    auto_settlement_reminders: true,
-    default_split_method: "EQUAL",
-    payment_methods: [],
+    new_expense_added: true,
+    settlement_recorded: true,
+    cycle_close_reminder: true,
+    monthly_summary_digest: false,
   },
-  createdAt: "2024-01-15T10:00:00.000Z",
+  createdAt: "2024-03-15T10:00:00.000Z",
 };
-
-const SETTINGS_GROUPS: SettingsGroupSummary[] = [
-  {
-    id: "grp-apt4b",
-    name: "Apt 4B Roommates",
-    slug: "apt-4b-roommates",
-    status: "ACTIVE",
-    baseCurrency: "USD",
-    defaultSplitMode: "EQUAL",
-    simplifyDebts: true,
-    currentUserRole: "ADMIN",
-  },
-  {
-    id: "grp-trip",
-    name: "Tokyo Trip",
-    slug: "tokyo-trip",
-    status: "ACTIVE",
-    baseCurrency: "USD",
-    defaultSplitMode: "EQUAL",
-    simplifyDebts: true,
-    currentUserRole: "MEMBER",
-  },
-];
 
 const SHELL_GROUPS: ShellGroupSummary[] = [
   {
@@ -116,22 +81,7 @@ const SHELL_GROUPS: ShellGroupSummary[] = [
     simplifyDebts: true,
     activeSplitCount: 1,
     members: [
-      { id: "u-alex", name: "Alex Rivera", sharePercentage: 50 },
-      { id: "u-elena", name: "Elena Rostova", sharePercentage: 50 },
-    ],
-  },
-  {
-    id: "grp-trip",
-    name: "Tokyo Trip",
-    slug: "tokyo-trip",
-    groupType: "TRIP",
-    status: "ACTIVE",
-    baseCurrency: "USD",
-    defaultSplitMode: "EQUAL",
-    simplifyDebts: true,
-    activeSplitCount: 0,
-    members: [
-      { id: "u-alex", name: "Alex Rivera", sharePercentage: 50 },
+      { id: "u-alex", name: "Jordan Doe", sharePercentage: 50 },
       { id: "u-elena", name: "Elena Rostova", sharePercentage: 50 },
     ],
   },
@@ -139,13 +89,12 @@ const SHELL_GROUPS: ShellGroupSummary[] = [
 
 const SHELL_USER: ShellUserSummary = {
   id: "u-alex",
-  fullName: "Alex Rivera",
-  email: "alex@example.com",
+  fullName: "Jordan Doe",
+  email: "jordan.davis@fastmail.com",
+  displayCurrency: "USD",
   baseCurrency: "USD",
-  instantSettlementTag: null,
-  personalShareCapCents: null,
-  defaultSplitMethod: "EQUAL",
-  receiptStorageUsedBytes: 94_371_840,
+  personalShareCapCents: 160_000,
+  autoIncludeInExpenses: true,
 };
 
 const EXPENSE_GROUPS: ExpenseGroupInfo[] = [
@@ -164,7 +113,7 @@ const EXPENSE_GROUPS: ExpenseGroupInfo[] = [
     members: [
       {
         userId: "u-alex",
-        name: "Alex Rivera",
+        name: "Jordan Doe",
         status: "ACTIVE",
         instantSettlementTag: null,
       },
@@ -172,7 +121,7 @@ const EXPENSE_GROUPS: ExpenseGroupInfo[] = [
         userId: "u-elena",
         name: "Elena Rostova",
         status: "ACTIVE",
-        instantSettlementTag: "@elena-r",
+        instantSettlementTag: null,
       },
     ],
   },
@@ -213,64 +162,6 @@ const SAMPLE_EXPENSES: ExpenseLedgerRecord[] = [
   },
 ];
 
-function ConsumerHarness({
-  showExpenses,
-}: {
-  showExpenses: boolean;
-}) {
-  const { user } = useActiveGroup();
-  const [settleOpen, setSettleOpen] = React.useState(false);
-
-  const sampleDebts: SimplifiedDebtEdge[] = [
-    {
-      groupId: "grp-apt4b",
-      groupName: "Apt 4B Roommates",
-      currency: "USD",
-      payerId: "u-elena",
-      payerName: "Elena Rostova",
-      recipientId: "u-alex",
-      recipientName: "Alex Rivera",
-      recipientInstantTag: user?.instantSettlementTag ?? null,
-      amountCents: 80_000,
-    },
-  ];
-
-  return (
-    <>
-      {showExpenses ? (
-        <div>
-          <ExpensesClient
-            currentUserId="u-alex"
-            userBaseCurrency="USD"
-            personalShareCapCents={null}
-            initialGroups={EXPENSE_GROUPS}
-            initialExpenses={SAMPLE_EXPENSES}
-            initialSettlements={[]}
-            initialBillingCycles={[]}
-            initialRecurringRules={[]}
-          />
-          <button type="button" onClick={() => setSettleOpen(true)}>
-            Open Test Settlement
-          </button>
-          <RecordSettlementModal
-            open={settleOpen}
-            onClose={() => setSettleOpen(false)}
-            debts={sampleDebts}
-            currentUserId="u-elena"
-            currentUserInstantTag={user?.instantSettlementTag ?? null}
-          />
-        </div>
-      ) : (
-        <SettingsClient
-          initialProfile={INITIAL_PROFILE}
-          groups={SETTINGS_GROUPS}
-          balances={[]}
-        />
-      )}
-    </>
-  );
-}
-
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -285,87 +176,102 @@ beforeEach(() => {
   refreshMock.mockReset();
 });
 
-describe("Settings (/settings) UI & End-to-End Consumer Wiring", () => {
+describe("Settings (/settings) v2 Core Cards UI", () => {
+  it("renders v2 core cards and completely removes 500 MB quota ring, Simplify toggle, and SMS/phone-verify UI", () => {
+    render(
+      <AppShell groups={SHELL_GROUPS} user={SHELL_USER} initialGroupId="grp-apt4b">
+        <SettingsClient
+          initialProfile={INITIAL_PROFILE}
+          groupCount={4}
+          balances={[]}
+        />
+      </AppShell>,
+    );
+
+    // Core v2 cards present
+    expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Profile & Identity" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", {
+        name: "Display Currency & Personal Budget",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Notifications" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Data & Account" }),
+    ).toBeInTheDocument();
+
+    // 4 v2 notification switches + auto-include switch
+    expect(
+      screen.getByRole("switch", { name: /Auto-include me in new expenses/i }),
+    ).toHaveAttribute("aria-checked", "true");
+    expect(
+      screen.getByRole("switch", { name: /New expense added/i }),
+    ).toHaveAttribute("aria-checked", "true");
+    expect(
+      screen.getByRole("switch", { name: /Settlement recorded/i }),
+    ).toHaveAttribute("aria-checked", "true");
+    expect(
+      screen.getByRole("switch", { name: /Cycle close reminder/i }),
+    ).toHaveAttribute("aria-checked", "true");
+    expect(
+      screen.getByRole("switch", { name: /Monthly summary digest/i }),
+    ).toHaveAttribute("aria-checked", "false");
+
+    // Removed v1 UI surfaces MUST be completely absent
+    expect(screen.queryByTestId("storage-quota-card")).not.toBeInTheDocument();
+    expect(screen.queryByText(/500 MB/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("switch", { name: /Simplify Group Debts/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("switch", { name: /Allow SMS settlement nudges/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Verify Phone/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("discards unsaved edits back to last saved snapshot", async () => {
+    const user = userEvent.setup();
+    render(
+      <AppShell groups={SHELL_GROUPS} user={SHELL_USER} initialGroupId="grp-apt4b">
+        <SettingsClient
+          initialProfile={INITIAL_PROFILE}
+          groupCount={4}
+          balances={[]}
+        />
+      </AppShell>,
+    );
+
+    const discardBtn = screen.getByRole("button", { name: "Discard Changes" });
+    expect(discardBtn).toBeDisabled();
+
+    const nameInput = screen.getByLabelText(/Full Name/i) as HTMLInputElement;
+    await user.clear(nameInput);
+    await user.type(nameInput, "Temporary Name");
+    expect(nameInput.value).toBe("Temporary Name");
+
+    const digestSwitch = screen.getByRole("switch", {
+      name: /Monthly summary digest/i,
+    });
+    await user.click(digestSwitch);
+    expect(digestSwitch).toHaveAttribute("aria-checked", "true");
+    expect(discardBtn).toBeEnabled();
+
+    await user.click(discardBtn);
+
+    expect(nameInput.value).toBe("Jordan Doe");
+    expect(digestSwitch).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByText(/Changes discarded/i)).toBeInTheDocument();
+  });
+
   it(
-    "displays accurate 500 MB Storage & Sync Quota ProgressRing, enforces ADMIN & phone-verify gates, and handles Reset to Defaults",
-    { timeout: 15000 },
-    async () => {
-      const user = userEvent.setup();
-      render(
-        <AppShell groups={SHELL_GROUPS} user={SHELL_USER} initialGroupId="grp-apt4b">
-          <SettingsClient
-            initialProfile={INITIAL_PROFILE}
-            groups={SETTINGS_GROUPS}
-            balances={[]}
-          />
-        </AppShell>,
-      );
-
-      // 90.0 MB of 500 MB -> 18%
-      const quotaCard = screen.getByTestId("storage-quota-card");
-      expect(quotaCard).toHaveTextContent("90.0 MB");
-      expect(quotaCard).toHaveTextContent("500 MB");
-      const progress = within(quotaCard).getByRole("progressbar", {
-        name: "Storage & Sync Quota",
-      });
-      expect(progress).toHaveAttribute("aria-valuenow", "94371840");
-      expect(progress).toHaveAttribute("aria-valuemax", "524288000");
-      expect(quotaCard).toHaveTextContent("18%");
-
-      // ADMIN can toggle Simplify Group Debts for grp-apt4b
-      const simplifySwitch = screen.getByRole("switch", {
-        name: /Simplify Group Debts/i,
-      });
-      expect(simplifySwitch).toBeEnabled();
-      expect(simplifySwitch).toHaveAttribute("aria-checked", "true");
-
-      // Unverified phone disables Allow SMS settlement nudges
-      const smsSwitch = screen.getByRole("switch", {
-        name: /Allow SMS settlement nudges/i,
-      });
-      expect(smsSwitch).toBeDisabled();
-
-      // Edit preferences then Reset to Defaults restores them
-      await user.click(screen.getByRole("tab", { name: "Exact Shares" }));
-      const capInput = screen.getByLabelText(/Personal Share Cap/i) as HTMLInputElement;
-      await user.type(capInput, "1600.00");
-      expect(capInput.value).toBe("1600.00");
-
-      await user.click(screen.getByRole("button", { name: /Reset to Defaults/i }));
-
-      expect(capInput.value).toBe("");
-      expect(screen.getByRole("tab", { name: "Equal Split" })).toHaveAttribute(
-        "aria-selected",
-        "true",
-      );
-      expect(screen.getByText(/Defaults restored/i)).toBeInTheDocument();
-    },
-  );
-
-  it(
-    "disables Simplify Group Debts when current user is a non-ADMIN MEMBER in active group",
-    { timeout: 15000 },
-    () => {
-      mockSearchParams = new URLSearchParams("group=grp-trip&cycle=2026-11");
-      render(
-        <AppShell groups={SHELL_GROUPS} user={SHELL_USER} initialGroupId="grp-trip">
-          <SettingsClient
-            initialProfile={INITIAL_PROFILE}
-            groups={SETTINGS_GROUPS}
-            balances={[]}
-          />
-        </AppShell>,
-      );
-
-      const simplifySwitch = screen.getByRole("switch", {
-        name: /Simplify Group Debts \(Tokyo Trip\)/i,
-      });
-      expect(simplifySwitch).toBeDisabled();
-    },
-  );
-
-  it(
-    "saves Default Split Mode, Personal Share Cap, and @instant_settlement_tag and wires them to AddEditExpenseModal, Expenses, and RecordSettlementModal",
+    "saves all v2 settings fields and syncs personalShareCapCents & autoIncludeInExpenses to consumers",
     { timeout: 20000 },
     async () => {
       const user = userEvent.setup();
@@ -375,26 +281,18 @@ describe("Settings (/settings) UI & End-to-End Consumer Wiring", () => {
           ok: true,
           profile: {
             ...INITIAL_PROFILE,
-            instantSettlementTag: "@alex-rivera-99",
-            personalShareCapCents: 160_000,
+            fullName: "Jordan M. Doe",
+            phoneNumber: "+1 (415) 555-0199",
+            timezone: "America/New_York",
+            displayCurrency: "EUR",
+            personalShareCapCents: 200_000,
+            autoIncludeInExpenses: false,
             notificationPrefs: {
-              ...INITIAL_PROFILE.notificationPrefs,
-              default_split_method: "PERCENTAGE",
-              payment_methods: [
-                {
-                  id: "pm-venmo-primary",
-                  label: "Venmo Settlement Rail",
-                  rail: "VENMO",
-                  handle: "@alex-rivera-99",
-                  is_default: true,
-                },
-              ],
+              new_expense_added: true,
+              settlement_recorded: false,
+              cycle_close_reminder: true,
+              monthly_summary_digest: true,
             },
-          },
-          updatedGroup: {
-            id: "grp-apt4b",
-            defaultSplitMode: "CUSTOM_RATIOS",
-            simplifyDebts: true,
           },
         }),
       } as Response);
@@ -406,65 +304,116 @@ describe("Settings (/settings) UI & End-to-End Consumer Wiring", () => {
             <button type="button" onClick={() => setShowExpenses(true)}>
               Switch To Consumers
             </button>
-            <ConsumerHarness showExpenses={showExpenses} />
+            {showExpenses ? (
+              <ExpensesClient
+                currentUserId="u-alex"
+                userBaseCurrency="USD"
+                personalShareCapCents={null}
+                initialGroups={EXPENSE_GROUPS}
+                initialExpenses={SAMPLE_EXPENSES}
+                initialSettlements={[]}
+                initialBillingCycles={[]}
+                initialRecurringRules={[]}
+              />
+            ) : (
+              <SettingsClient
+                initialProfile={INITIAL_PROFILE}
+                groupCount={1}
+                balances={[]}
+              />
+            )}
           </AppShell>
         );
       }
 
       render(<HarnessWrapper />);
 
-      // Fill tag, Default Split Mode = Percentage, Personal Share Cap = 1600.00
-      const tagInput = screen.getByLabelText(/Instant Settlement Tag/i);
-      await user.clear(tagInput);
-      await user.type(tagInput, "alex-rivera-99");
+      const nameInput = screen.getByLabelText(/Full Name/i);
+      await user.clear(nameInput);
+      await user.type(nameInput, "Jordan M. Doe");
 
-      await user.click(screen.getByRole("tab", { name: "Percentage" }));
+      const phoneInput = screen.getByLabelText(/Phone Number/i);
+      await user.clear(phoneInput);
+      await user.type(phoneInput, "+1 (415) 555-0199");
 
-      const capInput = screen.getByLabelText(/Personal Share Cap/i);
+      const capInput = screen.getByLabelText(/Personal Monthly Share Cap/i);
       await user.clear(capInput);
-      await user.type(capInput, "1600.00");
+      await user.type(capInput, "2000.00");
 
-      await user.click(screen.getByRole("button", { name: /Save Changes/i }));
+      await user.click(
+        screen.getByRole("switch", { name: /Auto-include me in new expenses/i }),
+      );
+      await user.click(
+        screen.getByRole("switch", { name: /Settlement recorded/i }),
+      );
+      await user.click(
+        screen.getByRole("switch", { name: /Monthly summary digest/i }),
+      );
+
+      await user.click(screen.getByRole("button", { name: "Save Changes" }));
 
       await waitFor(() => {
         expect(fetchSpy).toHaveBeenCalledTimes(1);
       });
+
       const [, init] = fetchSpy.mock.calls[0];
       const sentBody = JSON.parse(String(init?.body));
-      expect(sentBody.instant_settlement_tag).toBe("@alex-rivera-99");
-      expect(sentBody.personal_share_cap_cents).toBe(160_000);
-      expect(sentBody.notification_prefs.default_split_method).toBe("PERCENTAGE");
+      expect(sentBody).toMatchObject({
+        full_name: "Jordan M. Doe",
+        phone_number: "+1 (415) 555-0199",
+        timezone: "America/Los_Angeles",
+        display_currency: "USD",
+        personal_share_cap_cents: 200_000,
+        auto_include_in_expenses: false,
+        notification_prefs: {
+          new_expense_added: true,
+          settlement_recorded: false,
+          cycle_close_reminder: true,
+          monthly_summary_digest: true,
+        },
+      });
       expect(screen.getByText("Settings saved")).toBeInTheDocument();
 
-      // 1. Verify AddEditExpenseModal picks up Default Split Mode = By Percentage
-      await user.click(screen.getByRole("button", { name: "Add Expense" }));
-      const expenseDialog = screen.getByRole("dialog", { name: "Add Expense" });
-      expect(
-        within(expenseDialog).getByRole("tab", { name: "By Percentage" }),
-      ).toHaveAttribute("aria-selected", "true");
-      await user.click(within(expenseDialog).getByRole("button", { name: "Cancel" }));
-
-      // 2. Switch to Expenses consumer view -> Personal Share Cap ($1,600.00, 50.0% of $800.00)
+      // Switch to Expenses consumer view -> Personal Share Cap ($2,000.00, 40.0% of $800.00)
       await user.click(
         screen.getByRole("button", { name: "Switch To Consumers" }),
       );
       const personalShareCard = screen.getByTestId("kpi-personal-share");
       expect(personalShareCard).toHaveTextContent("$800.00");
-      expect(personalShareCard).toHaveTextContent(
-        "Monthly limit threshold: $1,600.00",
-      );
-      expect(personalShareCard).toHaveTextContent("50.0%");
-
-      // 3. Open RecordSettlementModal -> displays @alex-rivera-99
-      await user.click(
-        screen.getByRole("button", { name: "Open Test Settlement" }),
-      );
-      const settleDialog = screen.getByRole("dialog", {
-        name: "Record Settlement",
-      });
-      expect(
-        within(settleDialog).getByTestId("recipient-settlement-tag"),
-      ).toHaveTextContent("Recipient handle: @alex-rivera-99");
+      expect(personalShareCard).toHaveTextContent("40.0%");
     },
   );
+
+  it("blocks Delete Account inside Data & Account when a non-zero group balance exists", async () => {
+    const user = userEvent.setup();
+    render(
+      <AppShell groups={SHELL_GROUPS} user={SHELL_USER} initialGroupId="grp-apt4b">
+        <SettingsClient
+          initialProfile={INITIAL_PROFILE}
+          groupCount={1}
+          balances={[
+            {
+              groupId: "grp-apt4b",
+              groupName: "Apt 4B Roommates",
+              groupStatus: "ACTIVE",
+              baseCurrency: "USD",
+              memberStatus: "ACTIVE",
+              role: "ADMIN",
+              netBalanceCents: -4500,
+              formattedBalance: "-$45.00",
+            },
+          ]}
+        />
+      </AppShell>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Delete Account" }));
+    const dialog = screen.getByRole("dialog", {
+      name: "Delete LedgerSplit Account?",
+    });
+    expect(within(dialog).getByText("Action Blocked")).toBeInTheDocument();
+    expect(
+      within(dialog).getByRole("button", { name: "Delete Account" }),
+    ).toBeDisabled();
+  });
 });

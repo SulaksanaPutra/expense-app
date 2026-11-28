@@ -1,4 +1,3 @@
-import { createHmac, randomInt, timingSafeEqual } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   buildFullLedgerCsv,
@@ -9,9 +8,6 @@ import {
   type ExpenseSettlementRecord,
   type FullLedgerCsvSettlementItem,
 } from "@/lib/expenses/ledger";
-import { RECEIPT_STORAGE_QUOTA_BYTES } from "@/lib/expenses/split-engine";
-import { computeEqualSharePercentages } from "@/lib/groups/invite-utils";
-import { getInviteSigningSecret } from "@/lib/groups/invite-token";
 import {
   formatMinorUnits,
   formatMinorUnitsDecimal,
@@ -19,14 +15,8 @@ import {
 } from "@/lib/money";
 import type {
   Database,
-  ExpenseSplitMethod,
-  GroupStatus,
-  MemberRole,
   NotificationPrefs,
-  PaymentRail,
-  SavedPaymentMethod,
   SplitBreakdownItem,
-  SplitMode,
 } from "@/types/database";
 
 export interface SettingsAuthUser {
@@ -36,15 +26,11 @@ export interface SettingsAuthUser {
   avatarUrl?: string | null;
 }
 
-export interface SettingsGroupSummary {
-  id: string;
-  name: string;
-  slug: string;
-  status: GroupStatus;
-  baseCurrency: string;
-  defaultSplitMode: SplitMode;
-  simplifyDebts: boolean;
-  currentUserRole: MemberRole;
+export interface SettingsNotificationPrefs {
+  new_expense_added: boolean;
+  settlement_recorded: boolean;
+  cycle_close_reminder: boolean;
+  monthly_summary_digest: boolean;
 }
 
 export interface SettingsUserProfile {
@@ -53,85 +39,64 @@ export interface SettingsUserProfile {
   email: string;
   avatarUrl: string | null;
   phoneNumber: string | null;
-  phoneVerified: boolean;
-  instantSettlementTag: string | null;
-  baseCurrency: string;
+  timezone: string;
+  displayCurrency: string;
   personalShareCapCents: number | null;
-  receiptStorageUsedBytes: number;
-  receiptStorageQuotaBytes: number;
-  notificationPrefs: Required<
-    Pick<
-      NotificationPrefs,
-      | "new_expense"
-      | "settlement_confirmation"
-      | "monthly_recap"
-      | "sms_nudges_opt_in"
-      | "auto_settlement_reminders"
-      | "default_split_method"
-    >
-  > & {
-    payment_methods: SavedPaymentMethod[];
-  };
+  autoIncludeInExpenses: boolean;
+  notificationPrefs: SettingsNotificationPrefs;
   createdAt: string;
 }
 
 export interface SettingsPageData {
   profile: SettingsUserProfile;
-  groups: SettingsGroupSummary[];
+  groupCount: number;
   loadError: string | null;
 }
 
-export const DEFAULT_USER_PREFS: SettingsUserProfile["notificationPrefs"] = {
-  new_expense: true,
-  settlement_confirmation: true,
-  monthly_recap: true,
-  sms_nudges_opt_in: false,
-  auto_settlement_reminders: true,
-  default_split_method: "EQUAL",
-  payment_methods: [],
+export const DEFAULT_USER_PREFS: SettingsNotificationPrefs = {
+  new_expense_added: true,
+  settlement_recorded: true,
+  cycle_close_reminder: true,
+  monthly_summary_digest: false,
 };
 
-const VALID_PAYMENT_RAILS: readonly PaymentRail[] = [
-  "VENMO",
-  "APPLE_CARD",
-  "CASH",
-  "OTHER",
-];
+export const DEFAULT_TIMEZONE = "America/Los_Angeles";
 
-const VALID_SPLIT_METHODS: readonly ExpenseSplitMethod[] = [
-  "EQUAL",
-  "PERCENTAGE",
-  "EXACT",
-];
+interface SettingsUserRow {
+  id: string;
+  full_name: string;
+  email: string;
+  phone_number: string | null;
+  timezone: string;
+  base_currency: string;
+  display_currency: string;
+  personal_share_cap_cents: number | null;
+  auto_include_in_expenses: boolean;
+  notification_prefs: NotificationPrefs;
+  created_at: string;
+}
 
-export function normalizeInstantSettlementTag(
-  raw: string | null | undefined,
-): { ok: true; value: string | null } | { ok: false; message: string } {
-  if (raw === null || raw === undefined) {
-    return { ok: true, value: null };
+function isMissingColumnError(error: { code?: string; message?: string } | null | undefined): boolean {
+  if (!error) return false;
+  if (error.code === "42703" || error.code === "PGRST204") return true;
+  const msg = (error.message ?? "").toLowerCase();
+  return msg.includes("schema cache") || msg.includes("does not exist");
+}
+
+function readLegacyTimezone(rawPrefs: unknown): string {
+  if (rawPrefs && typeof rawPrefs === "object") {
+    const tz = (rawPrefs as Record<string, unknown>).timezone;
+    if (typeof tz === "string" && tz.trim()) return tz.trim();
   }
-  const trimmed = raw.trim();
-  if (!trimmed) {
-    return { ok: true, value: null };
+  return DEFAULT_TIMEZONE;
+}
+
+function readLegacyAutoInclude(rawPrefs: unknown): boolean {
+  if (rawPrefs && typeof rawPrefs === "object") {
+    const val = (rawPrefs as Record<string, unknown>).auto_include_in_expenses;
+    if (typeof val === "boolean") return val;
   }
-  const stripped = trimmed.replace(/^@+/, "");
-  if (!stripped) {
-    return { ok: true, value: null };
-  }
-  if (stripped.length > 60) {
-    return {
-      ok: false,
-      message: "Instant settlement tag must be 60 characters or fewer.",
-    };
-  }
-  if (!/^[a-zA-Z0-9._-]+$/.test(stripped)) {
-    return {
-      ok: false,
-      message:
-        "Instant settlement tag may only contain letters, numbers, dots, underscores, or hyphens.",
-    };
-  }
-  return { ok: true, value: `@${stripped}` };
+  return true;
 }
 
 export function normalizePhoneNumber(
@@ -158,6 +123,33 @@ export function normalizePhoneNumber(
     };
   }
   return { ok: true, value: trimmed };
+}
+
+export function validateTimezone(
+  raw: unknown,
+): { ok: true; value: string } | { ok: false; message: string } {
+  if (typeof raw !== "string") {
+    return {
+      ok: false,
+      message: "Timezone must be a valid IANA timezone identifier.",
+    };
+  }
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.length > 80) {
+    return {
+      ok: false,
+      message: "Timezone must be a valid IANA timezone identifier.",
+    };
+  }
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: trimmed });
+    return { ok: true, value: trimmed };
+  } catch {
+    return {
+      ok: false,
+      message: `"${trimmed}" is not a valid IANA timezone identifier.`,
+    };
+  }
 }
 
 export function validateAvatarUrl(
@@ -203,138 +195,47 @@ export function validateAvatarUrl(
   };
 }
 
-export function buildDefaultPaymentMethods(
-  instantSettlementTag: string | null,
-): SavedPaymentMethod[] {
-  const tag = instantSettlementTag?.trim() || "";
-  const methods: SavedPaymentMethod[] = [];
-  if (tag) {
-    methods.push({
-      id: "pm-venmo-primary",
-      label: "Venmo Settlement Rail",
-      rail: "VENMO",
-      handle: tag.startsWith("@") ? tag : `@${tag}`,
-      is_default: true,
-    });
-  }
-  return methods;
-}
-
-export function normalizePaymentMethods(
-  raw: unknown,
-): { ok: true; value: SavedPaymentMethod[] } | { ok: false; message: string } {
-  if (!Array.isArray(raw)) {
-    return { ok: true, value: [] };
-  }
-  if (raw.length > 10) {
-    return {
-      ok: false,
-      message: "You can save up to 10 payment settlement handles.",
-    };
-  }
-  const seenIds = new Set<string>();
-  const normalized: SavedPaymentMethod[] = [];
-  for (let i = 0; i < raw.length; i += 1) {
-    const item = raw[i];
-    if (!item || typeof item !== "object") {
-      return { ok: false, message: "Invalid payment method entry." };
-    }
-    const rec = item as Record<string, unknown>;
-    const label = typeof rec.label === "string" ? rec.label.trim() : "";
-    const handle = typeof rec.handle === "string" ? rec.handle.trim() : "";
-    const rail =
-      typeof rec.rail === "string" &&
-      VALID_PAYMENT_RAILS.includes(rec.rail.trim().toUpperCase() as PaymentRail)
-        ? (rec.rail.trim().toUpperCase() as PaymentRail)
-        : "OTHER";
-    const id =
-      typeof rec.id === "string" && rec.id.trim()
-        ? rec.id.trim().slice(0, 64)
-        : `pm-${i + 1}`;
-    if (!label || label.length > 60) {
-      return {
-        ok: false,
-        message: "Payment method label must be 1 to 60 characters.",
-      };
-    }
-    if (!handle || handle.length > 64) {
-      return {
-        ok: false,
-        message: "Payment handle or reference must be 1 to 64 characters.",
-      };
-    }
-    if (seenIds.has(id)) continue;
-    seenIds.add(id);
-    normalized.push({
-      id,
-      label,
-      rail,
-      handle,
-      is_default: Boolean(rec.is_default),
-    });
-  }
-
-  // Ensure at most one default item
-  let foundDefault = false;
-  for (const item of normalized) {
-    if (item.is_default && !foundDefault) {
-      foundDefault = true;
-    } else if (item.is_default) {
-      item.is_default = false;
-    }
-  }
-  if (!foundDefault && normalized.length > 0) {
-    normalized[0].is_default = true;
-  }
-
-  return { ok: true, value: normalized };
-}
-
 export function normalizeNotificationPrefs(
   raw: unknown,
-  fallbackTag: string | null = null,
-): SettingsUserProfile["notificationPrefs"] {
+): SettingsNotificationPrefs {
   const obj = (raw && typeof raw === "object" ? raw : {}) as Record<
     string,
     unknown
   >;
-  const splitMethod =
-    typeof obj.default_split_method === "string" &&
-    VALID_SPLIT_METHODS.includes(obj.default_split_method as ExpenseSplitMethod)
-      ? (obj.default_split_method as ExpenseSplitMethod)
-      : "EQUAL";
 
-  const pmResult = normalizePaymentMethods(obj.payment_methods);
-  const paymentMethods =
-    pmResult.ok && pmResult.value.length > 0
-      ? pmResult.value
-      : Array.isArray(obj.payment_methods)
-        ? []
-        : buildDefaultPaymentMethods(fallbackTag);
+  const newExpenseAdded =
+    typeof obj.new_expense_added === "boolean"
+      ? obj.new_expense_added
+      : typeof obj.new_expense === "boolean"
+        ? obj.new_expense
+        : DEFAULT_USER_PREFS.new_expense_added;
+
+  const settlementRecorded =
+    typeof obj.settlement_recorded === "boolean"
+      ? obj.settlement_recorded
+      : typeof obj.settlement_confirmation === "boolean"
+        ? obj.settlement_confirmation
+        : DEFAULT_USER_PREFS.settlement_recorded;
+
+  const cycleCloseReminder =
+    typeof obj.cycle_close_reminder === "boolean"
+      ? obj.cycle_close_reminder
+      : typeof obj.auto_settlement_reminders === "boolean"
+        ? obj.auto_settlement_reminders
+        : DEFAULT_USER_PREFS.cycle_close_reminder;
+
+  const monthlySummaryDigest =
+    typeof obj.monthly_summary_digest === "boolean"
+      ? obj.monthly_summary_digest
+      : typeof obj.monthly_recap === "boolean"
+        ? obj.monthly_recap
+        : DEFAULT_USER_PREFS.monthly_summary_digest;
 
   return {
-    new_expense:
-      typeof obj.new_expense === "boolean"
-        ? obj.new_expense
-        : DEFAULT_USER_PREFS.new_expense,
-    settlement_confirmation:
-      typeof obj.settlement_confirmation === "boolean"
-        ? obj.settlement_confirmation
-        : DEFAULT_USER_PREFS.settlement_confirmation,
-    monthly_recap:
-      typeof obj.monthly_recap === "boolean"
-        ? obj.monthly_recap
-        : DEFAULT_USER_PREFS.monthly_recap,
-    sms_nudges_opt_in:
-      typeof obj.sms_nudges_opt_in === "boolean"
-        ? obj.sms_nudges_opt_in
-        : DEFAULT_USER_PREFS.sms_nudges_opt_in,
-    auto_settlement_reminders:
-      typeof obj.auto_settlement_reminders === "boolean"
-        ? obj.auto_settlement_reminders
-        : DEFAULT_USER_PREFS.auto_settlement_reminders,
-    default_split_method: splitMethod,
-    payment_methods: paymentMethods,
+    new_expense_added: newExpenseAdded,
+    settlement_recorded: settlementRecorded,
+    cycle_close_reminder: cycleCloseReminder,
+    monthly_summary_digest: monthlySummaryDigest,
   };
 }
 
@@ -351,118 +252,110 @@ export async function getSettingsPageData(
     email: authUser.email ?? "",
     avatarUrl: authUser.avatarUrl ?? null,
     phoneNumber: null,
-    phoneVerified: false,
-    instantSettlementTag: null,
-    baseCurrency: "USD",
+    timezone: DEFAULT_TIMEZONE,
+    displayCurrency: "USD",
     personalShareCapCents: null,
-    receiptStorageUsedBytes: 0,
-    receiptStorageQuotaBytes: RECEIPT_STORAGE_QUOTA_BYTES,
-    notificationPrefs: { ...DEFAULT_USER_PREFS, payment_methods: [] },
+    autoIncludeInExpenses: true,
+    notificationPrefs: { ...DEFAULT_USER_PREFS },
     createdAt: new Date().toISOString(),
   };
 
   try {
-    const [{ data: userRow, error: userErr }, { data: membershipRows, error: memErr }] =
-      await Promise.all([
-        supabase
-          .from("users")
-          .select(
-            "id, full_name, email, phone_number, phone_verified, base_currency, display_currency, personal_share_cap_cents, auto_include_in_expenses, notification_prefs, created_at",
-          )
-          .eq("id", authUser.id)
-          .maybeSingle(),
-        supabase
-          .from("group_members")
-          .select("group_id, role, status")
-          .eq("user_id", authUser.id)
-          .eq("status", "ACTIVE"),
-      ]);
+    const [
+      { data: userRow, error: userErr },
+      { data: membershipRows, error: memErr },
+    ] = await Promise.all([
+      supabase
+        .from("users")
+        .select(
+          "id, full_name, email, phone_number, timezone, base_currency, display_currency, personal_share_cap_cents, auto_include_in_expenses, notification_prefs, created_at",
+        )
+        .eq("id", authUser.id)
+        .maybeSingle(),
+      supabase
+        .from("group_members")
+        .select("group_id")
+        .eq("user_id", authUser.id)
+        .eq("status", "ACTIVE"),
+    ]);
 
-    if (userErr) {
+    let resolvedUserRow: SettingsUserRow | null = userRow as SettingsUserRow | null;
+    if (userErr && isMissingColumnError(userErr)) {
+      const fb = await supabase
+        .from("users")
+        .select(
+          "id, full_name, email, phone_number, base_currency, personal_share_cap_cents, notification_prefs, created_at",
+        )
+        .eq("id", authUser.id)
+        .maybeSingle();
+      if (fb.error) {
+        return {
+          profile: fallbackProfile,
+          groupCount: 0,
+          loadError: fb.error.message || "Unable to load profile settings.",
+        };
+      }
+      resolvedUserRow = fb.data
+        ? ({
+            ...fb.data,
+            timezone: readLegacyTimezone(fb.data.notification_prefs),
+            display_currency: fb.data.base_currency || "USD",
+            auto_include_in_expenses: readLegacyAutoInclude(
+              fb.data.notification_prefs,
+            ),
+          } as SettingsUserRow)
+        : null;
+    } else if (userErr) {
       return {
         profile: fallbackProfile,
-        groups: [],
+        groupCount: 0,
         loadError: userErr.message || "Unable to load profile settings.",
       };
     }
 
-    const profile: SettingsUserProfile = userRow
+    const resolvedDisplayCurrency =
+      resolvedUserRow?.display_currency ||
+      resolvedUserRow?.base_currency ||
+      "USD";
+
+    const profile: SettingsUserProfile = resolvedUserRow
       ? {
-          id: userRow.id,
-          fullName: userRow.full_name || fallbackProfile.fullName,
-          email: userRow.email || fallbackProfile.email,
+          id: resolvedUserRow.id,
+          fullName: resolvedUserRow.full_name || fallbackProfile.fullName,
+          email: resolvedUserRow.email || fallbackProfile.email,
           avatarUrl: authUser.avatarUrl ?? null,
-          phoneNumber: userRow.phone_number ?? null,
-          phoneVerified: Boolean(userRow.phone_verified),
-          instantSettlementTag: null,
-          baseCurrency: userRow.base_currency || "USD",
+          phoneNumber: resolvedUserRow.phone_number ?? null,
+          timezone: resolvedUserRow.timezone || DEFAULT_TIMEZONE,
+          displayCurrency: resolvedDisplayCurrency,
           personalShareCapCents:
-            userRow.personal_share_cap_cents !== null &&
-            userRow.personal_share_cap_cents !== undefined
-              ? Number(userRow.personal_share_cap_cents)
+            resolvedUserRow.personal_share_cap_cents !== null &&
+            resolvedUserRow.personal_share_cap_cents !== undefined
+              ? Number(resolvedUserRow.personal_share_cap_cents)
               : null,
-          receiptStorageUsedBytes: Number(
-            0,
-          ),
-          receiptStorageQuotaBytes: RECEIPT_STORAGE_QUOTA_BYTES,
+          autoIncludeInExpenses:
+            typeof resolvedUserRow.auto_include_in_expenses === "boolean"
+              ? resolvedUserRow.auto_include_in_expenses
+              : true,
           notificationPrefs: normalizeNotificationPrefs(
-            userRow.notification_prefs,
-            null,
+            resolvedUserRow.notification_prefs,
           ),
-          createdAt: userRow.created_at || fallbackProfile.createdAt,
+          createdAt: resolvedUserRow.created_at || fallbackProfile.createdAt,
         }
       : fallbackProfile;
 
-    if (memErr || !membershipRows || membershipRows.length === 0) {
-      return {
-        profile,
-        groups: [],
-        loadError: memErr ? memErr.message : null,
-      };
-    }
-
-    const roleByGroup = new Map<string, MemberRole>(
-      membershipRows.map((m) => [m.group_id, m.role]),
-    );
-    const groupIds = membershipRows.map((m) => m.group_id);
-
-    const { data: groupRows, error: groupErr } = await supabase
-      .from("groups")
-      .select(
-        "id, name, slug, status, base_currency, default_split_mode, created_at",
-      )
-      .in("id", groupIds)
-      .neq("status", "ARCHIVED")
-      .order("created_at", { ascending: true });
-
-    if (groupErr) {
-      return {
-        profile,
-        groups: [],
-        loadError: groupErr.message || "Unable to load active groups.",
-      };
-    }
-
-    const groups: SettingsGroupSummary[] = (groupRows ?? []).map((g) => ({
-      id: g.id,
-      name: g.name,
-      slug: g.slug,
-      status: g.status,
-      baseCurrency: g.base_currency,
-      defaultSplitMode: g.default_split_mode,
-      simplifyDebts: true,
-      currentUserRole: roleByGroup.get(g.id) ?? "MEMBER",
-    }));
+    const groupCount = memErr
+      ? 0
+      : new Set((membershipRows ?? []).map((m) => m.group_id)).size;
 
     return {
       profile,
-      groups,
-      loadError: null,
+      groupCount,
+      loadError: memErr ? memErr.message : null,
     };
   } catch (err) {
     return {
       profile: fallbackProfile,
-      groups: [],
+      groupCount: 0,
       loadError:
         err instanceof Error ? err.message : "Unable to load settings.",
     };
@@ -472,25 +365,18 @@ export async function getSettingsPageData(
 export interface UpdateSettingsInput {
   full_name?: unknown;
   phone_number?: unknown;
-  instant_settlement_tag?: unknown;
-  base_currency?: unknown;
+  timezone?: unknown;
+  display_currency?: unknown;
   personal_share_cap_cents?: unknown;
+  auto_include_in_expenses?: unknown;
   avatar_url?: unknown;
   notification_prefs?: unknown;
-  active_group_id?: unknown;
-  group_simplify_debts?: unknown;
-  group_default_split_mode?: unknown;
 }
 
 export type UpdateSettingsResult =
   | {
       ok: true;
       profile: SettingsUserProfile;
-      updatedGroup?: {
-        id: string;
-        defaultSplitMode: SplitMode;
-        simplifyDebts: boolean;
-      };
     }
   | {
       ok: false;
@@ -515,20 +401,50 @@ export async function updateUserSettings(
 
   const input = rawInput as UpdateSettingsInput;
 
-  const { data: existingRow, error: existingErr } = await supabase
+  const existingRes = await supabase
     .from("users")
     .select(
-      "id, full_name, email, phone_number, phone_verified, base_currency, display_currency, personal_share_cap_cents, auto_include_in_expenses, notification_prefs, created_at",
+      "id, full_name, email, phone_number, timezone, base_currency, display_currency, personal_share_cap_cents, auto_include_in_expenses, notification_prefs, created_at",
     )
     .eq("id", authUser.id)
     .maybeSingle();
 
-  if (existingErr) {
+  let existingRow: SettingsUserRow | null = existingRes.data as SettingsUserRow | null;
+  let useLegacyUserColumns = false;
+
+  if (existingRes.error && isMissingColumnError(existingRes.error)) {
+    useLegacyUserColumns = true;
+    const fb = await supabase
+      .from("users")
+      .select(
+        "id, full_name, email, phone_number, base_currency, personal_share_cap_cents, notification_prefs, created_at",
+      )
+      .eq("id", authUser.id)
+      .maybeSingle();
+    if (fb.error) {
+      return {
+        ok: false,
+        status: 500,
+        code: "SERVER_ERROR",
+        message: fb.error.message || "Unable to load user profile.",
+      };
+    }
+    existingRow = fb.data
+      ? ({
+          ...fb.data,
+          timezone: readLegacyTimezone(fb.data.notification_prefs),
+          display_currency: fb.data.base_currency || "USD",
+          auto_include_in_expenses: readLegacyAutoInclude(
+            fb.data.notification_prefs,
+          ),
+        } as SettingsUserRow)
+      : null;
+  } else if (existingRes.error) {
     return {
       ok: false,
       status: 500,
       code: "SERVER_ERROR",
-      message: existingErr.message || "Unable to load user profile.",
+      message: existingRes.error.message || "Unable to load user profile.",
     };
   }
 
@@ -549,7 +465,7 @@ export async function updateUserSettings(
         ok: false,
         status: 400,
         code: "INVALID_FULL_NAME",
-        message: "Legal full name must be a text value.",
+        message: "Full name must be a text value.",
       };
     }
     const trimmed = input.full_name.trim();
@@ -558,7 +474,7 @@ export async function updateUserSettings(
         ok: false,
         status: 400,
         code: "INVALID_FULL_NAME",
-        message: "Legal full name must be between 2 and 100 characters.",
+        message: "Full name must be between 2 and 100 characters.",
       };
     }
     nextFullName = trimmed;
@@ -566,7 +482,6 @@ export async function updateUserSettings(
 
   // Validate phone_number
   let nextPhoneNumber = existingRow.phone_number;
-  let nextPhoneVerified = Boolean(existingRow.phone_verified);
   if (input.phone_number !== undefined) {
     const phoneCheck = normalizePhoneNumber(
       input.phone_number === null ? null : String(input.phone_number),
@@ -579,47 +494,41 @@ export async function updateUserSettings(
         message: phoneCheck.message,
       };
     }
-    if (phoneCheck.value !== existingRow.phone_number) {
-      nextPhoneNumber = phoneCheck.value;
-      nextPhoneVerified = false;
-    }
+    nextPhoneNumber = phoneCheck.value;
   }
 
-  // Validate instant_settlement_tag
-  let nextTag: string | null = null;
-  if (input.instant_settlement_tag !== undefined) {
-    const tagCheck = normalizeInstantSettlementTag(
-      input.instant_settlement_tag === null
-        ? null
-        : String(input.instant_settlement_tag),
-    );
-    if (!tagCheck.ok) {
+  // Validate timezone
+  let nextTimezone = existingRow.timezone || DEFAULT_TIMEZONE;
+  if (input.timezone !== undefined) {
+    const tzCheck = validateTimezone(input.timezone);
+    if (!tzCheck.ok) {
       return {
         ok: false,
         status: 400,
-        code: "INVALID_SETTLEMENT_TAG",
-        message: tagCheck.message,
+        code: "INVALID_TIMEZONE",
+        message: tzCheck.message,
       };
     }
-    nextTag = tagCheck.value;
+    nextTimezone = tzCheck.value;
   }
 
-  // Validate base_currency
-  let nextBaseCurrency = existingRow.base_currency || "USD";
-  if (input.base_currency !== undefined) {
+  // Validate display_currency
+  let nextDisplayCurrency =
+    existingRow.display_currency || existingRow.base_currency || "USD";
+  if (input.display_currency !== undefined) {
     const code =
-      typeof input.base_currency === "string"
-        ? input.base_currency.trim().toUpperCase()
+      typeof input.display_currency === "string"
+        ? input.display_currency.trim().toUpperCase()
         : "";
     if (!isValidCurrencyCode(code)) {
       return {
         ok: false,
         status: 400,
         code: "INVALID_CURRENCY",
-        message: "Base currency must be a valid 3-letter ISO-4217 code.",
+        message: "Display currency must be a valid 3-letter ISO-4217 code.",
       };
     }
-    nextBaseCurrency = code;
+    nextDisplayCurrency = code;
   }
 
   // Validate personal_share_cap_cents (BIGINT integer minor units only)
@@ -643,11 +552,28 @@ export async function updateUserSettings(
           status: 400,
           code: "INVALID_PERSONAL_CAP",
           message:
-            "Personal share cap must be a non-negative integer in minor units.",
+            "Personal monthly share cap must be a non-negative integer in minor units.",
         };
       }
       nextCapCents = num;
     }
+  }
+
+  // Validate auto_include_in_expenses
+  let nextAutoInclude =
+    typeof existingRow.auto_include_in_expenses === "boolean"
+      ? existingRow.auto_include_in_expenses
+      : true;
+  if (input.auto_include_in_expenses !== undefined) {
+    if (typeof input.auto_include_in_expenses !== "boolean") {
+      return {
+        ok: false,
+        status: 400,
+        code: "INVALID_AUTO_INCLUDE",
+        message: "auto_include_in_expenses must be a boolean.",
+      };
+    }
+    nextAutoInclude = input.auto_include_in_expenses;
   }
 
   // Validate avatar_url (optional; stored on Supabase Auth metadata)
@@ -671,12 +597,9 @@ export async function updateUserSettings(
     }
   }
 
-  // Validate & merge notification_prefs
-  const currentPrefs = normalizeNotificationPrefs(
-    existingRow.notification_prefs,
-    nextTag,
-  );
-  const nextPrefs = { ...currentPrefs };
+  // Validate & merge notification_prefs (4 v2 switches)
+  const currentPrefs = normalizeNotificationPrefs(existingRow.notification_prefs);
+  const nextPrefs: SettingsNotificationPrefs = { ...currentPrefs };
 
   if (input.notification_prefs !== undefined) {
     if (
@@ -692,304 +615,92 @@ export async function updateUserSettings(
     }
     const rawPrefs = input.notification_prefs as Record<string, unknown>;
 
-    if (rawPrefs.new_expense !== undefined) {
-      if (typeof rawPrefs.new_expense !== "boolean") {
-        return {
-          ok: false,
-          status: 400,
-          code: "INVALID_NOTIFICATION_PREFS",
-          message: "new_expense must be a boolean.",
-        };
-      }
-      nextPrefs.new_expense = rawPrefs.new_expense;
-    }
+    const booleanKeys: Array<keyof SettingsNotificationPrefs> = [
+      "new_expense_added",
+      "settlement_recorded",
+      "cycle_close_reminder",
+      "monthly_summary_digest",
+    ];
 
-    if (rawPrefs.settlement_confirmation !== undefined) {
-      if (typeof rawPrefs.settlement_confirmation !== "boolean") {
-        return {
-          ok: false,
-          status: 400,
-          code: "INVALID_NOTIFICATION_PREFS",
-          message: "settlement_confirmation must be a boolean.",
-        };
-      }
-      nextPrefs.settlement_confirmation = rawPrefs.settlement_confirmation;
-    }
-
-    if (rawPrefs.monthly_recap !== undefined) {
-      if (typeof rawPrefs.monthly_recap !== "boolean") {
-        return {
-          ok: false,
-          status: 400,
-          code: "INVALID_NOTIFICATION_PREFS",
-          message: "monthly_recap must be a boolean.",
-        };
-      }
-      nextPrefs.monthly_recap = rawPrefs.monthly_recap;
-    }
-
-    if (rawPrefs.auto_settlement_reminders !== undefined) {
-      if (typeof rawPrefs.auto_settlement_reminders !== "boolean") {
-        return {
-          ok: false,
-          status: 400,
-          code: "INVALID_NOTIFICATION_PREFS",
-          message: "auto_settlement_reminders must be a boolean.",
-        };
-      }
-      nextPrefs.auto_settlement_reminders = rawPrefs.auto_settlement_reminders;
-    }
-
-    if (rawPrefs.default_split_method !== undefined) {
-      if (
-        typeof rawPrefs.default_split_method !== "string" ||
-        !VALID_SPLIT_METHODS.includes(
-          rawPrefs.default_split_method as ExpenseSplitMethod,
-        )
-      ) {
-        return {
-          ok: false,
-          status: 400,
-          code: "INVALID_SPLIT_METHOD",
-          message:
-            "default_split_method must be EQUAL, PERCENTAGE, or EXACT.",
-        };
-      }
-      nextPrefs.default_split_method =
-        rawPrefs.default_split_method as ExpenseSplitMethod;
-    }
-
-    if (rawPrefs.payment_methods !== undefined) {
-      const pmRes = normalizePaymentMethods(rawPrefs.payment_methods);
-      if (!pmRes.ok) {
-        return {
-          ok: false,
-          status: 400,
-          code: "INVALID_PAYMENT_METHODS",
-          message: pmRes.message,
-        };
-      }
-      nextPrefs.payment_methods = pmRes.value;
-    }
-
-    if (rawPrefs.sms_nudges_opt_in !== undefined) {
-      if (typeof rawPrefs.sms_nudges_opt_in !== "boolean") {
-        return {
-          ok: false,
-          status: 400,
-          code: "INVALID_NOTIFICATION_PREFS",
-          message: "sms_nudges_opt_in must be a boolean.",
-        };
-      }
-      if (rawPrefs.sms_nudges_opt_in && (!nextPhoneVerified || !nextPhoneNumber)) {
-        return {
-          ok: false,
-          status: 400,
-          code: "PHONE_VERIFICATION_REQUIRED",
-          message:
-            "Verify your phone number before opting in to SMS settlement nudges.",
-        };
-      }
-      nextPrefs.sms_nudges_opt_in = rawPrefs.sms_nudges_opt_in;
-    }
-  }
-
-  // Enforce invariant: unverified/cleared phone disables SMS nudges
-  if (!nextPhoneVerified || !nextPhoneNumber) {
-    nextPrefs.sms_nudges_opt_in = false;
-  }
-
-  // Keep Venmo settlement rail handle synced when user has a primary Venmo entry or adds tag
-  if (input.instant_settlement_tag !== undefined) {
-    const withoutAuto = nextPrefs.payment_methods.filter(
-      (pm) => pm.id !== "pm-venmo-primary",
-    );
-    if (nextTag) {
-      const hasDefault = withoutAuto.some((pm) => pm.is_default);
-      nextPrefs.payment_methods = [
-        {
-          id: "pm-venmo-primary",
-          label: "Venmo Settlement Rail",
-          rail: "VENMO",
-          handle: nextTag,
-          is_default: !hasDefault,
-        },
-        ...withoutAuto,
-      ];
-    } else {
-      nextPrefs.payment_methods = withoutAuto;
-    }
-  }
-
-  // Optional active-group rule mutations (ADMIN-gated)
-  let updatedGroup:
-    | {
-        id: string;
-        defaultSplitMode: SplitMode;
-        simplifyDebts: boolean;
-      }
-    | undefined;
-
-  const activeGroupId =
-    typeof input.active_group_id === "string" &&
-    input.active_group_id.trim() &&
-    input.active_group_id.trim() !== "all"
-      ? input.active_group_id.trim()
-      : null;
-
-  const wantsGroupSplitMode =
-    input.group_default_split_mode === "EQUAL" ||
-    input.group_default_split_mode === "CUSTOM_RATIOS";
-
-  if (
-    input.group_default_split_mode !== undefined &&
-    !wantsGroupSplitMode
-  ) {
-    return {
-      ok: false,
-      status: 400,
-      code: "INVALID_GROUP_SPLIT_MODE",
-      message: "group_default_split_mode must be EQUAL or CUSTOM_RATIOS.",
-    };
-  }
-
-  if (activeGroupId && wantsGroupSplitMode) {
-    if (wantsGroupSplitMode) {
-      const targetMode = input.group_default_split_mode as SplitMode;
-      const { data: groupRow, error: groupErr } = await supabase
-        .from("groups")
-        .select("id, status, default_split_mode")
-        .eq("id", activeGroupId)
-        .maybeSingle();
-
-      if (groupErr) {
-        return {
-          ok: false,
-          status: 500,
-          code: "SERVER_ERROR",
-          message: groupErr.message || "Unable to load active group.",
-        };
-      }
-      if (!groupRow) {
-        return {
-          ok: false,
-          status: 404,
-          code: "NOT_FOUND",
-          message: "Active group not found.",
-        };
-      }
-      if (groupRow.status === "ARCHIVED") {
-        return {
-          ok: false,
-          status: 409,
-          code: "GROUP_ARCHIVED",
-          message: "Archived groups are strictly read-only.",
-        };
-      }
-
-      const { data: memberRow, error: memberErr } = await supabase
-        .from("group_members")
-        .select("role, status")
-        .eq("group_id", activeGroupId)
-        .eq("user_id", authUser.id)
-        .maybeSingle();
-
-      if (memberErr) {
-        return {
-          ok: false,
-          status: 500,
-          code: "SERVER_ERROR",
-          message: memberErr.message || "Unable to verify group role.",
-        };
-      }
-      if (
-        !memberRow ||
-        memberRow.status !== "ACTIVE" ||
-        memberRow.role !== "ADMIN"
-      ) {
-        return {
-          ok: false,
-          status: 403,
-          code: "FORBIDDEN",
-          message: "Only active group admins can update group split rules.",
-        };
-      }
-
-      if (targetMode === "CUSTOM_RATIOS") {
-        const { data: activeMembers } = await supabase
-          .from("group_members")
-          .select("user_id, share_percentage, joined_at")
-          .eq("group_id", activeGroupId)
-          .eq("status", "ACTIVE")
-          .order("joined_at", { ascending: true });
-
-        const rows = activeMembers ?? [];
-        const totalBps = rows.reduce(
-          (sum, r) => sum + Math.round(Number(r.share_percentage ?? 0) * 100),
-          0,
-        );
-        if (rows.length > 0 && totalBps !== 10_000) {
-          const equalMap = computeEqualSharePercentages(
-            rows.map((r) => r.user_id),
-          );
-          for (const r of rows) {
-            await supabase
-              .from("group_members")
-              .update({ share_percentage: equalMap.get(r.user_id) ?? 0 })
-              .eq("group_id", activeGroupId)
-              .eq("user_id", r.user_id);
-          }
+    for (const key of booleanKeys) {
+      if (rawPrefs[key] !== undefined) {
+        if (typeof rawPrefs[key] !== "boolean") {
+          return {
+            ok: false,
+            status: 400,
+            code: "INVALID_NOTIFICATION_PREFS",
+            message: `${key} must be a boolean.`,
+          };
         }
-      }
-
-      const { error: modeUpdateErr } = await supabase
-        .from("groups")
-        .update({ default_split_mode: targetMode })
-        .eq("id", activeGroupId);
-
-      if (modeUpdateErr) {
-        return {
-          ok: false,
-          status: 500,
-          code: "SERVER_ERROR",
-          message:
-            modeUpdateErr.message || "Failed to update group default split mode.",
-        };
-      }
-
-      updatedGroup = {
-        id: activeGroupId,
-        defaultSplitMode: targetMode,
-        simplifyDebts: true,
-      };
-    } else if (updatedGroup) {
-      const { data: refreshedGroup } = await supabase
-        .from("groups")
-        .select("default_split_mode")
-        .eq("id", activeGroupId)
-        .maybeSingle();
-      if (refreshedGroup) {
-        updatedGroup.defaultSplitMode = refreshedGroup.default_split_mode;
+        nextPrefs[key] = rawPrefs[key] as boolean;
       }
     }
   }
 
-  const { data: updatedUser, error: updateErr } = await supabase
-    .from("users")
-    .update({
-      full_name: nextFullName,
-      phone_number: nextPhoneNumber,
-      phone_verified: nextPhoneVerified,
-      base_currency: nextBaseCurrency,
-      display_currency: nextBaseCurrency,
-      personal_share_cap_cents: nextCapCents,
-      notification_prefs: nextPrefs as NotificationPrefs,
-    })
-    .eq("id", authUser.id)
-    .select(
-      "id, full_name, email, phone_number, phone_verified, base_currency, display_currency, personal_share_cap_cents, auto_include_in_expenses, notification_prefs, created_at",
-    )
-    .maybeSingle();
+  let updatedUser: SettingsUserRow | null = null;
+  let updateErr: { message?: string } | null = null;
+
+  if (!useLegacyUserColumns) {
+    const v2Res = await supabase
+      .from("users")
+      .update({
+        full_name: nextFullName,
+        phone_number: nextPhoneNumber,
+        timezone: nextTimezone,
+        base_currency: nextDisplayCurrency,
+        display_currency: nextDisplayCurrency,
+        personal_share_cap_cents: nextCapCents,
+        auto_include_in_expenses: nextAutoInclude,
+        notification_prefs: nextPrefs as NotificationPrefs,
+      })
+      .eq("id", authUser.id)
+      .select(
+        "id, full_name, email, phone_number, timezone, base_currency, display_currency, personal_share_cap_cents, auto_include_in_expenses, notification_prefs, created_at",
+      )
+      .maybeSingle();
+
+    if (v2Res.error && isMissingColumnError(v2Res.error)) {
+      useLegacyUserColumns = true;
+    } else {
+      updatedUser = v2Res.data as SettingsUserRow | null;
+      updateErr = v2Res.error;
+    }
+  }
+
+  if (useLegacyUserColumns) {
+    const legacyPrefs = {
+      ...nextPrefs,
+      timezone: nextTimezone,
+      auto_include_in_expenses: nextAutoInclude,
+    } as NotificationPrefs;
+
+    const fbRes = await supabase
+      .from("users")
+      .update({
+        full_name: nextFullName,
+        phone_number: nextPhoneNumber,
+        base_currency: nextDisplayCurrency,
+        personal_share_cap_cents: nextCapCents,
+        notification_prefs: legacyPrefs,
+      })
+      .eq("id", authUser.id)
+      .select(
+        "id, full_name, email, phone_number, base_currency, personal_share_cap_cents, notification_prefs, created_at",
+      )
+      .maybeSingle();
+
+    updateErr = fbRes.error;
+    updatedUser = fbRes.data
+      ? ({
+          ...fbRes.data,
+          timezone: readLegacyTimezone(fbRes.data.notification_prefs),
+          display_currency: fbRes.data.base_currency || nextDisplayCurrency,
+          auto_include_in_expenses: readLegacyAutoInclude(
+            fbRes.data.notification_prefs,
+          ),
+        } as SettingsUserRow)
+      : null;
+  }
 
   if (updateErr || !updatedUser) {
     return {
@@ -1027,132 +738,36 @@ export async function updateUserSettings(
       email: updatedUser.email,
       avatarUrl: nextAvatarUrl,
       phoneNumber: updatedUser.phone_number ?? null,
-      phoneVerified: Boolean(updatedUser.phone_verified),
-      instantSettlementTag: nextTag,
-      baseCurrency: updatedUser.base_currency || "USD",
+      timezone: updatedUser.timezone || DEFAULT_TIMEZONE,
+      displayCurrency:
+        updatedUser.display_currency || updatedUser.base_currency || "USD",
       personalShareCapCents:
         updatedUser.personal_share_cap_cents !== null &&
         updatedUser.personal_share_cap_cents !== undefined
           ? Number(updatedUser.personal_share_cap_cents)
           : null,
-      receiptStorageUsedBytes: Number(
-        0,
-      ),
-      receiptStorageQuotaBytes: RECEIPT_STORAGE_QUOTA_BYTES,
+      autoIncludeInExpenses:
+        typeof updatedUser.auto_include_in_expenses === "boolean"
+          ? updatedUser.auto_include_in_expenses
+          : true,
       notificationPrefs: normalizeNotificationPrefs(
         updatedUser.notification_prefs,
-        nextTag,
       ),
       createdAt: updatedUser.created_at,
     },
-    updatedGroup,
   };
-}
-
-interface PhoneChallengePayload {
-  u: string;
-  p: string;
-  c: string;
-  exp: number;
-}
-
-export function createPhoneVerificationChallenge(params: {
-  userId: string;
-  phoneNumber: string;
-  nowMs?: number;
-  codeOverride?: string;
-  secret?: string;
-}): { code: string; challengeToken: string; expiresAt: string } {
-  const nowMs = params.nowMs ?? Date.now();
-  const expiresAtMs = nowMs + 10 * 60 * 1000;
-  const code =
-    params.codeOverride ?? String(randomInt(100000, 1000000));
-  const payload: PhoneChallengePayload = {
-    u: params.userId,
-    p: params.phoneNumber,
-    c: code,
-    exp: expiresAtMs,
-  };
-  const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString(
-    "base64url",
-  );
-  const sig = createHmac("sha256", getInviteSigningSecret(params.secret))
-    .update(encoded)
-    .digest("base64url");
-
-  return {
-    code,
-    challengeToken: `${encoded}.${sig}`,
-    expiresAt: new Date(expiresAtMs).toISOString(),
-  };
-}
-
-export function verifyPhoneVerificationChallenge(params: {
-  userId: string;
-  phoneNumber: string;
-  code: string;
-  challengeToken: string;
-  nowMs?: number;
-  secret?: string;
-}): { ok: true } | { ok: false; message: string } {
-  const parts = params.challengeToken.trim().split(".");
-  if (parts.length !== 2 || !parts[0] || !parts[1]) {
-    return { ok: false, message: "Invalid verification challenge token." };
-  }
-  const [encoded, providedSig] = parts;
-  const expectedSig = createHmac(
-    "sha256",
-    getInviteSigningSecret(params.secret),
-  )
-    .update(encoded)
-    .digest("base64url");
-
-  const sigA = Buffer.from(providedSig, "utf8");
-  const sigB = Buffer.from(expectedSig, "utf8");
-  if (sigA.length !== sigB.length || !timingSafeEqual(sigA, sigB)) {
-    return { ok: false, message: "Verification signature check failed." };
-  }
-
-  let parsed: PhoneChallengePayload;
-  try {
-    parsed = JSON.parse(
-      Buffer.from(encoded, "base64url").toString("utf8"),
-    ) as PhoneChallengePayload;
-  } catch {
-    return { ok: false, message: "Malformed verification challenge." };
-  }
-
-  const nowMs = params.nowMs ?? Date.now();
-  if (typeof parsed.exp !== "number" || nowMs > parsed.exp) {
-    return {
-      ok: false,
-      message: "Verification code expired. Request a new code.",
-    };
-  }
-  if (parsed.u !== params.userId || parsed.p !== params.phoneNumber) {
-    return {
-      ok: false,
-      message: "Phone number does not match the verification challenge.",
-    };
-  }
-  if (parsed.c !== params.code.trim()) {
-    return {
-      ok: false,
-      message: "Incorrect 6-digit verification code.",
-    };
-  }
-
-  return { ok: true };
 }
 
 export async function buildFullLedgerExport(
   supabase: SupabaseClient<Database>,
   userId: string,
-): Promise<{
-  ok: true;
-  csv: string;
-  json: string;
-} | { ok: false; message: string }> {
+): Promise<
+  {
+    ok: true;
+    csv: string;
+    json: string;
+  } | { ok: false; message: string }
+> {
   const { data: membershipRows, error: memErr } = await supabase
     .from("group_members")
     .select("group_id")
@@ -1194,7 +809,9 @@ export async function buildFullLedgerExport(
 
   const { data: groups, error: groupErr } = await supabase
     .from("groups")
-    .select("id, name, slug, group_type, status, base_currency, billing_cycle_anchor_day")
+    .select(
+      "id, name, slug, group_type, status, base_currency, billing_cycle_anchor_day",
+    )
     .in("id", memberGroupIds)
     .order("created_at", { ascending: true });
 
@@ -1306,7 +923,11 @@ export async function buildFullLedgerExport(
 
   const ledgerRecords: ExpenseLedgerRecord[] = (expenseRows ?? []).map((row) => {
     const group = groupMap.get(row.group_id);
-    const baseCurrency = (group?.base_currency || row.currency || "USD").toUpperCase();
+    const baseCurrency = (
+      group?.base_currency ||
+      row.currency ||
+      "USD"
+    ).toUpperCase();
     const breakdown: SplitBreakdownItem[] = Array.isArray(row.split_breakdown)
       ? (row.split_breakdown as unknown as SplitBreakdownItem[])
       : [];
@@ -1355,25 +976,29 @@ export async function buildFullLedgerExport(
     };
   });
 
-  const csvSettlements: FullLedgerCsvSettlementItem[] = (settlementRows ?? []).map(
-    (s) => {
-      const group = groupMap.get(s.group_id);
-      const baseCurrency = (group?.base_currency || s.currency || "USD").toUpperCase();
-      return {
-        id: s.id,
-        groupId: s.group_id,
-        groupName: group?.name ?? "Split Group",
-        groupBaseCurrency: baseCurrency,
-        payerId: s.payer_id,
-        payerName: usersById.get(s.payer_id) ?? "Member",
-        recipientId: s.recipient_id,
-        recipientName: usersById.get(s.recipient_id) ?? "Member",
-        amountCents: Math.trunc(Number(s.amount_cents)),
-        paymentRail: s.payment_rail,
-        settledAt: s.settled_at,
-      };
-    },
-  );
+  const csvSettlements: FullLedgerCsvSettlementItem[] = (
+    settlementRows ?? []
+  ).map((s) => {
+    const group = groupMap.get(s.group_id);
+    const baseCurrency = (
+      group?.base_currency ||
+      s.currency ||
+      "USD"
+    ).toUpperCase();
+    return {
+      id: s.id,
+      groupId: s.group_id,
+      groupName: group?.name ?? "Split Group",
+      groupBaseCurrency: baseCurrency,
+      payerId: s.payer_id,
+      payerName: usersById.get(s.payer_id) ?? "Member",
+      recipientId: s.recipient_id,
+      recipientName: usersById.get(s.recipient_id) ?? "Member",
+      amountCents: Math.trunc(Number(s.amount_cents)),
+      paymentRail: s.payment_rail,
+      settledAt: s.settled_at,
+    };
+  });
 
   const csv = buildFullLedgerCsv({
     expenses: ledgerRecords,
@@ -1385,7 +1010,11 @@ export async function buildFullLedgerExport(
   const jsonExpenses = (expenseRows ?? []).map((row) => {
     const ledger = ledgerById.get(row.id);
     const group = groupMap.get(row.group_id);
-    const baseCurrency = (group?.base_currency || row.currency || "USD").toUpperCase();
+    const baseCurrency = (
+      group?.base_currency ||
+      row.currency ||
+      "USD"
+    ).toUpperCase();
     const amountCents = Math.trunc(Number(row.amount_cents));
     const shareCents = ledger ? getUserShareCents(ledger, userId) : 0;
     const status = ledger?.isLocked
@@ -1393,8 +1022,6 @@ export async function buildFullLedgerExport(
       : ledger?.isSettledForUser
         ? "Settled"
         : "Pending";
-    const origMinor: number | null = null;
-    const origCurrency: string | null = null;
 
     return {
       ...row,
@@ -1409,26 +1036,17 @@ export async function buildFullLedgerExport(
       your_share_formatted: formatMinorUnits(shareCents, baseCurrency),
       your_share_decimal: formatMinorUnitsDecimal(shareCents, baseCurrency),
       status,
-      fx_audit:
-        origMinor !== null && origCurrency
-          ? {
-              original_amount_cents: origMinor,
-              original_amount_formatted: formatMinorUnits(origMinor, origCurrency),
-              original_amount_decimal: formatMinorUnitsDecimal(
-                origMinor,
-                origCurrency,
-              ),
-              original_currency: origCurrency,
-              exchange_rate: null,
-              exchange_rate_source: null,
-            }
-          : null,
+      fx_audit: null,
     };
   });
 
   const jsonSettlements = (settlementRows ?? []).map((s) => {
     const group = groupMap.get(s.group_id);
-    const baseCurrency = (group?.base_currency || s.currency || "USD").toUpperCase();
+    const baseCurrency = (
+      group?.base_currency ||
+      s.currency ||
+      "USD"
+    ).toUpperCase();
     const amountCents = Math.trunc(Number(s.amount_cents));
     return {
       ...s,

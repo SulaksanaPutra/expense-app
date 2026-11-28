@@ -5,6 +5,7 @@ import {
   type UserGroupBalanceSummary,
 } from "@/lib/groups/departure";
 import {
+  DEFAULT_TIMEZONE,
   DEFAULT_USER_PREFS,
   getSettingsPageData,
   type SettingsPageData,
@@ -37,16 +38,14 @@ export default async function SettingsPage() {
       email: user.email ?? "",
       avatarUrl: authUserSummary.avatarUrl,
       phoneNumber: null,
-      phoneVerified: false,
-      instantSettlementTag: null,
-      baseCurrency: "USD",
+      timezone: DEFAULT_TIMEZONE,
+      displayCurrency: "USD",
       personalShareCapCents: null,
-      receiptStorageUsedBytes: 0,
-      receiptStorageQuotaBytes: 524_288_000,
-      notificationPrefs: { ...DEFAULT_USER_PREFS, payment_methods: [] },
+      autoIncludeInExpenses: true,
+      notificationPrefs: { ...DEFAULT_USER_PREFS },
       createdAt: new Date().toISOString(),
     },
-    groups: [],
+    groupCount: 0,
     loadError: null,
   };
 
@@ -67,7 +66,7 @@ export default async function SettingsPage() {
   return (
     <SettingsClient
       initialProfile={settingsData.profile}
-      groups={settingsData.groups}
+      groupCount={settingsData.groupCount}
       balances={balances}
       loadError={settingsData.loadError}
     />

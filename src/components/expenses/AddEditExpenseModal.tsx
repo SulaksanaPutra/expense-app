@@ -168,7 +168,14 @@ function buildInitialGroupState(
       ? currentUser.id
       : (memberIds[0] ?? "");
 
-  const equalMap = computeEqualSharePercentages(memberIds);
+  const includedMemberIds =
+    currentUser &&
+    currentUser.autoIncludeInExpenses === false &&
+    memberIds.length > 1
+      ? memberIds.filter((id) => id !== currentUser.id)
+      : memberIds;
+
+  const equalMap = computeEqualSharePercentages(includedMemberIds);
   const hasCustomRatios =
     group.defaultSplitMode === "CUSTOM_RATIOS" &&
     group.status !== "NEEDS_RATIO_UPDATE" &&
@@ -189,7 +196,7 @@ function buildInitialGroupState(
     currency: group.baseCurrency,
     paidBy: defaultPayer,
     splitMethod: resolvedSplitMethod,
-    includedMemberIds: memberIds,
+    includedMemberIds,
     percentageInputs: Object.fromEntries(
       members.map((m) => [
         m.id,
