@@ -122,6 +122,7 @@ interface InMemoryDb {
   billing_cycles: InMemoryBillingCycleRow[];
   settlements: InMemorySettlementRow[];
   recurring_rules: Array<Record<string, unknown>>;
+  settlement_handles?: Array<Record<string, unknown>>;
   group_audit_logs: Array<Record<string, unknown>>;
 }
 
@@ -131,7 +132,7 @@ function createInMemorySupabase(db: InMemoryDb) {
     | { op: "is"; col: string; val: null }
     | { op: "or"; expr: string };
 
-  function applyFilters<T extends object>(rows: T[], filters: Filter[]): T[] {
+  function applyFilters<T extends object>(rows: T[] = [], filters: Filter[]): T[] {
     return rows.filter((row) =>
       filters.every((f) => {
         const rec = row as Record<string, unknown>;

@@ -34,7 +34,6 @@ vi.mock("next/link", () => ({
 
 import {
   AppShell,
-  LiveSyncPill,
   SIDEBAR_COLLAPSED_STORAGE_KEY,
   buildShellHref,
   formatCycleLabel,
@@ -43,7 +42,11 @@ import {
   parseGroupParam,
   stepCycleSlug,
 } from "@/components/shell";
-import type { ShellGroupSummary, ShellUserSummary } from "@/components/shell";
+import type {
+  ShellGroupSummary,
+  ShellNotificationItem,
+  ShellUserSummary,
+} from "@/components/shell";
 
 const TEST_GROUPS: ShellGroupSummary[] = [
   {
@@ -87,24 +90,38 @@ const TEST_GROUPS: ShellGroupSummary[] = [
 
 const TEST_USER: ShellUserSummary = {
   id: "usr-1",
-  fullName: "Jordan Davis",
-  email: "jordan@example.com",
+  fullName: "Jordan Doe",
+  email: "jordan.doe@ledgersplit.app",
+  displayCurrency: "USD",
 };
+
+const TEST_NOTIFICATIONS: ShellNotificationItem[] = [
+  {
+    id: "notif-1",
+    type: "NEW_EXPENSE",
+    title: 'Marcus Kim added "ConEdison Electric"',
+    description: "$140.00 · Apartment 4B Shared",
+    timestamp: "2h ago",
+    unread: true,
+    href: "/expenses?group=grp-apt-4b",
+  },
+  {
+    id: "notif-2",
+    type: "SETTLEMENT_CONFIRMATION",
+    title: "Alex Lee marked $120.00 as settled",
+    description: "Apartment 4B Shared",
+    timestamp: "Nov 19",
+    unread: false,
+    href: "/dashboard?group=grp-apt-4b",
+  },
+];
 
 function renderShell(overrides?: Partial<React.ComponentProps<typeof AppShell>>) {
   return render(
     <AppShell
       groups={TEST_GROUPS}
       user={TEST_USER}
-      initialNotifications={[
-        {
-          id: "notif-1",
-          title: "New Expense Logged",
-          description: "Alex added Trader Joe's ($46.05 your share)",
-          timestamp: "2h ago",
-          unread: true,
-        },
-      ]}
+      initialNotifications={TEST_NOTIFICATIONS}
       {...overrides}
     >
       <div>Page Body Content</div>
@@ -154,10 +171,14 @@ describe("URL State Helpers", () => {
   });
 });
 
-describe("AppShell", () => {
-  it("highlights the active route in #0066cc pill and shows live non-archived group count", () => {
+describe("AppShell v2", () => {
+  it("renders Sidebar without SHARED pill or LiveSyncPill, highlights active route, and shows live non-archived group count", () => {
     mockPathname = "/expenses";
     renderShell();
+
+    const sidebar = screen.getByTestId("desktop-sidebar");
+    expect(within(sidebar).queryByText("SHARED")).not.toBeInTheDocument();
+    expect(screen.queryByText("Live Sync")).not.toBeInTheDocument();
 
     const nav = screen.getByRole("navigation", { name: "Primary" });
     const expensesLink = within(nav).getByRole("link", { name: /Expenses/i });
@@ -165,13 +186,22 @@ describe("AppShell", () => {
     const splitGroupsLink = within(nav).getByRole("link", {
       name: /Split Groups/i,
     });
+    const settingsLink = within(nav).getByRole("link", { name: /Settings/i });
 
     expect(expensesLink).toHaveAttribute("aria-current", "page");
-    expect(expensesLink).toHaveClass("bg-[#0066cc]", "text-white", "rounded-pill");
+    expect(expensesLink).toHaveClass(
+      "bg-primary-container",
+      "text-on-primary",
+      "rounded-full",
+    );
     expect(dashboardLink).not.toHaveAttribute("aria-current");
-    expect(dashboardLink).not.toHaveClass("bg-[#0066cc]");
+    expect(settingsLink).toBeInTheDocument();
     // 2 non-archived groups (ARCHIVED excluded)
     expect(within(splitGroupsLink).getByText("2")).toBeInTheDocument();
+
+    // ACTIVE GROUP card shows label and live split count pill
+    expect(within(sidebar).getByText("ACTIVE GROUP")).toBeInTheDocument();
+    expect(within(sidebar).getByText("6 splits")).toBeInTheDocument();
   });
 
   it("toggles desktop sidebar collapse state and persists it to localStorage", async () => {
@@ -254,7 +284,7 @@ describe("AppShell", () => {
       screen.queryByRole("dialog", { name: "Mobile navigation" }),
     ).not.toBeInTheDocument();
 
-    // Reopen and close via backdrop click (clicking <dialog> element directly)
+    // Reopen and close via backdrop click
     await user.click(hamburger);
     const backdropDrawer = screen.getByRole("dialog", {
       name: "Mobile navigation",
@@ -283,7 +313,7 @@ describe("AppShell", () => {
       { scroll: false },
     );
 
-    // Verify both prev and next billing cycle buttons render visibly without hidden wrappers
+    // Verify both prev and next billing cycle buttons render visibly
     const cyclePickerGroup = screen.getByRole("group", {
       name: "Billing cycle picker",
     });
@@ -293,14 +323,9 @@ describe("AppShell", () => {
     const nextCycleBtn = within(cyclePickerGroup).getByRole("button", {
       name: "Next billing cycle",
     });
-    expect(prevCycleBtn.parentElement).toBe(cyclePickerGroup);
-    expect(nextCycleBtn.parentElement).toBe(cyclePickerGroup);
-    expect(prevCycleBtn).toHaveClass("!px-0");
-    expect(nextCycleBtn).toHaveClass("!px-0");
 
     // Step Cycle Picker backward (2024-10 -> 2024-09)
     await user.click(prevCycleBtn);
-
     expect(replaceMock).toHaveBeenLastCalledWith(
       "/dashboard?cycle=2024-09&q=groceries&group=grp-apt-4b",
       { scroll: false },
@@ -308,7 +333,6 @@ describe("AppShell", () => {
 
     // Step Cycle Picker forward (2024-09 -> 2024-10)
     await user.click(nextCycleBtn);
-
     expect(replaceMock).toHaveBeenLastCalledWith(
       "/dashboard?cycle=2024-10&q=groceries&group=grp-apt-4b",
       { scroll: false },
@@ -346,15 +370,67 @@ describe("AppShell", () => {
       "/dashboard?cycle=2024-10&q=groceries&group=grp-apt-4b",
       { scroll: false },
     );
-    expect(within(nav).getByRole("link", { name: /Expenses/i })).toHaveAttribute(
-      "href",
-      "/expenses?group=grp-apt-4b&cycle=2024-10",
-    );
   });
 
-  it("opens User Profile menu, navigates to Settings, and submits POST /auth/signout on Sign Out", async () => {
+  it("supports Notifications popover All | Unread filtering and Mark all read", async () => {
     const user = userEvent.setup();
     renderShell();
+
+    const bellBtn = screen.getByRole("button", {
+      name: "Notifications (1 unread)",
+    });
+    expect(screen.getByTestId("notification-unread-dot")).toBeInTheDocument();
+
+    await user.click(bellBtn);
+    const popover = screen.getByRole("region", { name: "Notifications" });
+
+    // Both read and unread items visible under "All"
+    expect(within(popover).getByText("1 unread")).toBeInTheDocument();
+    expect(
+      within(popover).getByText(/Marcus Kim added "ConEdison Electric"/i),
+    ).toBeInTheDocument();
+    expect(
+      within(popover).getByText(/Alex Lee marked \$120\.00 as settled/i),
+    ).toBeInTheDocument();
+
+    // Filter to "Unread (1)" -> only unread item visible
+    const unreadTab = within(popover).getByRole("tab", {
+      name: "Unread (1)",
+    });
+    await user.click(unreadTab);
+    expect(
+      within(popover).getByText(/Marcus Kim added "ConEdison Electric"/i),
+    ).toBeInTheDocument();
+    expect(
+      within(popover).queryByText(/Alex Lee marked \$120\.00 as settled/i),
+    ).not.toBeInTheDocument();
+
+    // Mark all read clears unread count, removes dot, and shows empty unread state
+    await user.click(
+      within(popover).getByRole("button", { name: "Mark all read" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Notifications" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("notification-unread-dot"),
+    ).not.toBeInTheDocument();
+    expect(
+      within(popover).getByText("No unread notifications."),
+    ).toBeInTheDocument();
+  });
+
+  it("opens User Account menu with user info, Default Currency, navigation links, shortcuts, export, and Sign Out", async () => {
+    const user = userEvent.setup();
+    renderShell({
+      user: {
+        id: "usr-1",
+        fullName: "Jordan Doe",
+        email: "jordan.doe@ledgersplit.app",
+        displayCurrency: "EUR",
+      },
+      initialCycle: "2026-11",
+    });
 
     const signOutForm = document.querySelector(
       'form[action="/auth/signout"][method="POST"]',
@@ -371,52 +447,57 @@ describe("AppShell", () => {
     });
 
     await user.click(profileTrigger);
-    await user.click(screen.getByRole("menuitem", { name: "Settings" }));
-    expect(pushMock).toHaveBeenCalledWith("/settings");
+    const menu = screen.getByRole("menu", { name: "User account menu" });
 
+    expect(within(menu).getByText("Jordan Doe")).toBeInTheDocument();
+    expect(
+      within(menu).getByText("jordan.doe@ledgersplit.app"),
+    ).toBeInTheDocument();
+    expect(within(menu).getByText("Default Currency")).toBeInTheDocument();
+    expect(within(menu).getByText("EUR (€)")).toBeInTheDocument();
+
+    // Account & Profile navigates to /settings
+    await user.click(
+      within(menu).getByRole("menuitem", { name: /Account & Profile/i }),
+    );
+    expect(pushMock).toHaveBeenCalledWith("/settings?cycle=2026-11");
+
+    // Reopen and click Settings
     await user.click(profileTrigger);
-    await user.click(screen.getByRole("menuitem", { name: "Sign Out" }));
+    const menu2 = screen.getByRole("menu", { name: "User account menu" });
+    await user.click(within(menu2).getByRole("menuitem", { name: "Settings" }));
+    expect(pushMock).toHaveBeenLastCalledWith("/settings?cycle=2026-11");
+
+    // Reopen and click Keyboard Shortcuts (⌘K) -> opens Quick Search dialog
+    await user.click(profileTrigger);
+    const menu3 = screen.getByRole("menu", { name: "User account menu" });
+    await user.click(
+      within(menu3).getByRole("menuitem", { name: /Keyboard Shortcuts/i }),
+    );
+    expect(
+      screen.getByRole("dialog", { name: "Quick Search" }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Close dialog" }));
+
+    // Reopen and click Export Monthly Ledger
+    await user.click(profileTrigger);
+    const menu4 = screen.getByRole("menu", { name: "User account menu" });
+    await user.click(
+      within(menu4).getByRole("menuitem", { name: /Export Monthly Ledger/i }),
+    );
+    expect(screen.getByText("Export started")).toBeInTheDocument();
+
+    // Reopen and click Sign Out
+    await user.click(profileTrigger);
+    const menu5 = screen.getByRole("menu", { name: "User account menu" });
+    await user.click(within(menu5).getByRole("menuitem", { name: "Sign Out" }));
     expect(submitSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("supports Global Search Cmd+K trigger, Notification Bell mark-all-read, Add Expense CTA, and Page Header LiveSyncPill (not in TopBar)", async () => {
+  it("supports Global Search Cmd+K trigger and Add Expense CTA", async () => {
     const user = userEvent.setup();
     const onAddExpense = vi.fn();
-    render(
-      <AppShell
-        groups={TEST_GROUPS}
-        user={TEST_USER}
-        onAddExpense={onAddExpense}
-        initialNotifications={[
-          {
-            id: "notif-1",
-            title: "New Expense Logged",
-            description: "Alex added Trader Joe's ($46.05 your share)",
-            timestamp: "2h ago",
-            unread: true,
-          },
-        ]}
-      >
-        <LiveSyncPill />
-      </AppShell>,
-    );
-
-    // Live Sync pill lives in page header content, NOT inside <header> TopBar
-    const topBar = document.querySelector("header");
-    expect(topBar).not.toBeNull();
-    expect(within(topBar as HTMLElement).queryByText("Live Sync")).not.toBeInTheDocument();
-    expect(screen.getByText("Live Sync")).toBeInTheDocument();
-
-    // Notification bell
-    const notifBtn = screen.getByRole("button", {
-      name: "Notifications (1 unread)",
-    });
-    await user.click(notifBtn);
-    expect(screen.getByText("New Expense Logged")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Mark all read" }));
-    expect(
-      screen.getByRole("button", { name: "Notifications" }),
-    ).toBeInTheDocument();
+    renderShell({ onAddExpense });
 
     // Add Expense CTA
     await user.click(screen.getByRole("button", { name: "Add Expense" }));

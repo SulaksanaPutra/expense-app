@@ -93,12 +93,7 @@ vi.mock("@/lib/supabase/client", () => ({
   }),
 }));
 
-import {
-  AppShell,
-  LiveSyncPill,
-  REALTIME_LEDGER_CHANGE_EVENT,
-  mapRealtimeStatusToLiveSync,
-} from "@/components/shell";
+import { AppShell, REALTIME_LEDGER_CHANGE_EVENT } from "@/components/shell";
 import type {
   RealtimeLedgerChangeDetail,
   ShellGroupSummary,
@@ -142,7 +137,7 @@ function emitRealtimeTableEvent(
   }
 }
 
-describe("Issue #88 — Supabase Realtime Live Sync pill & Notification Bell", () => {
+describe("Supabase Realtime Notifications & Ledger Refresh", () => {
   const origUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const origKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
@@ -167,97 +162,6 @@ describe("Issue #88 — Supabase Realtime Live Sync pill & Notification Bell", (
     if (origKey === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     else process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = origKey;
   });
-
-  it("maps Realtime channel statuses and browser online state to LiveSyncStatus", () => {
-    expect(mapRealtimeStatusToLiveSync("SUBSCRIBED", true)).toBe("subscribed");
-    expect(mapRealtimeStatusToLiveSync("SUBSCRIBING", true)).toBe("syncing");
-    expect(mapRealtimeStatusToLiveSync("TIMED_OUT", true)).toBe("syncing");
-    expect(mapRealtimeStatusToLiveSync("CHANNEL_ERROR", true)).toBe("syncing");
-    expect(mapRealtimeStatusToLiveSync("CLOSED", true)).toBe("offline");
-    expect(mapRealtimeStatusToLiveSync("SUBSCRIBED", false)).toBe("offline");
-  });
-
-  it(
-    "transitions LiveSyncPill through Syncing... -> Live Sync -> Syncing... -> Offline -> Live Sync",
-    { timeout: 15000 },
-    async () => {
-      vi.spyOn(globalThis, "fetch").mockResolvedValue(
-        new Response(JSON.stringify({ ok: true, notifications: [] }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
-      );
-
-      render(
-        <AppShell groups={GROUPS} user={USER}>
-          <LiveSyncPill />
-        </AppShell>,
-      );
-
-      // Initially syncing while waiting for Realtime SUBSCRIBED callback
-      await waitFor(() => {
-        expect(subscribeStatusCallback).not.toBeNull();
-      });
-      const pill = screen.getByText("Syncing...").closest("span");
-      expect(pill).toHaveAttribute("data-sync-status", "syncing");
-      expect(setAuthMock).toHaveBeenCalledWith("test-jwt-token");
-
-      // Channel emits SUBSCRIBED -> Live Sync
-      act(() => {
-        subscribeStatusCallback?.("SUBSCRIBED");
-      });
-      expect(screen.getByText("Live Sync").closest("span")).toHaveAttribute(
-        "data-sync-status",
-        "subscribed",
-      );
-
-      // Transient error/timeout -> Syncing...
-      act(() => {
-        subscribeStatusCallback?.("CHANNEL_ERROR");
-      });
-      expect(screen.getByText("Syncing...").closest("span")).toHaveAttribute(
-        "data-sync-status",
-        "syncing",
-      );
-
-      // Browser goes offline -> Offline
-      act(() => {
-        Object.defineProperty(window.navigator, "onLine", {
-          configurable: true,
-          value: false,
-        });
-        window.dispatchEvent(new Event("offline"));
-      });
-      expect(screen.getByText("Offline").closest("span")).toHaveAttribute(
-        "data-sync-status",
-        "offline",
-      );
-
-      // Browser comes back online -> Syncing... then SUBSCRIBED -> Live Sync + catch-up
-      act(() => {
-        Object.defineProperty(window.navigator, "onLine", {
-          configurable: true,
-          value: true,
-        });
-        window.dispatchEvent(new Event("online"));
-      });
-      expect(screen.getByText("Syncing...").closest("span")).toHaveAttribute(
-        "data-sync-status",
-        "syncing",
-      );
-
-      await waitFor(() => {
-        expect(subscribeStatusCallback).not.toBeNull();
-      });
-      act(() => {
-        subscribeStatusCallback?.("SUBSCRIBED");
-      });
-      expect(screen.getByText("Live Sync").closest("span")).toHaveAttribute(
-        "data-sync-status",
-        "subscribed",
-      );
-    },
-  );
 
   it(
     "streams live notifications into TopBar Notification Bell with unread dot, single-item click, and Mark all read",
@@ -290,7 +194,7 @@ describe("Issue #88 — Supabase Realtime Live Sync pill & Notification Bell", (
           user={USER}
           initialNotifications={initialNotifications}
         >
-          <LiveSyncPill />
+          <div>Dashboard body</div>
         </AppShell>,
       );
 
@@ -300,6 +204,8 @@ describe("Issue #88 — Supabase Realtime Live Sync pill & Notification Bell", (
       act(() => {
         subscribeStatusCallback?.("SUBSCRIBED");
       });
+
+      expect(setAuthMock).toHaveBeenCalledWith("test-jwt-token");
 
       // Initially 1 unread with red indicator dot
       expect(
@@ -393,7 +299,7 @@ describe("Issue #88 — Supabase Realtime Live Sync pill & Notification Bell", (
   it("triggers live ledger refresh and custom event when expenses, expense_revisions, or settlements arrive over Realtime", async () => {
     render(
       <AppShell groups={GROUPS} user={USER}>
-        <LiveSyncPill />
+        <div>Dashboard body</div>
       </AppShell>,
     );
 

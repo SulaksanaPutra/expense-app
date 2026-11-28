@@ -577,6 +577,27 @@ function parseAlterTable(stmt, tables) {
   }
 }
 
+
+function parseDropTable(stmt, tables) {
+  const match = stmt.match(
+    /^DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?([\s\S]+?)(?:\s+(?:CASCADE|RESTRICT))?$/i,
+  );
+  if (!match) return;
+
+  const targets = splitTopLevelCommas(match[1]);
+  for (const rawTarget of targets) {
+    const cleaned = rawTarget.replace(/\s+(?:CASCADE|RESTRICT)$/i, "").trim();
+    if (!cleaned) continue;
+    const { schema, name } = parseQualifiedName(cleaned);
+    tables.delete(`${schema}.${name}`);
+    for (const table of tables.values()) {
+      table.relations = table.relations.filter(
+        (r) => !(r.toSchema === schema && r.toTable === name),
+      );
+    }
+  }
+}
+
 function main() {
   if (!fs.existsSync(MIGRATIONS_DIR)) {
     throw new Error(`Migrations directory not found: ${MIGRATIONS_DIR}`);
@@ -599,6 +620,8 @@ function main() {
         parseCreateTable(stmt, tables);
       } else if (/^ALTER\s+TABLE\b/i.test(stmt)) {
         parseAlterTable(stmt, tables);
+      } else if (/^DROP\s+TABLE\b/i.test(stmt)) {
+        parseDropTable(stmt, tables);
       }
     }
   }

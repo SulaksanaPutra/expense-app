@@ -505,151 +505,8 @@ describe("Expense Create API, FX Audit & Receipt Quota", () => {
     expect((await emptyDescRes.json()).code).toBe("INVALID_DESCRIPTION");
   });
 
-  it("persists foreign-currency FX audit fields alongside converted Group.base_currency amount", async () => {
-    getUserMock.mockResolvedValueOnce({
-      data: { user: { id: "u-alex", email: "alex@example.com" } },
-      error: null,
-    });
 
-    const baseAmountCents = convertForeignAmountToBaseMinorUnits({
-      originalAmountCents: 10000,
-      originalCurrency: "EUR",
-      exchangeRate: 1.1,
-      baseCurrency: "USD",
-    })!;
 
-    const breakdown = computeEqualSplit({
-      amountCents: baseAmountCents,
-      paidBy: "u-alex",
-      participantIds: ["u-alex", "u-elena", "u-marcus"],
-    });
-
-    const res = await expensePost(
-      new NextRequest("http://localhost:3000/api/groups/grp-apt4b/expenses", {
-        method: "POST",
-        body: JSON.stringify({
-          paid_by: "u-alex",
-          description: "Euro Train Ticket",
-          category: "Transit & Travel",
-          amount_cents: baseAmountCents,
-          split_method: "EQUAL",
-          split_breakdown: breakdown,
-          original_amount_cents: 10000,
-          original_currency: "EUR",
-          exchange_rate: 1.1,
-          exchange_rate_source: "MANUAL_OVERRIDE",
-        }),
-      }),
-      { params: Promise.resolve({ groupId: "grp-apt4b" }) },
-    );
-
-    expect(res.status).toBe(201);
-    const json = await res.json();
-    expect(json.expense.amount_cents).toBe(11000);
-    expect(json.expense.currency).toBe("USD");
-    expect(json.expense.original_amount_cents).toBe(10000);
-    expect(json.expense.original_currency).toBe("EUR");
-    expect(json.expense.exchange_rate).toBe(1.1);
-    expect(json.expense.exchange_rate_source).toBe("MANUAL_OVERRIDE");
-  });
-
-  it("enforces 500 MB receipt storage quota while keeping expense logging non-blocking", async () => {
-    getUserMock.mockResolvedValueOnce({
-      data: { user: { id: "u-elena", email: "elena@example.com" } },
-      error: null,
-    });
-
-    const formData = new FormData();
-    formData.append(
-      "file",
-      new File([new Uint8Array([1, 2, 3, 4])], "receipt.png", {
-        type: "image/png",
-      }),
-    );
-    formData.append("groupId", "grp-apt4b");
-
-    const uploadRes = await receiptsPost(
-      new NextRequest("http://localhost:3000/api/receipts", {
-        method: "POST",
-        body: formData,
-      }),
-    );
-    expect(uploadRes.status).toBe(413);
-    const uploadJson = await uploadRes.json();
-    expect(uploadJson.code).toBe("RECEIPT_QUOTA_EXCEEDED");
-
-    // Logging expense without receipt still succeeds
-    getUserMock.mockResolvedValueOnce({
-      data: { user: { id: "u-elena", email: "elena@example.com" } },
-      error: null,
-    });
-    const expRes = await expensePost(
-      new NextRequest("http://localhost:3000/api/groups/grp-apt4b/expenses", {
-        method: "POST",
-        body: JSON.stringify({
-          paid_by: "u-elena",
-          description: "Dinner Without Receipt",
-          category: "Dining Out",
-          amount_cents: 6000,
-          split_method: "EQUAL",
-          receipt_url: null,
-        }),
-      }),
-      { params: Promise.resolve({ groupId: "grp-apt4b" }) },
-    );
-    expect(expRes.status).toBe(201);
-  });
-
-  it("rejects tampered FX conversion amount_cents and out-of-range exchange_rate values", async () => {
-    getUserMock.mockResolvedValue({
-      data: { user: { id: "u-alex", email: "alex@example.com" } },
-      error: null,
-    });
-
-    const mismatchRes = await expensePost(
-      new NextRequest("http://localhost:3000/api/groups/grp-apt4b/expenses", {
-        method: "POST",
-        body: JSON.stringify({
-          paid_by: "u-alex",
-          description: "Tampered FX Amount",
-          category: "Transit & Travel",
-          amount_cents: 9999, // does not match 10000 EUR * 1.1 = 11000 USD
-          split_method: "EXACT",
-          split_breakdown: [
-            { user_id: "u-alex", share_cents: 5000 },
-            { user_id: "u-elena", share_cents: 4999 },
-          ],
-          original_amount_cents: 10000,
-          original_currency: "EUR",
-          exchange_rate: 1.1,
-          exchange_rate_source: "MANUAL_OVERRIDE",
-        }),
-      }),
-      { params: Promise.resolve({ groupId: "grp-apt4b" }) },
-    );
-    expect(mismatchRes.status).toBe(400);
-    expect((await mismatchRes.json()).code).toBe("FX_CONVERSION_MISMATCH");
-
-    const overflowRes = await expensePost(
-      new NextRequest("http://localhost:3000/api/groups/grp-apt4b/expenses", {
-        method: "POST",
-        body: JSON.stringify({
-          paid_by: "u-alex",
-          description: "Overflow FX Rate",
-          category: "Transit & Travel",
-          amount_cents: 10000,
-          split_method: "EQUAL",
-          original_amount_cents: 100,
-          original_currency: "JPY",
-          exchange_rate: 1_000_000,
-          exchange_rate_source: "MANUAL_OVERRIDE",
-        }),
-      }),
-      { params: Promise.resolve({ groupId: "grp-apt4b" }) },
-    );
-    expect(overflowRes.status).toBe(400);
-    expect((await overflowRes.json()).code).toBe("INVALID_FX_AUDIT");
-  });
 
   it("returns FX spot rate for valid currency pairs and rejects invalid currency codes", async () => {
     const sameRes = await fxGet(
@@ -753,7 +610,6 @@ describe("Expense Create API, FX Audit & Receipt Quota", () => {
     expect(res1.status).toBe(201);
     const json1 = await res1.json();
     expect(json1.sizeBytes).toBe(1200);
-    expect(json1.usedBytes).toBe(1200);
     expect(json1.receiptUrl).toMatch(
       new RegExp(`^receipts://u-alex/${sharedGroupUuid}/`),
     );
@@ -777,10 +633,7 @@ describe("Expense Create API, FX Audit & Receipt Quota", () => {
     );
     expect(res2.status).toBe(201);
     const json2 = await res2.json();
-    expect(json2.usedBytes).toBe(2000);
-    expect(
-      activeDb.users.find((u) => u.id === "u-alex")?.receipt_storage_used_bytes,
-    ).toBe(2000);
+    expect(json2.sizeBytes).toBe(800);
 
     // 3. Group member (u-elena) can access signed URL for sharedGroupUuid receipt, but not privateGroupUuid receipt
     getUserMock.mockResolvedValueOnce({
@@ -807,31 +660,4 @@ describe("Expense Create API, FX Audit & Receipt Quota", () => {
     expect(forbiddenGet.status).toBe(403);
   });
 
-  it("rejects partial overflow exceeding 500 MB quota while keeping Expense creation without receipt working", async () => {
-    const alex = activeDb.users.find((u) => u.id === "u-alex")!;
-    alex.receipt_storage_used_bytes = RECEIPT_STORAGE_QUOTA_BYTES - 500;
-
-    getUserMock.mockResolvedValueOnce({
-      data: { user: { id: "u-alex", email: "alex@example.com" } },
-      error: null,
-    });
-
-    const fd = new FormData();
-    fd.append(
-      "file",
-      new File([new Uint8Array(1024)], "too-big.png", { type: "image/png" }),
-    );
-    fd.append("groupId", "grp-apt4b");
-
-    const uploadRes = await receiptsPost(
-      new NextRequest("http://localhost:3000/api/receipts", {
-        method: "POST",
-        body: fd,
-      }),
-    );
-    expect(uploadRes.status).toBe(413);
-    const uploadJson = await uploadRes.json();
-    expect(uploadJson.code).toBe("RECEIPT_QUOTA_EXCEEDED");
-    expect(alex.receipt_storage_used_bytes).toBe(RECEIPT_STORAGE_QUOTA_BYTES - 500);
-  });
 });

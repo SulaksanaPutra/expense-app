@@ -25,8 +25,8 @@ const TONE_STYLES: Record<
   { container: string; iconColor: string; Icon: React.ComponentType<{ className?: string }> }
 > = {
   info: {
-    container: "bg-[#0066cc]/8 border-[#0066cc]/25 text-ink",
-    iconColor: "text-[#0066cc]",
+    container: "bg-primary/8 border-primary/25 text-on-surface",
+    iconColor: "text-primary",
     Icon: Info,
   },
   success: {
@@ -41,7 +41,7 @@ const TONE_STYLES: Record<
   },
   error: {
     container: "bg-red-50 border-red-200 text-red-950",
-    iconColor: "text-red-600",
+    iconColor: "text-danger",
     Icon: AlertCircle,
   },
 };

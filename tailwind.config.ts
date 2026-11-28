@@ -18,7 +18,7 @@ const config: Config = {
       },
       borderRadius: {
         ...DESIGN_TOKENS.rounded,
-        card: DESIGN_TOKENS.rounded.lg,
+        card: DESIGN_TOKENS.rounded.card,
       },
       spacing: Object.fromEntries(
         Object.entries(DESIGN_TOKENS.spacing).map(([key, value]) => [

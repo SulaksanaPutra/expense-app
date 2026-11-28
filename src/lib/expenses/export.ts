@@ -306,22 +306,15 @@ export async function buildScopedLedgerExport(
         expenseDate: row.expense_date,
         amountCents: Math.trunc(Number(row.amount_cents)),
         currency: baseCurrency,
-        originalAmountCents:
-          row.original_amount_cents !== null &&
-          row.original_amount_cents !== undefined
-            ? Math.trunc(Number(row.original_amount_cents))
-            : null,
-        originalCurrency: row.original_currency ?? null,
-        exchangeRate:
-          row.exchange_rate !== null && row.exchange_rate !== undefined
-            ? Number(row.exchange_rate)
-            : null,
-        exchangeRateSource: row.exchange_rate_source ?? null,
+        originalAmountCents: null,
+        originalCurrency: null,
+        exchangeRate: null,
+        exchangeRateSource: null,
         splitMethod: row.split_method,
         splitBreakdown: breakdown,
         receiptUrl: row.receipt_url ?? null,
-        isRecurringGenerated: Boolean(row.is_recurring_generated),
-        recurringRuleId: row.recurring_rule_id ?? null,
+        isRecurringGenerated: false,
+        recurringRuleId: null,
         adjustmentForExpenseId: row.adjustment_for_expense_id ?? null,
         isLocked: lockEval.isLocked,
         isCycleClosed: lockEval.isCycleClosed,
@@ -351,7 +344,7 @@ export async function buildScopedLedgerExport(
       ? exp.originalCurrency.toUpperCase()
       : null;
     const fxAudit =
-      exp.originalAmountCents !== null && origCurrency
+      exp.originalAmountCents !== null && exp.originalAmountCents !== undefined && origCurrency
         ? {
             original_amount_cents: exp.originalAmountCents,
             original_amount_formatted: formatMinorUnits(
@@ -393,10 +386,10 @@ export async function buildScopedLedgerExport(
       ),
       split_method: exp.splitMethod,
       split_breakdown: exp.splitBreakdown,
-      original_amount_cents: exp.originalAmountCents,
+      original_amount_cents: exp.originalAmountCents ?? null,
       original_currency: origCurrency,
-      exchange_rate: exp.exchangeRate,
-      exchange_rate_source: exp.exchangeRateSource,
+      exchange_rate: exp.exchangeRate ?? null,
+      exchange_rate_source: exp.exchangeRateSource ?? null,
       fx_audit: fxAudit,
       receipt_url: exp.receiptUrl,
       adjustment_for_expense_id: exp.adjustmentForExpenseId,

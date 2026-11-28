@@ -4,6 +4,7 @@ import * as React from "react";
 import { cn } from "@/lib/cn";
 
 export type SegmentedControlVariant = "pill-tabs" | "split-method";
+export type SegmentedControlRole = "tablist" | "radiogroup";
 
 export interface SegmentedOption<T extends string = string> {
   value: T;
@@ -18,6 +19,7 @@ export interface SegmentedControlProps<T extends string = string> {
   value: T;
   onChange: (value: T) => void;
   variant?: SegmentedControlVariant;
+  role?: SegmentedControlRole;
   ariaLabel?: string;
   fullWidth?: boolean;
   idPrefix?: string;
@@ -29,6 +31,7 @@ export function SegmentedControl<T extends string = string>({
   value,
   onChange,
   variant = "split-method",
+  role = "tablist",
   ariaLabel = "Options",
   fullWidth = false,
   idPrefix,
@@ -36,12 +39,13 @@ export function SegmentedControl<T extends string = string>({
 }: SegmentedControlProps<T>) {
   const generatedPrefix = React.useId();
   const prefix = idPrefix ?? generatedPrefix;
-  const tabRefs = React.useRef<Array<HTMLButtonElement | null>>([]);
+  const itemRefs = React.useRef<Array<HTMLButtonElement | null>>([]);
+  const isRadioGroup = role === "radiogroup";
 
   const selectAndFocus = (index: number) => {
     const option = options[index];
     if (!option || option.disabled) return;
-    tabRefs.current[index]?.focus();
+    itemRefs.current[index]?.focus();
     onChange(option.value);
   };
 
@@ -60,10 +64,10 @@ export function SegmentedControl<T extends string = string>({
   ) => {
     if (options.length === 0) return;
 
-    if (e.key === "ArrowRight") {
+    if (e.key === "ArrowRight" || (isRadioGroup && e.key === "ArrowDown")) {
       e.preventDefault();
       selectAndFocus(findNextEnabledIndex(index, 1));
-    } else if (e.key === "ArrowLeft") {
+    } else if (e.key === "ArrowLeft" || (isRadioGroup && e.key === "ArrowUp")) {
       e.preventDefault();
       selectAndFocus(findNextEnabledIndex(index, -1));
     } else if (e.key === "Home") {
@@ -84,11 +88,11 @@ export function SegmentedControl<T extends string = string>({
   const containerStyle =
     variant === "pill-tabs"
       ? "bg-canvas border border-hairline p-1 rounded-pill"
-      : "bg-canvas-parchment border border-hairline/60 p-1 rounded-pill";
+      : "bg-surface-container-low border border-hairline/70 p-1 rounded-pill";
 
   return (
     <div
-      role="tablist"
+      role={role}
       aria-label={ariaLabel}
       className={cn(
         "inline-flex max-w-full flex-nowrap items-center gap-1",
@@ -104,20 +108,21 @@ export function SegmentedControl<T extends string = string>({
         const activeTabStyle =
           variant === "pill-tabs"
             ? "bg-primary text-on-primary"
-            : "bg-canvas text-ink border border-hairline/70";
+            : "bg-canvas text-on-surface border border-hairline/70 shadow-2xs";
         const inactiveTabStyle =
-          "bg-transparent text-ink-muted-80 hover:text-ink border border-transparent";
+          "bg-transparent text-on-surface-variant hover:text-on-surface border border-transparent";
 
         return (
           <button
             key={option.value}
             ref={(el) => {
-              tabRefs.current[idx] = el;
+              itemRefs.current[idx] = el;
             }}
             id={tabId}
             type="button"
-            role="tab"
-            aria-selected={isSelected}
+            role={isRadioGroup ? "radio" : "tab"}
+            aria-selected={!isRadioGroup ? isSelected : undefined}
+            aria-checked={isRadioGroup ? isSelected : undefined}
             tabIndex={isSelected ? 0 : -1}
             disabled={option.disabled}
             onClick={() => {
@@ -125,7 +130,7 @@ export function SegmentedControl<T extends string = string>({
             }}
             onKeyDown={(e) => handleKeyDown(e, idx)}
             className={cn(
-              "inline-flex items-center justify-center gap-1.5 rounded-pill py-2 font-medium whitespace-nowrap transition-colors",
+              "inline-flex items-center justify-center gap-1.5 rounded-pill py-2 font-medium whitespace-nowrap tabular-nums transition-colors",
               fullWidth
                 ? "min-w-0 flex-1 px-2 text-[11.5px] sm:px-4 sm:text-[13px]"
                 : "shrink-0 px-4 text-[13px]",

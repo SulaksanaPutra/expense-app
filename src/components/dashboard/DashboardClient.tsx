@@ -56,7 +56,6 @@ import {
   getSettlementDebtKey,
 } from "@/components/expenses";
 import {
-  LiveSyncPill,
   REALTIME_LEDGER_CHANGE_EVENT,
   useActiveGroup,
 } from "@/components/shell";
@@ -482,17 +481,17 @@ export function DashboardClient({
         expenseDate: created.expense_date,
         amountCents: Number(created.amount_cents),
         currency: created.currency,
-        originalAmountCents: created.original_amount_cents ?? null,
-        originalCurrency: created.original_currency ?? null,
-        exchangeRate: created.exchange_rate ?? null,
-        exchangeRateSource: created.exchange_rate_source ?? null,
+        originalAmountCents: null,
+        originalCurrency: null,
+        exchangeRate: null,
+        exchangeRateSource: null,
         splitMethod: created.split_method,
         splitBreakdown: Array.isArray(created.split_breakdown)
           ? created.split_breakdown
           : [],
         receiptUrl: created.receipt_url ?? null,
-        isRecurringGenerated: Boolean(created.is_recurring_generated),
-        recurringRuleId: created.recurring_rule_id ?? null,
+        isRecurringGenerated: false,
+        recurringRuleId: null,
         adjustmentForExpenseId: created.adjustment_for_expense_id ?? null,
         isLocked: Boolean(created.is_locked),
         isCycleClosed: false,
@@ -1192,22 +1191,15 @@ export function DashboardClient({
         expenseDate: updated.expense_date,
         amountCents: Number(updated.amount_cents),
         currency: updated.currency,
-        originalAmountCents:
-          updated.original_amount_cents !== null &&
-          updated.original_amount_cents !== undefined
-            ? Number(updated.original_amount_cents)
-            : null,
-        originalCurrency: updated.original_currency ?? null,
-        exchangeRate:
-          updated.exchange_rate !== null && updated.exchange_rate !== undefined
-            ? Number(updated.exchange_rate)
-            : null,
-        exchangeRateSource: updated.exchange_rate_source ?? null,
+        originalAmountCents: null,
+        originalCurrency: null,
+        exchangeRate: null,
+        exchangeRateSource: null,
         splitMethod: updated.split_method,
         splitBreakdown: breakdown,
         receiptUrl: updated.receipt_url ?? null,
-        isRecurringGenerated: Boolean(updated.is_recurring_generated),
-        recurringRuleId: updated.recurring_rule_id ?? null,
+        isRecurringGenerated: false,
+        recurringRuleId: null,
         adjustmentForExpenseId: updated.adjustment_for_expense_id ?? null,
         isLocked: lockEval.isLocked,
         isCycleClosed: lockEval.isCycleClosed,
@@ -1254,15 +1246,15 @@ export function DashboardClient({
         expenseDate: created.expense_date,
         amountCents: Number(created.amount_cents),
         currency: created.currency,
-        originalAmountCents: created.original_amount_cents ?? null,
-        originalCurrency: created.original_currency ?? null,
-        exchangeRate: created.exchange_rate ?? null,
-        exchangeRateSource: created.exchange_rate_source ?? null,
+        originalAmountCents: null,
+        originalCurrency: null,
+        exchangeRate: null,
+        exchangeRateSource: null,
         splitMethod: created.split_method,
         splitBreakdown: breakdown,
         receiptUrl: created.receipt_url ?? null,
-        isRecurringGenerated: Boolean(created.is_recurring_generated),
-        recurringRuleId: created.recurring_rule_id ?? null,
+        isRecurringGenerated: false,
+        recurringRuleId: null,
         adjustmentForExpenseId: created.adjustment_for_expense_id ?? null,
         isLocked: Boolean(created.is_locked),
         isCycleClosed: false,
@@ -1555,7 +1547,6 @@ export function DashboardClient({
             <h1 className="font-display text-3xl font-semibold tracking-tight text-ink">
               Dashboard Overview
             </h1>
-            <LiveSyncPill />
             {isCycleClosed && (
               <Badge
                 tone="warning"

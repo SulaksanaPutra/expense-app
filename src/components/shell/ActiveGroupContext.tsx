@@ -6,12 +6,10 @@ import { createClient } from "@/lib/supabase/client";
 import { hasSupabasePublicEnv } from "@/lib/supabase/env";
 import {
   mapDbNotificationToShellItem,
-  mapRealtimeStatusToLiveSync,
   REALTIME_LEDGER_CHANGE_EVENT,
   type DbNotificationSelectRow,
 } from "./notifications";
 import type {
-  LiveSyncStatus,
   RealtimeLedgerChangeDetail,
   ShellGroupSummary,
   ShellNotificationItem,
@@ -109,7 +107,6 @@ export interface ActiveGroupContextValue {
     groupId: string,
     patch: Partial<ShellGroupSummary>,
   ) => void;
-  liveSyncStatus: LiveSyncStatus;
   notifications: ShellNotificationItem[];
   unreadNotificationCount: number;
   markNotificationRead: (id: string) => void;
@@ -146,7 +143,6 @@ export interface ActiveGroupProviderProps {
   user?: ShellUserSummary | null;
   initialGroupId?: string;
   initialCycle?: string;
-  liveSyncStatus?: LiveSyncStatus;
   initialNotifications?: ShellNotificationItem[];
   onAddExpense?: () => void;
   children: React.ReactNode;
@@ -157,7 +153,6 @@ export function ActiveGroupProvider({
   user = null,
   initialGroupId,
   initialCycle,
-  liveSyncStatus: controlledSyncStatus,
   initialNotifications = [],
   onAddExpense,
   children,
@@ -398,28 +393,10 @@ export function ActiveGroupProvider({
   );
 
   const hasRealtimeEnv = hasSupabasePublicEnv();
-  const shouldSubscribeRealtime =
-    controlledSyncStatus === undefined && Boolean(user?.id) && hasRealtimeEnv;
+  const shouldSubscribeRealtime = Boolean(user?.id) && hasRealtimeEnv;
 
-  const [realtimeSyncState, setRealtimeSyncState] = React.useState<{
-    sessionKey: string;
-    status: LiveSyncStatus;
-  }>({ sessionKey: "", status: "syncing" });
   const needsCatchupRef = React.useRef(false);
   const channelSeqRef = React.useRef(0);
-  const currentRealtimeSessionKey =
-    shouldSubscribeRealtime && isOnline && user?.id ? user.id : "";
-
-  const liveSyncStatus: LiveSyncStatus =
-    controlledSyncStatus !== undefined
-      ? controlledSyncStatus
-      : !isOnline
-        ? "offline"
-        : shouldSubscribeRealtime
-          ? realtimeSyncState.sessionKey === currentRealtimeSessionKey
-            ? realtimeSyncState.status
-            : "syncing"
-          : "subscribed";
 
   const [mobileDrawerOpen, setMobileDrawerOpen] = React.useState(false);
   const [searchOpen, setSearchOpen] = React.useState(false);
@@ -454,7 +431,6 @@ export function ActiveGroupProvider({
       return;
     }
 
-    const sessionKey = user.id;
     let active = true;
     let refreshTimer: number | null = null;
     const supabase = createClient();
@@ -641,16 +617,9 @@ export function ActiveGroupProvider({
           { event: "*", schema: "public", table: "group_members" },
           (payload) => handleLedgerTableChange("group_members", payload),
         )
-        .on(
-          "postgres_changes",
-          { event: "*", schema: "public", table: "recurring_rules" },
-          (payload) => handleLedgerTableChange("recurring_rules", payload),
-        )
         .subscribe((status) => {
           if (!active) return;
-          const mappedStatus = mapRealtimeStatusToLiveSync(status, isOnline);
-          setRealtimeSyncState({ sessionKey, status: mappedStatus });
-          if (mappedStatus !== "subscribed") {
+          if (status !== "SUBSCRIBED") {
             needsCatchupRef.current = true;
           } else if (needsCatchupRef.current) {
             needsCatchupRef.current = false;
@@ -836,7 +805,6 @@ export function ActiveGroupProvider({
       updateReceiptStorageUsedBytes,
       updateUserPreferences,
       updateGroupPreferences,
-      liveSyncStatus,
       notifications,
       unreadNotificationCount,
       markNotificationRead,
@@ -864,7 +832,6 @@ export function ActiveGroupProvider({
       buildNavHref,
       closeAddExpense,
       cycle,
-      liveSyncStatus,
       markNotificationRead,
       markAllNotificationsRead,
       mobileDrawerOpen,

@@ -35,6 +35,7 @@ export interface ShellUserSummary {
   fullName: string;
   email: string;
   avatarUrl?: string | null;
+  displayCurrency?: string;
   baseCurrency?: string;
   instantSettlementTag?: string | null;
   personalShareCapCents?: number | null;
@@ -55,8 +56,6 @@ export interface ShellNotificationItem {
   deltaCents?: number | null;
   currency?: string | null;
 }
-
-export type LiveSyncStatus = "subscribed" | "syncing" | "offline";
 
 export interface RealtimeLedgerChangeDetail {
   table: string;

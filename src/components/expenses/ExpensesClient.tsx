@@ -60,7 +60,6 @@ import type {
   ToastItem,
 } from "@/components/ui";
 import {
-  LiveSyncPill,
   REALTIME_LEDGER_CHANGE_EVENT,
   useActiveGroup,
 } from "@/components/shell";
@@ -72,10 +71,23 @@ import {
   ALL_GROUPS_VALUE,
   formatCycleLabel,
 } from "@/components/shell/url-state";
-import {
-  computeInitialNextRunDate,
-  isValidIsoDateString,
-} from "@/lib/expenses/recurring";
+function isValidIsoDateString(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [y, m, d] = value.split("-").map((v) => Number.parseInt(v, 10));
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+}
+function computeInitialNextRunDate(dayOfMonth: number): string {
+  const now = new Date();
+  const safeDay = Math.min(Math.max(Math.trunc(dayOfMonth), 1), 28);
+  const year = now.getUTCFullYear();
+  const month = now.getUTCMonth();
+  const candidate = new Date(Date.UTC(year, month, safeDay));
+  if (candidate.getTime() < Date.UTC(year, month, now.getUTCDate())) {
+    return new Date(Date.UTC(year, month + 1, safeDay)).toISOString().slice(0, 10);
+  }
+  return candidate.toISOString().slice(0, 10);
+}
 import { EXPENSE_CATEGORIES } from "@/lib/expenses/split-engine";
 import {
   computeExpensesKpiSummary,
@@ -102,7 +114,6 @@ import {
 import type {
   Database,
   ExpenseSplitMethod,
-  RecurringFrequency,
   SplitMode,
 } from "@/types/database";
 import { AddEditExpenseModal } from "./AddEditExpenseModal";
@@ -531,7 +542,7 @@ export function ExpensesClient({
           ? created.split_breakdown
           : [],
         receiptUrl: created.receipt_url,
-        isRecurringGenerated: Boolean(created.is_recurring_generated),
+        isRecurringGenerated: false,
         recurringRuleId: created.recurring_rule_id,
         adjustmentForExpenseId: created.adjustment_for_expense_id,
         isLocked: Boolean(created.is_locked),
@@ -710,22 +721,15 @@ export function ExpensesClient({
         expenseDate: updated.expense_date,
         amountCents: Number(updated.amount_cents),
         currency: updated.currency,
-        originalAmountCents:
-          updated.original_amount_cents !== null &&
-          updated.original_amount_cents !== undefined
-            ? Number(updated.original_amount_cents)
-            : null,
-        originalCurrency: updated.original_currency ?? null,
-        exchangeRate:
-          updated.exchange_rate !== null && updated.exchange_rate !== undefined
-            ? Number(updated.exchange_rate)
-            : null,
-        exchangeRateSource: updated.exchange_rate_source ?? null,
+        originalAmountCents: null,
+        originalCurrency: null,
+        exchangeRate: null,
+        exchangeRateSource: null,
         splitMethod: updated.split_method,
         splitBreakdown: breakdown,
         receiptUrl: updated.receipt_url ?? null,
-        isRecurringGenerated: Boolean(updated.is_recurring_generated),
-        recurringRuleId: updated.recurring_rule_id ?? null,
+        isRecurringGenerated: false,
+        recurringRuleId: null,
         adjustmentForExpenseId: updated.adjustment_for_expense_id ?? null,
         isLocked: lockEval.isLocked,
         isCycleClosed: lockEval.isCycleClosed,
@@ -769,15 +773,15 @@ export function ExpensesClient({
         expenseDate: created.expense_date,
         amountCents: Number(created.amount_cents),
         currency: created.currency,
-        originalAmountCents: created.original_amount_cents ?? null,
-        originalCurrency: created.original_currency ?? null,
-        exchangeRate: created.exchange_rate ?? null,
-        exchangeRateSource: created.exchange_rate_source ?? null,
+        originalAmountCents: null,
+        originalCurrency: null,
+        exchangeRate: null,
+        exchangeRateSource: null,
         splitMethod: created.split_method,
         splitBreakdown: breakdown,
         receiptUrl: created.receipt_url ?? null,
-        isRecurringGenerated: Boolean(created.is_recurring_generated),
-        recurringRuleId: created.recurring_rule_id ?? null,
+        isRecurringGenerated: false,
+        recurringRuleId: null,
         adjustmentForExpenseId: created.adjustment_for_expense_id ?? null,
         isLocked: Boolean(created.is_locked),
         isCycleClosed: false,
@@ -846,7 +850,7 @@ export function ExpensesClient({
   const [recAmount, setRecAmount] = React.useState("");
   const [recPaidBy, setRecPaidBy] = React.useState<string>(currentUserId);
   const [recFrequency, setRecFrequency] =
-    React.useState<RecurringFrequency>("MONTHLY");
+    React.useState<"MONTHLY">("MONTHLY");
   const [recDayOfMonth, setRecDayOfMonth] = React.useState("1");
   const [recSplitRule, setRecSplitRule] = React.useState<SplitMode>("EQUAL");
   const [recNextRunDate, setRecNextRunDate] = React.useState(() =>
@@ -1273,7 +1277,7 @@ export function ExpensesClient({
           category: string;
           amount_cents: number;
           currency: string;
-          frequency: RecurringFrequency;
+          frequency: "MONTHLY";
           day_of_month: number;
           split_rule: SplitMode;
           is_active: boolean;
@@ -1477,7 +1481,6 @@ export function ExpensesClient({
             <h1 className="font-display text-2xl font-semibold tracking-tight text-ink sm:text-3xl">
               Expenses Ledger
             </h1>
-            <LiveSyncPill />
             <Badge tone={isCycleClosed ? "warning" : "info"} size="sm">
               {isCycleClosed ? "Closed Period" : "Open Cycle"}
             </Badge>
@@ -2698,7 +2701,7 @@ export function ExpensesClient({
               aria-label="Frequency"
               options={FREQUENCY_OPTIONS}
               value={recFrequency}
-              onChange={(v) => setRecFrequency(v as RecurringFrequency)}
+              onChange={(v) => setRecFrequency(v as "MONTHLY")}
             />
             <Input
               label="Day of Month (1–28)"

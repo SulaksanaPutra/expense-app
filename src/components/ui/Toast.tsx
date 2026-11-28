@@ -29,10 +29,10 @@ const TONE_MAP: Record<
   ToastTone,
   { accent: string; Icon: React.ComponentType<{ className?: string }> }
 > = {
-  info: { accent: "text-[#0066cc]", Icon: Info },
+  info: { accent: "text-primary", Icon: Info },
   success: { accent: "text-emerald-600", Icon: CheckCircle2 },
   warning: { accent: "text-amber-600", Icon: AlertTriangle },
-  error: { accent: "text-red-600", Icon: AlertCircle },
+  error: { accent: "text-danger", Icon: AlertCircle },
 };
 
 export function Toast({
@@ -63,14 +63,16 @@ export function Toast({
       onFocus={() => setPaused(true)}
       onBlur={() => setPaused(false)}
       className={cn(
-        "pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-[14px] border border-hairline bg-canvas p-4 text-ink shadow-[0_8px_24px_rgba(0,0,0,0.08)]",
+        "pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-[14px] border border-hairline bg-canvas p-4 text-on-surface shadow-[0_8px_24px_rgba(0,0,0,0.08)]",
       )}
     >
       <Icon className={cn("mt-0.5 h-4 w-4 shrink-0", accent)} aria-hidden="true" />
       <div className="min-w-0 flex-1">
-        <p className="text-[13px] font-semibold leading-snug text-ink">{title}</p>
+        <p className="text-[13px] font-semibold leading-snug text-on-surface">
+          {title}
+        </p>
         {description && (
-          <p className="mt-0.5 text-[12px] leading-relaxed text-ink-muted-80">
+          <p className="mt-0.5 text-[12px] leading-relaxed text-on-surface-variant">
             {description}
           </p>
         )}
@@ -80,7 +82,7 @@ export function Toast({
           type="button"
           onClick={() => onDismiss(id)}
           aria-label="Close notification"
-          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink-muted-48 hover:bg-canvas-parchment hover:text-ink focus-visible:outline-2 focus-visible:outline-primary-focus"
+          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-outline hover:bg-surface-container-low hover:text-on-surface focus-visible:outline-2 focus-visible:outline-primary-focus"
         >
           <X className="h-3.5 w-3.5" aria-hidden="true" />
         </button>

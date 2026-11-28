@@ -1,9 +1,5 @@
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  evaluateResidentialLeasePrompt,
-  evaluateTripAutoArchive,
-} from "@/lib/groups/archive";
 import { buildDefaultSplitExcludingFormerMembers } from "@/lib/groups/invite-utils";
 
 const getUserMock = vi.fn();
@@ -295,17 +291,10 @@ vi.mock("@/lib/supabase/admin", () => ({
 }));
 
 import { DELETE as accountDelete, GET as accountGet } from "@/app/api/account/route";
-import { PATCH as archiveRulesPatch } from "@/app/api/groups/[groupId]/archive-rules/route";
 import { POST as expensePost } from "@/app/api/groups/[groupId]/expenses/route";
 import { POST as leavePost } from "@/app/api/groups/[groupId]/leave/route";
 import { DELETE as removeMemberDelete } from "@/app/api/groups/[groupId]/members/[userId]/route";
-import {
-  DELETE as recurringDelete,
-  PATCH as recurringPatch,
-  POST as recurringPost,
-} from "@/app/api/groups/[groupId]/recurring-rules/route";
 import { POST as settlementPost } from "@/app/api/groups/[groupId]/settlements/route";
-import { POST as archiveCheckPost } from "@/app/api/groups/archive-check/route";
 
 describe("Departure Guards (FORMER_MEMBER), Archive Rules & ARCHIVED Read-Only API", () => {
   const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -721,88 +710,7 @@ describe("Departure Guards (FORMER_MEMBER), Archive Rules & ARCHIVED Read-Only A
     expect(formerSettleRes.status).toBe(201);
   });
 
-  it("evaluates Trip 14-day zero-balance auto-archive, Residential 7-day post-lease prompt, and Archive Rules updates", async () => {
-    // Pure helper unit assertions
-    const now = new Date("2026-11-26T12:00:00.000Z");
-    expect(
-      evaluateTripAutoArchive(
-        {
-          groupType: "TRIP",
-          status: "ACTIVE",
-          tripAutoArchiveEnabled: true,
-          tripAutoArchiveDays: 14,
-          isFullySettled: true,
-          zeroBalanceSince: "2026-11-12T12:00:00.000Z",
-        },
-        now,
-      ).shouldAutoArchive,
-    ).toBe(true);
-
-    expect(
-      evaluateTripAutoArchive(
-        {
-          groupType: "TRIP",
-          status: "ACTIVE",
-          tripAutoArchiveEnabled: true,
-          tripAutoArchiveDays: 14,
-          isFullySettled: true,
-          zeroBalanceSince: "2026-11-15T12:00:00.000Z",
-        },
-        now,
-      ).shouldAutoArchive,
-    ).toBe(false);
-
-    expect(
-      evaluateResidentialLeasePrompt(
-        {
-          groupType: "RESIDENTIAL",
-          status: "ACTIVE",
-          residentialLeasePromptEnabled: true,
-          leaseEndDate: "2026-11-19",
-          leasePromptSnoozedUntil: null,
-        },
-        now,
-      ).shouldPromptLeaseArchive,
-    ).toBe(true);
-
-    // ADMIN updates archive rules on grp-apt4b
-    getUserMock.mockResolvedValueOnce({
-      data: { user: { id: "u-admin", email: "alex@example.com" } },
-      error: null,
-    });
-    const rulesRes = await archiveRulesPatch(
-      new NextRequest(
-        "http://localhost:3000/api/groups/grp-apt4b/archive-rules",
-        {
-          method: "PATCH",
-          body: JSON.stringify({
-            trip_auto_archive_enabled: false,
-            trip_auto_archive_days: 21,
-            residential_lease_prompt_enabled: true,
-          }),
-        },
-      ),
-      { params: Promise.resolve({ groupId: "grp-apt4b" }) },
-    );
-    expect(rulesRes.status).toBe(200);
-    expect(activeDb.groups[0].trip_auto_archive_days).toBe(21);
-
-    // Archive check auto-archives grp-tahoe (15 days at zero balance) and flags grp-apt4b lease prompt
-    getUserMock.mockResolvedValueOnce({
-      data: { user: { id: "u-admin", email: "alex@example.com" } },
-      error: null,
-    });
-    const checkRes = await archiveCheckPost();
-    expect(checkRes.status).toBe(200);
-    const checkJson = await checkRes.json();
-    expect(checkJson.autoArchivedGroupIds).toContain("grp-tahoe");
-    expect(checkJson.leasePromptGroupIds).toContain("grp-apt4b");
-    expect(
-      activeDb.groups.find((g) => g.id === "grp-tahoe")?.status,
-    ).toBe("ARCHIVED");
-  });
-
-  it("rejects all Expense, Settlement, and RecurringRule writes on ARCHIVED groups", async () => {
+  it("rejects all Expense and Settlement writes on ARCHIVED groups", async () => {
     // 1. Expense write -> 409
     getUserMock.mockResolvedValueOnce({
       data: { user: { id: "u-admin", email: "alex@example.com" } },
@@ -845,61 +753,5 @@ describe("Departure Guards (FORMER_MEMBER), Archive Rules & ARCHIVED Read-Only A
     expect(settleRes.status).toBe(409);
     expect((await settleRes.json()).code).toBe("GROUP_ARCHIVED");
 
-    // 3. RecurringRule create -> 409
-    getUserMock.mockResolvedValueOnce({
-      data: { user: { id: "u-admin", email: "alex@example.com" } },
-      error: null,
-    });
-    const recCreateRes = await recurringPost(
-      new NextRequest(
-        "http://localhost:3000/api/groups/grp-archived/recurring-rules",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            description: "Monthly Cleaning",
-            category: "Household",
-            amount_cents: 5000,
-            day_of_month: 1,
-          }),
-        },
-      ),
-      { params: Promise.resolve({ groupId: "grp-archived" }) },
-    );
-    expect(recCreateRes.status).toBe(409);
-    expect((await recCreateRes.json()).code).toBe("GROUP_ARCHIVED");
-
-    // 4. RecurringRule update -> 409
-    getUserMock.mockResolvedValueOnce({
-      data: { user: { id: "u-admin", email: "alex@example.com" } },
-      error: null,
-    });
-    const recPatchRes = await recurringPatch(
-      new NextRequest(
-        "http://localhost:3000/api/groups/grp-archived/recurring-rules",
-        {
-          method: "PATCH",
-          body: JSON.stringify({
-            rule_id: "rec-archived-1",
-            is_active: false,
-          }),
-        },
-      ),
-      { params: Promise.resolve({ groupId: "grp-archived" }) },
-    );
-    expect(recPatchRes.status).toBe(409);
-
-    // 5. RecurringRule delete -> 409
-    getUserMock.mockResolvedValueOnce({
-      data: { user: { id: "u-admin", email: "alex@example.com" } },
-      error: null,
-    });
-    const recDelRes = await recurringDelete(
-      new NextRequest(
-        "http://localhost:3000/api/groups/grp-archived/recurring-rules?rule_id=rec-archived-1",
-        { method: "DELETE" },
-      ),
-      { params: Promise.resolve({ groupId: "grp-archived" }) },
-    );
-    expect(recDelRes.status).toBe(409);
   });
 });

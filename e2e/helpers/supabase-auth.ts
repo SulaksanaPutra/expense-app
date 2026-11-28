@@ -188,11 +188,6 @@ export async function cleanupE2EReceiptsForUser(userId: string) {
       await admin.storage.from("receipts").remove(objectPaths);
     }
   }
-
-  await admin
-    .from("users")
-    .update({ receipt_storage_used_bytes: 0 })
-    .eq("id", userId);
 }
 
 export async function cleanupE2EGroupsForUser(userId: string) {
@@ -224,7 +219,6 @@ async function deleteGroupsAndChildren(
     .in("group_id", ids)
     .not("adjustment_for_expense_id", "is", null);
   await admin.from("expenses").delete().in("group_id", ids);
-  await admin.from("recurring_rules").delete().in("group_id", ids);
   await admin.from("billing_cycles").delete().in("group_id", ids);
   await admin.from("group_audit_logs").delete().in("group_id", ids);
   await admin.from("group_members").delete().in("group_id", ids);

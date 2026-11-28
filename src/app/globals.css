@@ -2,25 +2,75 @@
 @config "../../tailwind.config.ts";
 
 :root {
-  /* Brand & Accent */
+  /* Stitch Canonical Surfaces & Canvas */
+  --color-surface: #f9f9fb;
+  --color-surface-dim: #d9dadc;
+  --color-surface-bright: #f9f9fb;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #f3f3f5;
+  --color-surface-container: #edeef0;
+  --color-surface-container-high: #e8e8ea;
+  --color-surface-container-highest: #e2e2e4;
+  --color-surface-pearl: #fafafc;
+  --color-surface-variant: #e2e2e4;
+  --color-surface-tint: #205daf;
+  --color-background: #f9f9fb;
+  --color-on-background: #1a1c1d;
+
+  /* Stitch Canonical Ink & Outlines */
+  --color-on-surface: #1a1c1d;
+  --color-on-surface-variant: #414753;
+  --color-inverse-surface: #2f3132;
+  --color-inverse-on-surface: #f0f0f2;
+  --color-outline: #727784;
+  --color-outline-variant: #c1c6d5;
+
+  /* Brand & Semantic Accent */
   --color-primary: #0066cc;
   --color-primary-focus: #0071e3;
+  --color-primary-container: #0066cc;
   --color-primary-on-dark: #2997ff;
   --color-on-primary: #ffffff;
+  --color-on-primary-container: #dfe8ff;
+  --color-inverse-primary: #aac7ff;
+  --color-primary-fixed: #d7e3ff;
+  --color-primary-fixed-dim: #aac7ff;
+  --color-on-primary-fixed: #001b3e;
+  --color-on-primary-fixed-variant: #00458e;
+  --color-secondary: #075cb9;
+  --color-on-secondary: #ffffff;
+  --color-secondary-container: #0372e4;
+  --color-on-secondary-container: #00346e;
+  --color-secondary-fixed: #d7e3ff;
+  --color-secondary-fixed-dim: #abc7ff;
+  --color-on-secondary-fixed: #001b3f;
+  --color-on-secondary-fixed-variant: #00458f;
+  --color-tertiary: #883700;
+  --color-on-tertiary: #ffffff;
+  --color-tertiary-container: #a84e19;
+  --color-on-tertiary-container: #ffe2d6;
+  --color-tertiary-fixed: #ffdbcb;
+  --color-tertiary-fixed-dim: #ffb692;
+  --color-on-tertiary-fixed: #341100;
+  --color-on-tertiary-fixed-variant: #793000;
+  --color-error: #ba1a1a;
+  --color-on-error: #ffffff;
+  --color-error-container: #ffdad6;
+  --color-on-error-container: #93000a;
+  --color-danger: #dc2626;
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
 
-  /* Ink & Text */
-  --color-ink: #1d1d1f;
-  --color-body: #1d1d1f;
+  /* Backward-compatible semantic aliases */
+  --color-canvas: #ffffff;
+  --color-canvas-parchment: #f9f9fb;
+  --color-ink: #1a1c1d;
+  --color-body: #1a1c1d;
   --color-body-on-dark: #ffffff;
   --color-body-muted: #cccccc;
-  --color-ink-muted-80: #333333;
-  --color-ink-muted-48: #7a7a7a;
+  --color-ink-muted-80: #414753;
+  --color-ink-muted-48: #727784;
   --color-on-dark: #ffffff;
-
-  /* Surfaces & Hairlines */
-  --color-canvas: #ffffff;
-  --color-canvas-parchment: #f5f5f7;
-  --color-surface-pearl: #fafafc;
   --color-surface-tile-1: #272729;
   --color-surface-tile-2: #2a2a2c;
   --color-surface-tile-3: #252527;
@@ -30,8 +80,8 @@
   --color-hairline: #e0e0e0;
 
   /* Typography */
-  --font-display: "SF Pro Display", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-sans: "SF Pro Text", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-display: "Inter", "SF Pro Display", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-sans: "Inter", "SF Pro Text", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
 
   /* Border Radii */
   --radius-none: 0px;
@@ -40,14 +90,15 @@
   --radius-md: 11px;
   --radius-lg: 18px;
   --radius-card: 18px;
+  --radius-xl: 24px;
   --radius-pill: 9999px;
   --radius-full: 9999px;
 
-  /* Design System Spacing (namespaced to avoid colliding with Tailwind v4 container/max-w-* scales) */
+  /* Design System Spacing */
   --space-xxs: 4px;
   --space-xs: 8px;
   --space-sm: 12px;
-  --space-md: 17px;
+  --space-md: 16px;
   --space-lg: 24px;
   --space-xl: 32px;
   --space-xxl: 48px;
@@ -55,10 +106,61 @@
 }
 
 @theme inline {
+  --color-surface: var(--color-surface);
+  --color-surface-dim: var(--color-surface-dim);
+  --color-surface-bright: var(--color-surface-bright);
+  --color-surface-container-lowest: var(--color-surface-container-lowest);
+  --color-surface-container-low: var(--color-surface-container-low);
+  --color-surface-container: var(--color-surface-container);
+  --color-surface-container-high: var(--color-surface-container-high);
+  --color-surface-container-highest: var(--color-surface-container-highest);
+  --color-surface-pearl: var(--color-surface-pearl);
+  --color-surface-variant: var(--color-surface-variant);
+  --color-surface-tint: var(--color-surface-tint);
+  --color-background: var(--color-background);
+  --color-on-background: var(--color-on-background);
+  --color-on-surface: var(--color-on-surface);
+  --color-on-surface-variant: var(--color-on-surface-variant);
+  --color-inverse-surface: var(--color-inverse-surface);
+  --color-inverse-on-surface: var(--color-inverse-on-surface);
+  --color-outline: var(--color-outline);
+  --color-outline-variant: var(--color-outline-variant);
+
   --color-primary: var(--color-primary);
   --color-primary-focus: var(--color-primary-focus);
+  --color-primary-container: var(--color-primary-container);
   --color-primary-on-dark: var(--color-primary-on-dark);
   --color-on-primary: var(--color-on-primary);
+  --color-on-primary-container: var(--color-on-primary-container);
+  --color-inverse-primary: var(--color-inverse-primary);
+  --color-primary-fixed: var(--color-primary-fixed);
+  --color-primary-fixed-dim: var(--color-primary-fixed-dim);
+  --color-on-primary-fixed: var(--color-on-primary-fixed);
+  --color-on-primary-fixed-variant: var(--color-on-primary-fixed-variant);
+  --color-secondary: var(--color-secondary);
+  --color-on-secondary: var(--color-on-secondary);
+  --color-secondary-container: var(--color-secondary-container);
+  --color-on-secondary-container: var(--color-on-secondary-container);
+  --color-secondary-fixed: var(--color-secondary-fixed);
+  --color-secondary-fixed-dim: var(--color-secondary-fixed-dim);
+  --color-on-secondary-fixed: var(--color-on-secondary-fixed);
+  --color-on-secondary-fixed-variant: var(--color-on-secondary-fixed-variant);
+  --color-tertiary: var(--color-tertiary);
+  --color-on-tertiary: var(--color-on-tertiary);
+  --color-tertiary-container: var(--color-tertiary-container);
+  --color-on-tertiary-container: var(--color-on-tertiary-container);
+  --color-tertiary-fixed: var(--color-tertiary-fixed);
+  --color-tertiary-fixed-dim: var(--color-tertiary-fixed-dim);
+  --color-on-tertiary-fixed: var(--color-on-tertiary-fixed);
+  --color-on-tertiary-fixed-variant: var(--color-on-tertiary-fixed-variant);
+  --color-error: var(--color-error);
+  --color-on-error: var(--color-on-error);
+  --color-error-container: var(--color-error-container);
+  --color-on-error-container: var(--color-on-error-container);
+  --color-danger: var(--color-danger);
+  --color-success: var(--color-success);
+  --color-warning: var(--color-warning);
+
   --color-ink: var(--color-ink);
   --color-body: var(--color-body);
   --color-body-on-dark: var(--color-body-on-dark);
@@ -68,7 +170,6 @@
   --color-on-dark: var(--color-on-dark);
   --color-canvas: var(--color-canvas);
   --color-canvas-parchment: var(--color-canvas-parchment);
-  --color-surface-pearl: var(--color-surface-pearl);
   --color-surface-tile-1: var(--color-surface-tile-1);
   --color-surface-tile-2: var(--color-surface-tile-2);
   --color-surface-tile-3: var(--color-surface-tile-3);
@@ -86,6 +187,7 @@
   --radius-md: var(--radius-md);
   --radius-lg: var(--radius-lg);
   --radius-card: var(--radius-card);
+  --radius-xl: var(--radius-xl);
   --radius-pill: var(--radius-pill);
   --radius-full: var(--radius-full);
 }
@@ -93,8 +195,8 @@
 @layer base {
   html,
   body {
-    background-color: var(--color-canvas-parchment);
-    color: var(--color-ink);
+    background-color: var(--color-surface);
+    color: var(--color-on-surface);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
   }
@@ -104,9 +206,92 @@
   }
 
   dialog::backdrop {
-    background-color: rgba(29, 29, 31, 0.45);
+    background-color: rgba(26, 28, 29, 0.45);
     backdrop-filter: blur(4px);
     overflow: hidden;
     overscroll-behavior: contain;
   }
+}
+
+.material-symbols-outlined {
+  font-family: "Material Symbols Outlined", sans-serif;
+  font-weight: normal;
+  font-style: normal;
+  font-size: 20px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-feature-settings: "liga";
+  font-feature-settings: "liga";
+  -webkit-font-smoothing: antialiased;
+  font-variation-settings:
+    "FILL" 0,
+    "wght" 400,
+    "GRAD" 0,
+    "opsz" 24;
+  user-select: none;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.text-headline-xl {
+  font-size: 30px;
+  font-weight: 600;
+  line-height: 38px;
+  letter-spacing: -0.02em;
+}
+
+.text-headline-lg {
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 32px;
+  letter-spacing: -0.02em;
+}
+
+.text-headline-md {
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 24px;
+  letter-spacing: -0.015em;
+}
+
+.text-headline-sm {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 20px;
+  letter-spacing: -0.01em;
+}
+
+.text-body-md {
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 20px;
+}
+
+.text-body-sm {
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 18px;
+}
+
+.text-label-md {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+  letter-spacing: 0.01em;
+}
+
+.text-label-sm {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 14px;
+  letter-spacing: 0.04em;
 }

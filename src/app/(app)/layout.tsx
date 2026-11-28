@@ -34,6 +34,8 @@ async function loadShellContext(): Promise<{
     fullName: metaName || authUser.email || "LedgerSplit User",
     email: authUser.email ?? "",
     avatarUrl: metaAvatarUrl,
+    displayCurrency: "USD",
+    baseCurrency: "USD",
   };
 
   if (!hasSupabaseEnv()) {
@@ -48,14 +50,14 @@ async function loadShellContext(): Promise<{
         supabase
           .from("users")
           .select(
-            "id, full_name, email, base_currency, instant_settlement_tag, personal_share_cap_cents, receipt_storage_used_bytes, notification_prefs",
+            "id, full_name, email, base_currency, display_currency, personal_share_cap_cents, auto_include_in_expenses, notification_prefs",
           )
           .eq("id", authUser.id)
           .maybeSingle(),
         supabase
           .from("groups")
           .select(
-            "id, name, slug, group_type, status, base_currency, default_split_mode, simplify_debts",
+            "id, name, slug, group_type, status, base_currency, default_split_mode",
           )
           .neq("status", "ARCHIVED")
           .order("created_at", { ascending: true }),
@@ -108,13 +110,17 @@ async function loadShellContext(): Promise<{
           ? rawRail
           : undefined;
 
+      const resolvedCurrency =
+        profile.display_currency || profile.base_currency || "USD";
+
       shellUser = {
         id: profile.id,
         fullName: profile.full_name || shellUser.fullName,
         email: profile.email || shellUser.email,
         avatarUrl: metaAvatarUrl,
-        baseCurrency: profile.base_currency || "USD",
-        instantSettlementTag: profile.instant_settlement_tag ?? null,
+        displayCurrency: resolvedCurrency,
+        baseCurrency: resolvedCurrency,
+        instantSettlementTag: null,
         personalShareCapCents:
           profile.personal_share_cap_cents !== null &&
           profile.personal_share_cap_cents !== undefined
@@ -122,7 +128,7 @@ async function loadShellContext(): Promise<{
             : null,
         defaultSplitMethod,
         defaultPaymentRail,
-        receiptStorageUsedBytes: Number(profile.receipt_storage_used_bytes ?? 0),
+        receiptStorageUsedBytes: 0,
       };
     }
 
@@ -198,7 +204,7 @@ async function loadShellContext(): Promise<{
       status: g.status,
       baseCurrency: g.base_currency,
       defaultSplitMode: g.default_split_mode,
-      simplifyDebts: Boolean(g.simplify_debts),
+      simplifyDebts: true,
       currentUserStatus: currentUserStatusByGroup.get(g.id) ?? null,
       activeSplitCount: splitCountByGroup.get(g.id) ?? 0,
       members: membersByGroup.get(g.id) ?? [],
@@ -219,7 +225,7 @@ export default async function AuthenticatedAppLayout({
 
   return (
     <React.Suspense
-      fallback={<div className="min-h-screen w-full bg-canvas-parchment" />}
+      fallback={<div className="min-h-screen w-full bg-surface" />}
     >
       <AppShell groups={groups} user={user} initialNotifications={notifications}>
         {children}
