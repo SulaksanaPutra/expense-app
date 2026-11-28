@@ -6,13 +6,20 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Layers,
-  LayoutDashboard,
+  LayoutGrid,
   ReceiptText,
-  SlidersHorizontal,
+  Settings,
   Users,
+  Wallet,
   X,
 } from "lucide-react";
-import { AvatarStack, Badge, Button, Select } from "@/components/ui";
+import {
+  AvatarStack,
+  Badge,
+  Button,
+  Card,
+  Select,
+} from "@/components/ui";
 import type { SelectOption } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { useActiveGroup } from "./ActiveGroupContext";
@@ -30,7 +37,7 @@ const NAV_ITEMS: NavItemConfig[] = [
     id: "dashboard",
     label: "Dashboard",
     path: "/dashboard",
-    icon: LayoutDashboard,
+    icon: LayoutGrid,
   },
   {
     id: "expenses",
@@ -48,7 +55,7 @@ const NAV_ITEMS: NavItemConfig[] = [
     id: "settings",
     label: "Settings",
     path: "/settings",
-    icon: SlidersHorizontal,
+    icon: Settings,
   },
 ];
 
@@ -56,22 +63,9 @@ function BrandMark() {
   return (
     <span
       aria-hidden="true"
-      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-sm bg-[#0066cc] text-white"
+      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary-container text-on-primary shadow-sm"
     >
-      <svg
-        viewBox="0 0 24 24"
-        className="h-4 w-4"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="M4 7h16" />
-        <path d="M4 12h10" />
-        <path d="M4 17h16" />
-        <circle cx="18" cy="12" r="2" fill="currentColor" stroke="none" />
-      </svg>
+      <Wallet className="h-4 w-4" aria-hidden="true" />
     </span>
   );
 }
@@ -110,7 +104,7 @@ function SidebarContent({
     const groupItems: SelectOption[] = groups.map((group) => ({
       value: group.id,
       label: group.name,
-      description: `${group.activeSplitCount} active ${group.activeSplitCount === 1 ? "split" : "splits"}`,
+      description: `${group.activeSplitCount} ${group.activeSplitCount === 1 ? "split" : "splits"}`,
     }));
     return [allOption, ...groupItems];
   }, [groups]);
@@ -135,17 +129,18 @@ function SidebarContent({
     [groups],
   );
 
-  const splitSummaryText = activeGroup
-    ? `${activeGroup.activeSplitCount} active ${activeGroup.activeSplitCount === 1 ? "split" : "splits"}`
-    : `${totalActiveSplits} active ${totalActiveSplits === 1 ? "split" : "splits"}`;
+  const splitCount = activeGroup
+    ? activeGroup.activeSplitCount
+    : totalActiveSplits;
+  const splitPillText = `${splitCount} ${splitCount === 1 ? "split" : "splits"}`;
 
   return (
     <div className="flex h-full flex-col justify-between gap-6 p-4">
       <div className="flex flex-col gap-6">
         <div
           className={cn(
-            "flex items-center px-1",
-            collapsed ? "justify-center" : "justify-between gap-2",
+            "flex items-center px-2 py-1",
+            collapsed ? "justify-center px-0" : "justify-between gap-2",
           )}
         >
           <Link
@@ -156,16 +151,11 @@ function SidebarContent({
           >
             <BrandMark />
             {!collapsed && (
-              <span className="truncate font-display text-[17px] font-semibold tracking-[-0.02em] text-ink">
+              <span className="truncate font-display text-headline-md text-on-surface">
                 LedgerSplit
               </span>
             )}
           </Link>
-          {!collapsed && !isMobile && (
-            <Badge tone="neutral" size="sm" className="uppercase tracking-wider">
-              SHARED
-            </Badge>
-          )}
           {isMobile && onCloseMobile && (
             <Button
               type="button"
@@ -205,21 +195,21 @@ function SidebarContent({
                 }
                 title={collapsed ? item.label : undefined}
                 className={cn(
-                  "flex items-center rounded-pill transition-colors",
+                  "flex h-10 items-center rounded-full transition-colors",
                   "focus-visible:outline-2 focus-visible:outline-primary-focus focus-visible:outline-offset-2",
                   collapsed
-                    ? "h-10 w-10 justify-center self-center px-0"
-                    : "justify-between px-3.5 py-2.5",
+                    ? "w-10 justify-center self-center px-0"
+                    : "justify-between px-3.5",
                   isActive
-                    ? "bg-[#0066cc] font-medium text-white"
-                    : "font-medium text-ink-muted-80 hover:bg-canvas-parchment hover:text-ink",
+                    ? "bg-primary-container font-semibold text-on-primary"
+                    : "font-medium text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface",
                 )}
               >
                 <span className="flex min-w-0 items-center gap-3">
                   <Icon
                     className={cn(
                       "h-[18px] w-[18px] shrink-0",
-                      isActive ? "text-white" : "text-ink-muted-48",
+                      isActive ? "text-on-primary" : "text-outline",
                     )}
                     aria-hidden={true}
                   />
@@ -232,8 +222,10 @@ function SidebarContent({
                     tone={isActive ? "info" : "neutral"}
                     size="sm"
                     className={cn(
-                      isActive &&
-                        "border-white/25 bg-white/20 text-white",
+                      "px-2 py-0.5 text-[11px] tabular-nums",
+                      isActive
+                        ? "border-white/25 bg-white/20 text-on-primary"
+                        : "border-outline-variant/60 bg-surface-container-low text-on-surface-variant",
                     )}
                   >
                     {activeGroupCount}
@@ -245,7 +237,7 @@ function SidebarContent({
         </nav>
       </div>
 
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col">
         {collapsed ? (
           <Button
             type="button"
@@ -254,15 +246,31 @@ function SidebarContent({
             aria-label={`Active group: ${activeGroup ? activeGroup.name : "All Groups"}`}
             title={activeGroup ? activeGroup.name : "All Groups"}
             onClick={() => setSidebarCollapsed(false)}
-            className="self-center"
+            className="mb-2 self-center"
           >
-            <Layers className="h-4 w-4 text-[#0066cc]" aria-hidden="true" />
+            <Layers
+              className="h-4 w-4 text-primary-container"
+              aria-hidden="true"
+            />
           </Button>
         ) : (
-          <div className="flex flex-col gap-2.5 rounded-[18px] border border-hairline bg-canvas-parchment p-3.5">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted-48">
-              Active Group
-            </span>
+          <Card
+            variant="sub-card"
+            padding="none"
+            className="mb-2 flex flex-col gap-2.5 rounded-[14px] border-outline-variant/60 bg-surface-container-low p-3"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-label-sm uppercase tracking-wider text-outline">
+                ACTIVE GROUP
+              </span>
+              <Badge
+                tone="info"
+                size="sm"
+                className="border-outline-variant/60 bg-surface-container-lowest px-2 py-0.5 text-[11px] font-semibold text-primary-container tabular-nums"
+              >
+                {splitPillText}
+              </Badge>
+            </div>
             <Select
               aria-label="Active Group"
               variant="pill-select"
@@ -270,17 +278,14 @@ function SidebarContent({
               options={groupOptions}
               value={activeGroupId}
               onChange={setActiveGroup}
-              className="h-9 bg-canvas px-3 text-[13px] font-semibold text-ink"
+              className="h-9 bg-surface-container-lowest px-3 text-[13px] font-semibold text-on-surface"
             />
-            <div className="flex items-center justify-between gap-2 px-0.5">
-              <span className="truncate text-[12px] font-medium text-[#0066cc]">
-                {splitSummaryText}
-              </span>
-              {displayMembers.length > 0 && (
+            {displayMembers.length > 0 && (
+              <div className="flex items-center pt-0.5">
                 <AvatarStack members={displayMembers} max={2} size="sm" />
-              )}
-            </div>
-          </div>
+              </div>
+            )}
+          </Card>
         )}
 
         {!isMobile && (
@@ -292,7 +297,7 @@ function SidebarContent({
             aria-label={collapsed ? "Expand Sidebar" : "Collapse Sidebar"}
             onClick={toggleSidebarCollapsed}
             className={cn(
-              "text-ink-muted-48 hover:text-ink",
+              "h-9 text-body-sm text-outline hover:bg-surface-container-low hover:text-on-surface",
               collapsed ? "w-10 self-center px-0" : "w-full justify-center",
             )}
             leftIcon={
@@ -320,7 +325,7 @@ export function Sidebar() {
       data-collapsed={sidebarCollapsed ? "true" : "false"}
       aria-label="Sidebar navigation"
       className={cn(
-        "hidden shrink-0 border-r border-hairline bg-canvas transition-[width] duration-200 lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col",
+        "hidden shrink-0 border-r border-outline-variant/60 bg-surface-container-lowest transition-[width] duration-200 lg:sticky lg:top-0 lg:z-30 lg:flex lg:h-screen lg:flex-col",
         sidebarCollapsed ? "w-[72px]" : "w-[248px]",
       )}
     >
@@ -335,40 +340,7 @@ export interface MobileDrawerProps {
 
 export function MobileDrawer({ returnFocusRef }: MobileDrawerProps) {
   const { mobileDrawerOpen, setMobileDrawerOpen } = useActiveGroup();
-  const dialogRef = React.useRef<HTMLDialogElement>(null);
-
-  React.useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-
-    if (mobileDrawerOpen) {
-      if (typeof dialog.showModal === "function") {
-        try {
-          if (!dialog.open) dialog.showModal();
-        } catch {
-          dialog.setAttribute("open", "");
-        }
-      } else {
-        dialog.setAttribute("open", "");
-      }
-      document.body.style.overflow = "hidden";
-    } else {
-      if (typeof dialog.close === "function") {
-        try {
-          if (dialog.open) dialog.close();
-        } catch {
-          dialog.removeAttribute("open");
-        }
-      } else {
-        dialog.removeAttribute("open");
-      }
-      document.body.style.overflow = "";
-    }
-
-    return () => {
-      document.body.style.overflow = "";
-    };
-  }, [mobileDrawerOpen]);
+  const overlayRef = React.useRef<HTMLDivElement>(null);
 
   const closeDrawer = React.useCallback(() => {
     setMobileDrawerOpen(false);
@@ -377,12 +349,33 @@ export function MobileDrawer({ returnFocusRef }: MobileDrawerProps) {
     });
   }, [returnFocusRef, setMobileDrawerOpen]);
 
-  const handleCancel = (e: React.SyntheticEvent<HTMLDialogElement>) => {
-    e.preventDefault();
-    closeDrawer();
-  };
+  React.useEffect(() => {
+    if (!mobileDrawerOpen) {
+      document.body.style.overflow = "";
+      return;
+    }
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLDialogElement>) => {
+    document.body.style.overflow = "hidden";
+
+    const handleDocKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeDrawer();
+      }
+    };
+
+    document.addEventListener("keydown", handleDocKeyDown);
+    return () => {
+      document.body.style.overflow = "";
+      document.removeEventListener("keydown", handleDocKeyDown);
+    };
+  }, [closeDrawer, mobileDrawerOpen]);
+
+  if (!mobileDrawerOpen) {
+    return null;
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
@@ -390,35 +383,31 @@ export function MobileDrawer({ returnFocusRef }: MobileDrawerProps) {
     }
   };
 
-  const handleBackdropClick = (e: React.MouseEvent<HTMLDialogElement>) => {
-    if (e.target === dialogRef.current) {
+  const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.target === overlayRef.current) {
       closeDrawer();
     }
   };
 
   return (
-    <dialog
-      ref={dialogRef}
+    <div
+      ref={overlayRef}
       id="mobile-nav-drawer"
+      role="dialog"
+      aria-modal="true"
       aria-label="Mobile navigation"
-      onCancel={handleCancel}
       onKeyDown={handleKeyDown}
       onClick={handleBackdropClick}
-      className={cn(
-        "fixed inset-0 m-0 h-dvh max-h-none w-full max-w-none bg-transparent p-0 backdrop:bg-ink/45 lg:hidden",
-        !mobileDrawerOpen && "hidden",
-      )}
+      className="fixed inset-0 z-50 flex bg-on-surface/45 backdrop-blur-[2px] lg:hidden"
     >
-      {mobileDrawerOpen && (
-        <div className="flex h-full w-[min(288px,85vw)] flex-col border-r border-hairline bg-canvas text-ink shadow-[0_16px_40px_rgba(0,0,0,0.16)]">
-          <SidebarContent
-            collapsed={false}
-            isMobile
-            onNavigate={closeDrawer}
-            onCloseMobile={closeDrawer}
-          />
-        </div>
-      )}
-    </dialog>
+      <div className="flex h-full w-[min(288px,85vw)] flex-col border-r border-outline-variant/60 bg-surface-container-lowest text-on-surface shadow-[0_16px_40px_rgba(0,0,0,0.16)]">
+        <SidebarContent
+          collapsed={false}
+          isMobile
+          onNavigate={closeDrawer}
+          onCloseMobile={closeDrawer}
+        />
+      </div>
+    </div>
   );
 }

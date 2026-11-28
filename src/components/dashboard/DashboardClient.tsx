@@ -56,7 +56,6 @@ import {
   getSettlementDebtKey,
 } from "@/components/expenses";
 import {
-  LiveSyncPill,
   REALTIME_LEDGER_CHANGE_EVENT,
   useActiveGroup,
 } from "@/components/shell";
@@ -1548,7 +1547,6 @@ export function DashboardClient({
             <h1 className="font-display text-3xl font-semibold tracking-tight text-ink">
               Dashboard Overview
             </h1>
-            <LiveSyncPill />
             {isCycleClosed && (
               <Badge
                 tone="warning"

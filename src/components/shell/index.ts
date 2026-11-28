@@ -17,11 +17,7 @@ export type { MobileDrawerProps } from "./Sidebar";
 export { TopBar } from "./TopBar";
 export type { TopBarProps } from "./TopBar";
 
-export { LiveSyncPill } from "./LiveSyncPill";
-export type { LiveSyncPillProps } from "./LiveSyncPill";
-
 export type {
-  LiveSyncStatus,
   RealtimeLedgerChangeDetail,
   ShellGroupMember,
   ShellGroupSummary,
@@ -34,7 +30,6 @@ export {
   formatNotificationTimestamp,
   getNotificationTypeLabel,
   mapDbNotificationToShellItem,
-  mapRealtimeStatusToLiveSync,
 } from "./notifications";
 
 export {

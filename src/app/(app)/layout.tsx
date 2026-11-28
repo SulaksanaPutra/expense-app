@@ -34,6 +34,8 @@ async function loadShellContext(): Promise<{
     fullName: metaName || authUser.email || "LedgerSplit User",
     email: authUser.email ?? "",
     avatarUrl: metaAvatarUrl,
+    displayCurrency: "USD",
+    baseCurrency: "USD",
   };
 
   if (!hasSupabaseEnv()) {
@@ -108,12 +110,16 @@ async function loadShellContext(): Promise<{
           ? rawRail
           : undefined;
 
+      const resolvedCurrency =
+        profile.display_currency || profile.base_currency || "USD";
+
       shellUser = {
         id: profile.id,
         fullName: profile.full_name || shellUser.fullName,
         email: profile.email || shellUser.email,
         avatarUrl: metaAvatarUrl,
-        baseCurrency: profile.display_currency || profile.base_currency || "USD",
+        displayCurrency: resolvedCurrency,
+        baseCurrency: resolvedCurrency,
         instantSettlementTag: null,
         personalShareCapCents:
           profile.personal_share_cap_cents !== null &&
@@ -219,7 +225,7 @@ export default async function AuthenticatedAppLayout({
 
   return (
     <React.Suspense
-      fallback={<div className="min-h-screen w-full bg-canvas-parchment" />}
+      fallback={<div className="min-h-screen w-full bg-surface" />}
     >
       <AppShell groups={groups} user={user} initialNotifications={notifications}>
         {children}
