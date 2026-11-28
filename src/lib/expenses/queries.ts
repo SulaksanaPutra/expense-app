@@ -51,7 +51,7 @@ export async function getExpensesPageData(
         supabase
           .from("groups")
           .select(
-            "id, name, slug, status, base_currency, default_split_mode, operational_budget_cents, billing_cycle_anchor_day, created_at",
+            "id, name, slug, status, base_currency, default_split_mode, operational_budget_cents, billing_cycle_anchor_day, cycle_reset_day, auto_settle_on_reset, created_at",
           )
           .neq("status", "ARCHIVED")
           .order("created_at", { ascending: true }),
@@ -198,7 +198,9 @@ export async function getExpensesPageData(
           g.operational_budget_cents !== undefined
             ? Number(g.operational_budget_cents)
             : null,
-        billingCycleAnchorDay: g.billing_cycle_anchor_day ?? 1,
+        billingCycleAnchorDay: g.cycle_reset_day ?? g.billing_cycle_anchor_day ?? 1,
+        cycleResetDay: g.cycle_reset_day ?? g.billing_cycle_anchor_day ?? 1,
+        autoSettleOnReset: g.auto_settle_on_reset ?? true,
         currentUserRole: currentMembership?.role ?? null,
         currentUserStatus: currentMembership?.status ?? null,
         members: gMembers.map((m) => {

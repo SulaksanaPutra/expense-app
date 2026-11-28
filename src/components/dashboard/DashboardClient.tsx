@@ -4,10 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  ArrowDownLeft,
-  ArrowRight,
   ArrowUpRight,
-  BellRing,
   Car,
   CheckCircle2,
   Download,
@@ -15,15 +12,16 @@ import {
   Home,
   Paperclip,
   Pencil,
-  PieChart,
   Plus,
+  Receipt,
   ReceiptText,
   RefreshCw,
   ShoppingBag,
   Sparkles,
   Trash2,
+  TrendingDown,
+  TrendingUp,
   Utensils,
-  Wallet,
   Zap,
 } from "lucide-react";
 import {
@@ -39,7 +37,6 @@ import {
   ProgressBar,
   SearchInput,
   Select,
-  Switch,
   Table,
   TableBody,
   TableCell,
@@ -68,8 +65,10 @@ import {
   computeExpensesKpiSummary,
   computePerGroupDebtEdges,
   evaluateExpenseLockAndSettlement,
+  getBillingCycleDateRange,
   getUserShareCents,
   isBillingCycleClosedForWindow,
+  stepCycleSlugSafe,
   type ExpenseBillingCycleRecord,
   type ExpenseGroupInfo,
   type ExpenseLedgerRecord,
@@ -135,22 +134,88 @@ export interface DashboardClientProps {
 const RECENT_TX_PAGE_SIZE = 5;
 
 const CATEGORY_COLORS: Record<string, string> = {
-  "Groceries & Food": "#34c759",
-  Groceries: "#34c759",
-  "Rent & Housing": "#0066cc",
-  "Home Goods": "#0066cc",
-  "Household Supplies": "#0066cc",
-  Utilities: "#5856d6",
-  "Dining Out": "#ff9500",
-  "Food & Drink": "#ff9500",
-  "Transit & Travel": "#ff9500",
-  Transport: "#ff9500",
-  Entertainment: "#ff2d55",
-  General: "#7a7a7a",
+  "Groceries & Food": "#0066cc",
+  Groceries: "#0066cc",
+  "Housing & Utilities": "#22c55e",
+  "Rent & Housing": "#22c55e",
+  Utilities: "#22c55e",
+  "Dining & Social": "#f59e0b",
+  "Dining Out": "#f59e0b",
+  Dining: "#f59e0b",
+  "Food & Drink": "#f59e0b",
+  "Travel & Fuel": "#8b5cf6",
+  "Transit & Travel": "#8b5cf6",
+  Travel: "#8b5cf6",
+  Transport: "#8b5cf6",
+  Entertainment: "#ec4899",
+  "Supplies & Misc": "#64748b",
+  "Home Goods": "#64748b",
+  "Household Supplies": "#64748b",
+  General: "#64748b",
 };
 
-function getCategoryColor(category: string): string {
-  return CATEGORY_COLORS[category] ?? "#0066cc";
+const CATEGORY_FALLBACK_PALETTE = [
+  "#0066cc",
+  "#22c55e",
+  "#f59e0b",
+  "#8b5cf6",
+  "#ec4899",
+  "#64748b",
+];
+
+function getCategoryColor(category: string, index = 0): string {
+  if (CATEGORY_COLORS[category]) return CATEGORY_COLORS[category];
+  const lower = category.toLowerCase();
+  if (lower.includes("grocer")) return "#0066cc";
+  if (lower.includes("utilit") || lower.includes("hous") || lower.includes("rent")) {
+    return "#22c55e";
+  }
+  if (lower.includes("dining") || lower.includes("food") || lower.includes("drink")) {
+    return "#f59e0b";
+  }
+  if (lower.includes("travel") || lower.includes("transit") || lower.includes("fuel")) {
+    return "#8b5cf6";
+  }
+  if (lower.includes("entertain")) return "#ec4899";
+  if (lower.includes("suppl") || lower.includes("misc") || lower.includes("general")) {
+    return "#64748b";
+  }
+  return CATEGORY_FALLBACK_PALETTE[index % CATEGORY_FALLBACK_PALETTE.length];
+}
+
+function formatShortCycleLabel(cycleSlug: string): string {
+  const [yStr, mStr] = cycleSlug.split("-");
+  const year = Number.parseInt(yStr, 10);
+  const monthIdx = Number.parseInt(mStr, 10) - 1;
+  if (!Number.isFinite(year) || !Number.isFinite(monthIdx)) {
+    return cycleSlug;
+  }
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(Date.UTC(year, monthIdx, 1)));
+}
+
+function formatCycleRangePill(cycleSlug: string, anchorDay = 1): string {
+  const { periodStart, periodEnd } = getBillingCycleDateRange(cycleSlug, anchorDay);
+  const start = new Date(`${periodStart}T00:00:00.000Z`);
+  const end = new Date(`${periodEnd}T00:00:00.000Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return `Cycle: ${formatShortCycleLabel(cycleSlug)}`;
+  }
+  const monthFmt = new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    timeZone: "UTC",
+  });
+  const startMonth = monthFmt.format(start);
+  const endMonth = monthFmt.format(end);
+  const startDay = start.getUTCDate();
+  const endDay = end.getUTCDate();
+  if (startMonth === endMonth) {
+    return `Cycle: ${startMonth} ${startDay}-${endDay}`;
+  }
+  return `Cycle: ${startMonth} ${startDay}-${endMonth} ${endDay}`;
 }
 
 function renderCategoryIcon(category: string) {
@@ -265,7 +330,6 @@ export function DashboardClient({
     cycle,
     user: shellUser,
     updateReceiptStorageUsedBytes,
-    setActiveGroup,
     buildNavHref,
     openAddExpense,
   } = useActiveGroup();
@@ -282,12 +346,9 @@ export function DashboardClient({
   >({});
   const [deletedExpenseIds, setDeletedExpenseIds] = React.useState<string[]>([]);
 
-  const [simplifyOverrides, setSimplifyOverrides] = React.useState<
-    Record<string, boolean>
+  const [liveFxRatesByTarget, setLiveFxRatesByTarget] = React.useState<
+    Record<string, Record<string, number>>
   >({});
-  const [savingSimplifyGroupId, setSavingSimplifyGroupId] = React.useState<
-    string | null
-  >(null);
   const [addedSettlements, setAddedSettlements] = React.useState<
     ExpenseSettlementRecord[]
   >([]);
@@ -297,8 +358,6 @@ export function DashboardClient({
   const [sendingReminderKeys, setSendingReminderKeys] = React.useState<
     Record<string, boolean>
   >({});
-  const [isSendingBatchReminders, setIsSendingBatchReminders] =
-    React.useState(false);
   const [nowTickMs, setNowTickMs] = React.useState(() => Date.now());
 
   const [settlementModalOpen, setSettlementModalOpen] = React.useState(false);
@@ -330,64 +389,53 @@ export function DashboardClient({
 
   const shellInstantTag = shellUser?.instantSettlementTag;
 
-  // Merge initialGroups with shellGroups & local simplifyOverrides for immediate reactive updates
+  // Merge initialGroups with shellGroups; per-group debt simplification is always-on per v2 spec.
   const effectiveGroups = React.useMemo<ExpenseGroupInfo[]>(() => {
     const shellById = new Map(shellGroups.map((sg) => [sg.id, sg]));
-    const baseGroups: ExpenseGroupInfo[] =
-      initialGroups.length > 0
-        ? initialGroups.map((g) => {
-            const sg = shellById.get(g.id);
-            const nextMembers =
-              shellInstantTag !== undefined
-                ? g.members.map((m) =>
-                    m.userId === currentUserId
-                      ? {
-                          ...m,
-                          instantSettlementTag: shellInstantTag ?? null,
-                        }
-                      : m,
-                  )
-                : g.members;
-            return {
-              ...g,
-              defaultSplitMode: sg?.defaultSplitMode ?? g.defaultSplitMode,
-              simplifyDebts: sg?.simplifyDebts ?? g.simplifyDebts,
-              members: nextMembers,
-            };
-          })
-        : shellGroups.map((sg) => ({
-            id: sg.id,
-            name: sg.name,
-            slug: sg.slug ?? sg.id,
-            status: sg.status,
-            baseCurrency: sg.baseCurrency,
-            defaultSplitMode: sg.defaultSplitMode ?? "EQUAL",
-            simplifyDebts: sg.simplifyDebts ?? true,
-            operationalBudgetCents: null,
-            billingCycleAnchorDay: 1,
-            currentUserRole: null,
-            currentUserStatus: sg.currentUserStatus ?? null,
-            members: sg.members.map((m) => ({
-              userId: m.id,
-              name: m.name,
-              status: "ACTIVE",
-              instantSettlementTag:
-                m.id === currentUserId ? (shellInstantTag ?? null) : null,
-            })),
-          }));
-
-    return baseGroups.map((g) =>
-      g.id in simplifyOverrides
-        ? { ...g, simplifyDebts: simplifyOverrides[g.id] }
-        : g,
-    );
-  }, [
-    currentUserId,
-    initialGroups,
-    shellGroups,
-    shellInstantTag,
-    simplifyOverrides,
-  ]);
+    return initialGroups.length > 0
+      ? initialGroups.map((g) => {
+          const sg = shellById.get(g.id);
+          const nextMembers =
+            shellInstantTag !== undefined
+              ? g.members.map((m) =>
+                  m.userId === currentUserId
+                    ? {
+                        ...m,
+                        instantSettlementTag: shellInstantTag ?? null,
+                      }
+                    : m,
+                )
+              : g.members;
+          return {
+            ...g,
+            defaultSplitMode: sg?.defaultSplitMode ?? g.defaultSplitMode,
+            simplifyDebts: true,
+            members: nextMembers,
+          };
+        })
+      : shellGroups.map((sg) => ({
+          id: sg.id,
+          name: sg.name,
+          slug: sg.slug ?? sg.id,
+          status: sg.status,
+          baseCurrency: sg.baseCurrency,
+          defaultSplitMode: sg.defaultSplitMode ?? "EQUAL",
+          simplifyDebts: true,
+          operationalBudgetCents: null,
+          billingCycleAnchorDay: 1,
+          cycleResetDay: 1,
+          autoSettleOnReset: true,
+          currentUserRole: null,
+          currentUserStatus: sg.currentUserStatus ?? null,
+          members: sg.members.map((m) => ({
+            userId: m.id,
+            name: m.name,
+            status: "ACTIVE",
+            instantSettlementTag:
+              m.id === currentUserId ? (shellInstantTag ?? null) : null,
+          })),
+        }));
+  }, [currentUserId, initialGroups, shellGroups, shellInstantTag]);
 
   const settlements = React.useMemo(() => {
     const byId = new Map<string, ExpenseSettlementRecord>();
@@ -543,17 +591,6 @@ export function DashboardClient({
           });
           setAddedExpenses((prev) => prev.filter((item) => item.id !== expId));
         }
-      } else if (detail.table === "groups") {
-        const groupId =
-          typeof detail.newRow?.id === "string" ? detail.newRow.id : null;
-        if (groupId) {
-          setSimplifyOverrides((prev) => {
-            if (!(groupId in prev)) return prev;
-            const next = { ...prev };
-            delete next[groupId];
-            return next;
-          });
-        }
       }
     };
 
@@ -605,6 +642,79 @@ export function DashboardClient({
     [activeGroupId, effectiveGroups],
   );
 
+  const effectiveDisplayCurrency = (
+    shellUser?.displayCurrency ??
+    userBaseCurrency ??
+    "USD"
+  )
+    .trim()
+    .toUpperCase();
+
+  const foreignCurrenciesKey = React.useMemo(() => {
+    if (activeGroupId !== ALL_GROUPS_VALUE) return "";
+    const foreign = Array.from(
+      new Set(
+        effectiveGroups
+          .map((g) => (g.baseCurrency || "USD").trim().toUpperCase())
+          .filter((code) => code !== effectiveDisplayCurrency),
+      ),
+    ).sort();
+    return foreign.join(",");
+  }, [activeGroupId, effectiveDisplayCurrency, effectiveGroups]);
+
+  React.useEffect(() => {
+    if (!foreignCurrenciesKey) {
+      return;
+    }
+    const currenciesToFetch = foreignCurrenciesKey.split(",").filter(Boolean);
+    let cancelled = false;
+
+    void (async () => {
+      const nextRates: Record<string, number> = {};
+      await Promise.all(
+        currenciesToFetch.map(async (fromCurrency) => {
+          try {
+            const res = await fetch(
+              `/api/fx?from=${encodeURIComponent(fromCurrency)}&to=${encodeURIComponent(effectiveDisplayCurrency)}`,
+            );
+            if (!res.ok) return;
+            const payload = (await res.json()) as {
+              ok?: boolean;
+              rate?: number;
+            };
+            if (
+              payload.ok &&
+              typeof payload.rate === "number" &&
+              Number.isFinite(payload.rate) &&
+              payload.rate > 0
+            ) {
+              nextRates[fromCurrency] = payload.rate;
+            }
+          } catch {
+            // Deterministic fallback rates in lib/money remain active when offline.
+          }
+        }),
+      );
+      if (!cancelled && Object.keys(nextRates).length > 0) {
+        setLiveFxRatesByTarget((prev) => ({
+          ...prev,
+          [effectiveDisplayCurrency]: {
+            ...prev[effectiveDisplayCurrency],
+            ...nextRates,
+          },
+        }));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveDisplayCurrency, foreignCurrenciesKey]);
+
+  const activeFxRates = foreignCurrenciesKey
+    ? liveFxRatesByTarget[effectiveDisplayCurrency]
+    : undefined;
+
   const kpi = React.useMemo(
     () =>
       computeExpensesKpiSummary({
@@ -614,17 +724,19 @@ export function DashboardClient({
         activeGroupId,
         cycleSlug: cycle,
         currentUserId,
-        userBaseCurrency,
+        userBaseCurrency: effectiveDisplayCurrency,
         personalShareCapCents: null,
+        fxRates: activeFxRates,
       }),
     [
+      activeFxRates,
       activeGroupId,
       currentUserId,
       cycle,
+      effectiveDisplayCurrency,
       effectiveGroups,
       ledgerExpenses,
       settlements,
-      userBaseCurrency,
     ],
   );
 
@@ -679,11 +791,6 @@ export function DashboardClient({
     [allScopedEdges, currentUserId],
   );
 
-  const owedToYouEdges = React.useMemo(
-    () => allScopedEdges.filter((edge) => edge.recipientId === currentUserId),
-    [allScopedEdges, currentUserId],
-  );
-
   const topCreditorEdge = youOweEdges[0] ?? null;
 
   const isCycleClosed = React.useMemo(
@@ -698,17 +805,6 @@ export function DashboardClient({
         ),
       ),
     [cycle, initialBillingCycles, scopedGroups],
-  );
-
-  const groupFilterOptions = React.useMemo<SelectOption[]>(
-    () => [
-      { value: ALL_GROUPS_VALUE, label: "All Groups" },
-      ...effectiveGroups.map((g) => ({
-        value: g.id,
-        label: g.name,
-      })),
-    ],
-    [effectiveGroups],
   );
 
   const categoryOptions = React.useMemo<SelectOption[]>(() => {
@@ -765,79 +861,6 @@ export function DashboardClient({
     const start = (safePage - 1) * RECENT_TX_PAGE_SIZE;
     return visibleExpenses.slice(start, start + RECENT_TX_PAGE_SIZE);
   }, [safePage, visibleExpenses]);
-
-  const handleToggleSimplify = async (
-    group: ExpenseGroupInfo,
-    nextChecked: boolean,
-  ) => {
-    const previous = group.simplifyDebts;
-    setSimplifyOverrides((prev) => ({ ...prev, [group.id]: nextChecked }));
-
-    const member = group.members.find((m) => m.userId === currentUserId);
-    const userStatus = group.currentUserStatus ?? member?.status ?? null;
-    const isActiveAdmin =
-      userStatus === "ACTIVE" &&
-      group.currentUserRole === "ADMIN" &&
-      group.status !== "ARCHIVED";
-
-    if (!isActiveAdmin) {
-      pushToast({
-        tone: "info",
-        title: nextChecked
-          ? "Previewing simplified transfers"
-          : "Previewing direct pairwise balances",
-        description:
-          "Only Group Admins can save this setting permanently for the group.",
-      });
-      return;
-    }
-
-    setSavingSimplifyGroupId(group.id);
-    try {
-      const res = await fetch(
-        `/api/groups/${encodeURIComponent(group.id)}/simplify`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ simplify_debts: nextChecked }),
-        },
-      );
-      const data = (await res.json()) as {
-        ok?: boolean;
-        error?: string;
-        simplify_debts?: boolean;
-      };
-
-      if (!res.ok) {
-        setSimplifyOverrides((prev) => ({ ...prev, [group.id]: previous }));
-        pushToast({
-          tone: "error",
-          title: "Could not update Simplify setting",
-          description: data.error || "Unable to save debt simplification setting.",
-        });
-        return;
-      }
-
-      pushToast({
-        tone: "success",
-        title: nextChecked
-          ? `Simplified debts enabled for ${group.name}`
-          : `Direct pairwise balances enabled for ${group.name}`,
-        description: nextChecked
-          ? "Multi-person balances are consolidated within this group."
-          : "Showing direct member-to-member obligations without multi-party netting.",
-      });
-    } catch {
-      setSimplifyOverrides((prev) => ({ ...prev, [group.id]: previous }));
-      pushToast({
-        tone: "error",
-        title: "Network error",
-        description: "Unable to save debt simplification setting.",
-      });
-    } finally {
-      setSavingSimplifyGroupId((curr) => (curr === group.id ? null : curr));
-    }
-  };
 
   const openSettlementForEdge = (edge?: SimplifiedDebtEdge | null) => {
     if (edge) {
@@ -1018,120 +1041,6 @@ export function DashboardClient({
       router,
       sendingReminderKeys,
     ],
-  );
-
-  const handleSendBatchReminders = React.useCallback(
-    async (edges: SimplifiedDebtEdge[]) => {
-      if (isSendingBatchReminders || edges.length === 0) return;
-
-      setIsSendingBatchReminders(true);
-      try {
-        const response = await fetch("/api/reminders", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            targets: edges.map((edge) => ({
-              group_id: edge.groupId,
-              debtor_id: edge.payerId,
-              amount_cents: edge.amountCents,
-            })),
-          }),
-        });
-
-        const payload = (await response.json()) as {
-          ok?: boolean;
-          error?: string;
-          cooldown?: ReminderCooldownInfo;
-          sent?: Array<{
-            channel: "PUSH" | "EMAIL" | "SMS";
-            cooldown: ReminderCooldownInfo;
-          }>;
-          rateLimited?: Array<{
-            groupId: string;
-            debtorId: string;
-            cooldown: ReminderCooldownInfo;
-          }>;
-        };
-
-        const nextOverrides: Record<string, ReminderCooldownInfo> = {};
-        for (const item of payload.sent ?? []) {
-          nextOverrides[
-            getReminderCooldownKey(
-              item.cooldown.groupId,
-              item.cooldown.debtorId,
-            )
-          ] = item.cooldown;
-        }
-        for (const item of payload.rateLimited ?? []) {
-          nextOverrides[getReminderCooldownKey(item.groupId, item.debtorId)] =
-            item.cooldown;
-        }
-        if (payload.cooldown) {
-          nextOverrides[
-            getReminderCooldownKey(
-              payload.cooldown.groupId,
-              payload.cooldown.debtorId,
-            )
-          ] = payload.cooldown;
-        }
-        if (Object.keys(nextOverrides).length > 0) {
-          setCooldownOverrides((prev) => ({ ...prev, ...nextOverrides }));
-          setNowTickMs(Date.now());
-        }
-
-        if (response.status === 429) {
-          const minHours = Math.min(
-            ...(payload.rateLimited ?? []).map((r) => r.cooldown.remainingHours),
-            payload.cooldown?.remainingHours ?? 24,
-          );
-          pushToast({
-            tone: "warning",
-            title: "Reminder cooldown active",
-            description:
-              payload.error || formatCooldownLabel(minHours),
-          });
-          return;
-        }
-
-        if (!response.ok) {
-          pushToast({
-            tone: "error",
-            title: "Could not send reminders",
-            description:
-              payload.error || "Unable to send settlement reminders.",
-          });
-          return;
-        }
-
-        const sentList = payload.sent ?? (payload.cooldown ? [{ channel: payload.cooldown.channel, cooldown: payload.cooldown }] : []);
-        const smsCount = sentList.filter((s) => s.channel === "SMS").length;
-        const pushCount = sentList.length - smsCount;
-        const channelSummary = [
-          smsCount > 0 ? `${smsCount} via SMS` : null,
-          pushCount > 0 ? `${pushCount} via Push/in-app` : null,
-        ]
-          .filter(Boolean)
-          .join(", ");
-
-        pushToast({
-          tone: "success",
-          title: `Sent ${sentList.length} ${sentList.length === 1 ? "reminder" : "reminders"}`,
-          description: channelSummary
-            ? `Delivered (${channelSummary}). Next reminder allowed in 24 hours.`
-            : "Settlement reminders dispatched.",
-        });
-        router.refresh();
-      } catch {
-        pushToast({
-          tone: "error",
-          title: "Network error",
-          description: "Unable to send settlement reminders right now.",
-        });
-      } finally {
-        setIsSendingBatchReminders(false);
-      }
-    },
-    [isSendingBatchReminders, pushToast, router],
   );
 
   const handleExportCsv = () => {
@@ -1318,62 +1227,13 @@ export function DashboardClient({
   }, [deletingExpense, isDeletingExpense, pushToast, router]);
 
   const cycleLabel = formatCycleLabel(cycle);
-  const netSettlementCents = kpi.owedToYouCents - kpi.youOweCents;
-
-  const activeBudgetCents = React.useMemo(() => {
-    if (activeLedgerGroup) {
-      return activeLedgerGroup.operationalBudgetCents ?? null;
-    }
-    if (kpi.hasMixedCurrencies) return null;
-    const hasAnyBudget = scopedGroups.some(
-      (g) => g.operationalBudgetCents !== null && g.operationalBudgetCents > 0,
-    );
-    if (!hasAnyBudget) return null;
-    return scopedGroups.reduce(
-      (sum, g) => sum + (g.operationalBudgetCents ?? 0),
-      0,
-    );
-  }, [activeLedgerGroup, kpi.hasMixedCurrencies, scopedGroups]);
-
-  const budgetConsumedPct =
-    activeBudgetCents && activeBudgetCents > 0
-      ? Math.round((kpi.totalGroupExpensesCents / activeBudgetCents) * 100)
-      : null;
-  const budgetRemainingCents =
-    activeBudgetCents !== null
-      ? Math.max(0, activeBudgetCents - kpi.totalGroupExpensesCents)
-      : null;
-
-  const cycleSplitRatioText = React.useMemo(() => {
-    const cycleExpenses = ledgerExpenses.filter((exp) => {
-      if (activeGroupId !== ALL_GROUPS_VALUE && exp.groupId !== activeGroupId) {
-        return false;
-      }
-      const { startMs, endMs } = getBillingCycleWindow(
-        cycle,
-        exp.groupBillingAnchorDay || 1,
-      );
-      const expMs = Date.parse(exp.expenseDate);
-      return Number.isFinite(expMs) && expMs >= startMs && expMs < endMs;
-    });
-
-    if (cycleExpenses.length === 0) {
-      return activeLedgerGroup
-        ? `Split model: ${
-            activeLedgerGroup.defaultSplitMode === "CUSTOM_RATIOS"
-              ? "Custom Ratios"
-              : "Equal Split"
-          }`
-        : `${scopedGroups.length} active split ${scopedGroups.length === 1 ? "group" : "groups"}`;
-    }
-
-    const equalCount = cycleExpenses.filter(
-      (exp) => exp.splitMethod === "EQUAL",
-    ).length;
-    const equalPct = Math.round((equalCount / cycleExpenses.length) * 100);
-    const customPct = 100 - equalPct;
-    return `Split model: Equal ${equalPct}% · Custom ${customPct}%`;
-  }, [activeGroupId, activeLedgerGroup, cycle, ledgerExpenses, scopedGroups.length]);
+  const shortCycleLabel = formatShortCycleLabel(cycle);
+  const prevShortCycleLabel = formatShortCycleLabel(stepCycleSlugSafe(cycle, -1));
+  const cycleRangePill = formatCycleRangePill(
+    cycle,
+    activeLedgerGroup?.cycleResetDay ?? activeLedgerGroup?.billingCycleAnchorDay ?? 1,
+  );
+  const netSettlementCents = kpi.netSettlementCents;
 
   const renderEdgeRow = (
     edge: SimplifiedDebtEdge,
@@ -1501,35 +1361,6 @@ export function DashboardClient({
     );
   };
 
-  const remindableOwedEdges = React.useMemo(() => {
-    const groupById = new Map(scopedGroups.map((g) => [g.id, g]));
-    return owedToYouEdges.filter((edge) => {
-      const grp = groupById.get(edge.groupId);
-      if (!grp || grp.status === "ARCHIVED") return false;
-      const member = grp.members.find((m) => m.userId === currentUserId);
-      const userStatus = grp.currentUserStatus ?? member?.status ?? null;
-      return userStatus === "ACTIVE";
-    });
-  }, [currentUserId, owedToYouEdges, scopedGroups]);
-
-  const eligibleRemindEdges = React.useMemo(
-    () =>
-      remindableOwedEdges.filter(
-        (edge) => !getActiveCooldown(edge.groupId, edge.payerId),
-      ),
-    [getActiveCooldown, remindableOwedEdges],
-  );
-
-  const minBatchCooldownHours = React.useMemo(() => {
-    if (remindableOwedEdges.length === 0 || eligibleRemindEdges.length > 0) {
-      return null;
-    }
-    const hoursList = remindableOwedEdges
-      .map((edge) => getActiveCooldown(edge.groupId, edge.payerId)?.remainingHours)
-      .filter((h): h is number => typeof h === "number");
-    return hoursList.length > 0 ? Math.min(...hoursList) : 24;
-  }, [eligibleRemindEdges.length, getActiveCooldown, remindableOwedEdges]);
-
   return (
     <div className="flex flex-col gap-6 pb-12">
       {loadError && (
@@ -1541,10 +1372,10 @@ export function DashboardClient({
       )}
 
       {/* Page Header */}
-      <section className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
-        <div className="flex flex-col gap-1">
+      <section className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+        <div className="flex flex-col gap-0.5">
           <div className="flex flex-wrap items-center gap-2.5">
-            <h1 className="font-display text-3xl font-semibold tracking-tight text-ink">
+            <h1 className="font-display text-[30px] leading-tight font-semibold tracking-tight text-ink">
               Dashboard Overview
             </h1>
             {isCycleClosed && (
@@ -1564,327 +1395,265 @@ export function DashboardClient({
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <Select
-            aria-label="Filter dashboard by group"
-            variant="pill-select"
-            options={groupFilterOptions}
-            value={activeGroupId}
-            onChange={(val) => {
-              setActiveGroup(val);
-              setCurrentPage(1);
-            }}
-            className="h-9 bg-canvas text-[13px] font-medium"
-          />
+        <div className="flex shrink-0 items-center gap-2.5">
           <Button
             type="button"
             variant="secondary"
-            size="sm"
-            leftIcon={<Download className="h-3.5 w-3.5" aria-hidden="true" />}
+            size="md"
+            leftIcon={<Download className="h-3.5 w-3.5 text-ink-muted-48" aria-hidden="true" />}
             onClick={handleExportCsv}
+            className="whitespace-nowrap text-[12px] font-medium"
           >
             Export CSV
           </Button>
           <Button
             type="button"
-            variant="secondary"
+            variant="icon-circle"
             size="sm"
-            aria-label="Recalculate balances"
+            aria-label="Refresh dashboard"
             onClick={() => router.refresh()}
-            className="px-2.5"
+            className="h-9 w-9 border border-hairline bg-canvas text-ink-muted-80 hover:bg-surface-pearl"
           >
-            <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+            <RefreshCw className="h-4 w-4" aria-hidden="true" />
           </Button>
         </div>
       </section>
 
-      {/* Top Row: 3 KPI Cards */}
-      <section className="grid grid-cols-1 gap-5 md:grid-cols-3">
+      {/* Row 1: 3-Column KPI Row */}
+      <section className="grid grid-cols-1 gap-6 md:grid-cols-3">
+        {/* Card 1: Net Settlement Balance */}
+        <Card
+          variant="kpi"
+          padding="md"
+          data-testid="kpi-net-settlement-balance"
+          className="flex flex-col justify-between gap-4"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted-48">
+              NET SETTLEMENT BALANCE
+            </span>
+            <span
+              className={cn(
+                "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border",
+                netSettlementCents < 0
+                  ? "border-[#fecaca] bg-[#fef2f2] text-[#dc2626]"
+                  : "border-[#bbf7d0] bg-[#edfbf2] text-[#166534]",
+              )}
+            >
+              {netSettlementCents < 0 ? (
+                <TrendingDown className="h-5 w-5" aria-hidden="true" />
+              ) : (
+                <TrendingUp className="h-5 w-5" aria-hidden="true" />
+              )}
+            </span>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <p
+              className={cn(
+                "text-[32px] leading-tight font-bold tracking-tight tabular-nums",
+                netSettlementCents > 0
+                  ? "text-[#166534]"
+                  : netSettlementCents < 0
+                    ? "text-[#dc2626]"
+                    : "text-ink",
+              )}
+            >
+              {formatMinorUnits(netSettlementCents, kpi.displayCurrency, {
+                showPlus: true,
+              })}
+            </p>
+            <p className="text-[13px] text-ink-muted-48 tabular-nums">
+              You are owed {formatMinorUnits(kpi.owedToYouCents, kpi.displayCurrency)} · You owe{" "}
+              {formatMinorUnits(kpi.youOweCents, kpi.displayCurrency)}
+            </p>
+          </div>
+
+          <div className="border-t border-divider-soft pt-2">
+            <span className="text-[11px] font-semibold text-ink-muted-48 tabular-nums">
+              {activeLedgerGroup
+                ? `Verified in ${activeLedgerGroup.name} · ${kpi.displayCurrency}`
+                : `All settlements verified across ${scopedGroups.length} ${scopedGroups.length === 1 ? "group" : "groups"}`}
+            </span>
+          </div>
+        </Card>
+
+        {/* Card 2: Total Spent (Cycle) */}
         <Card
           variant="kpi"
           padding="md"
           data-testid="kpi-total-spent"
           className="flex flex-col justify-between gap-4"
         >
-          <div>
-            <div className="mb-3 flex items-start justify-between gap-2">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted-48">
-                Total Spent This Month
-              </span>
-              <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-hairline bg-canvas-parchment text-ink-muted-80">
-                <Wallet className="h-4 w-4" aria-hidden="true" />
-              </span>
-            </div>
-            <p className="text-[30px] font-semibold tracking-tight tabular-nums text-ink">
-              {kpi.hasMixedCurrencies
-                ? "Mixed currencies"
-                : formatMinorUnits(
-                    kpi.totalGroupExpensesCents,
-                    kpi.displayCurrency,
-                  )}
-            </p>
-            <div className="mt-2">
-              {kpi.momDeltaPercent !== null ? (
-                <Badge tone="neutral" size="sm">
-                  {kpi.momDeltaPercent >= 0 ? "+" : ""}
-                  {kpi.momDeltaPercent}% vs last month
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted-48">
+              TOTAL SPENT ({shortCycleLabel.toUpperCase()})
+            </span>
+            <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-hairline bg-surface-pearl text-ink-muted-48">
+              <Receipt className="h-5 w-5" aria-hidden="true" />
+            </span>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <div className="flex flex-wrap items-baseline gap-2.5">
+              <p className="text-[32px] leading-tight font-bold tracking-tight tabular-nums text-ink">
+                {formatMinorUnits(kpi.totalGroupExpensesCents, kpi.displayCurrency)}
+              </p>
+              {kpi.momDeltaPercent !== null && (
+                <Badge
+                  tone={kpi.momDeltaPercent <= 0 ? "success" : "warning"}
+                  size="sm"
+                  data-testid="kpi-mom-delta"
+                  className="whitespace-nowrap tabular-nums"
+                >
+                  {kpi.momDeltaPercent > 0 ? "+" : ""}
+                  {kpi.momDeltaPercent.toFixed(1)}% vs {prevShortCycleLabel}
                 </Badge>
-              ) : (
-                <span className="text-[12px] text-ink-muted-48">
-                  {cycleLabel}
-                </span>
               )}
             </div>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-divider-soft pt-3 text-[12px] text-ink-muted-48">
-            <span>
-              Your share:{" "}
-              <strong className="font-semibold tabular-nums text-ink">
-                {formatMinorUnits(kpi.personalShareCents, kpi.displayCurrency)}
-              </strong>
-            </span>
-            <span className="tabular-nums">
-              {kpi.transactionCount}{" "}
-              {kpi.transactionCount === 1 ? "transaction" : "transactions"}
-            </span>
-          </div>
-        </Card>
-
-        <Card
-          variant="kpi"
-          padding="md"
-          data-testid="kpi-you-are-owed"
-          className="flex flex-col justify-between gap-4"
-        >
-          <div>
-            <div className="mb-3 flex items-start justify-between gap-2">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted-48">
-                You Are Owed
-              </span>
-              <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[#34c759]/25 bg-[#34c759]/10 text-[#248a3d]">
-                <ArrowDownLeft className="h-4 w-4" aria-hidden="true" />
-              </span>
-            </div>
-            <div className="flex flex-wrap items-baseline gap-2">
-              <p className="text-[30px] font-semibold tracking-tight tabular-nums text-[#248a3d]">
-                {kpi.hasMixedCurrencies && kpi.owedToYouCount > 0
-                  ? `${kpi.owedToYouCount} claims`
-                  : `+${formatMinorUnits(kpi.owedToYouCents, kpi.displayCurrency)}`}
-              </p>
-              <Badge
-                tone={kpi.owedToYouCents > 0 ? "success" : "neutral"}
-                size="sm"
-              >
-                {kpi.owedToYouCents > 0 ? "Incoming" : "Settled"}
-              </Badge>
-            </div>
-            <p className="mt-2 text-[12px] text-ink-muted-48">
-              {owedToYouEdges.length > 0
-                ? `From ${owedToYouEdges.length} ${owedToYouEdges.length === 1 ? "peer transfer" : "peer transfers"}`
-                : "No pending incoming claims"}
+            <p className="text-[13px] text-ink-muted-48 tabular-nums">
+              Your share: {formatMinorUnits(kpi.personalShareCents, kpi.displayCurrency)} ·{" "}
+              {kpi.transactionCount} {kpi.transactionCount === 1 ? "expense" : "expenses"}
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-divider-soft pt-3 text-[12px]">
-            <span className="text-ink-muted-48">
-              {kpi.owedToYouCount}{" "}
-              {kpi.owedToYouCount === 1 ? "pending claim" : "pending claims"}
+          <div className="border-t border-divider-soft pt-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted-48 tabular-nums">
+              BUDGET UTILIZATION:{" "}
+              {kpi.budgetUtilizationPercent !== null
+                ? `${kpi.budgetUtilizationPercent.toFixed(1)}%`
+                : "N/A"}
             </span>
-            {remindableOwedEdges.length === 0 ? (
-              <Link
-                href={buildNavHref("/expenses")}
-                className="inline-flex items-center gap-1 font-medium text-[#0066cc] hover:underline"
-              >
-                <span>View ledger</span>
-                <ArrowRight className="h-3 w-3" aria-hidden="true" />
-              </Link>
-            ) : eligibleRemindEdges.length > 0 ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                data-testid="send-batch-reminders-btn"
-                loading={isSendingBatchReminders}
-                disabled={isSendingBatchReminders}
-                leftIcon={
-                  <BellRing
-                    className="h-3.5 w-3.5 text-[#0066cc]"
-                    aria-hidden="true"
-                  />
-                }
-                onClick={() => void handleSendBatchReminders(eligibleRemindEdges)}
-                className="h-7 px-2.5 text-[12px] font-medium text-[#0066cc] hover:bg-[#0066cc]/10"
-              >
-                Send {eligibleRemindEdges.length}{" "}
-                {eligibleRemindEdges.length === 1 ? "reminder" : "reminders"}
-              </Button>
-            ) : (
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                data-testid="send-batch-reminders-btn"
-                disabled
-                className="h-7 px-2.5 text-[12px] font-medium text-ink-muted-48"
-              >
-                {formatCooldownLabel(minBatchCooldownHours ?? 24)}
-              </Button>
-            )}
           </div>
         </Card>
 
+        {/* Card 3: You Owe */}
         <Card
           variant="kpi"
           padding="md"
           data-testid="kpi-you-owe"
           className="flex flex-col justify-between gap-4"
         >
-          <div>
-            <div className="mb-3 flex items-start justify-between gap-2">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted-48">
-                You Owe
-              </span>
-              <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[#ff3b30]/25 bg-[#ff3b30]/10 text-[#ff3b30]">
-                <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
-              </span>
-            </div>
-            <div className="flex flex-wrap items-baseline gap-2">
-              <p
-                className={`text-[30px] font-semibold tracking-tight tabular-nums ${
-                  kpi.youOweCents > 0 ? "text-[#ff3b30]" : "text-ink"
-                }`}
-              >
-                {kpi.hasMixedCurrencies && kpi.youOweCount > 0
-                  ? `${kpi.youOweCount} owed`
-                  : kpi.youOweCents > 0
-                    ? `-${formatMinorUnits(kpi.youOweCents, kpi.displayCurrency)}`
-                    : formatMinorUnits(0, kpi.displayCurrency)}
-              </p>
-              <Badge
-                tone={kpi.youOweCents > 0 ? "danger" : "success"}
-                size="sm"
-              >
-                {kpi.youOweCents > 0 ? "Action Needed" : "All Settled"}
-              </Badge>
-            </div>
-            <p className="mt-2 truncate text-[12px] text-ink-muted-48">
-              {topCreditorEdge
-                ? `To ${topCreditorEdge.recipientName} (${topCreditorEdge.groupName})`
-                : "No outstanding payouts owed"}
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted-48">
+              YOU OWE
+            </span>
+            <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#fecaca] bg-[#fef2f2] text-[#dc2626]">
+              <ArrowUpRight className="h-5 w-5" aria-hidden="true" />
+            </span>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <p
+              className={cn(
+                "text-[32px] leading-tight font-bold tracking-tight tabular-nums",
+                kpi.youOweCents > 0 ? "text-[#dc2626]" : "text-ink",
+              )}
+            >
+              {kpi.youOweCents > 0
+                ? `-${formatMinorUnits(kpi.youOweCents, kpi.displayCurrency)}`
+                : formatMinorUnits(0, kpi.displayCurrency)}
+            </p>
+            <p className="text-[13px] text-ink-muted-48 tabular-nums">
+              {kpi.youOweCount} pending {kpi.youOweCount === 1 ? "balance" : "balances"} ·{" "}
+              {kpi.youOwePeerCount} {kpi.youOwePeerCount === 1 ? "peer" : "peers"}
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-divider-soft pt-3 text-[12px]">
-            <span className="text-ink-muted-48">
-              Next: {kpi.nextSettlementDateLabel}
+          <div className="border-t border-divider-soft pt-2">
+            <span className="text-[11px] font-semibold text-ink-muted-48 tabular-nums">
+              Next auto-reconciliation: {kpi.nextSettlementDateLabel}
             </span>
-            <Button
-              type="button"
-              variant="danger-soft"
-              size="sm"
-              disabled={settleableDebts.length === 0 || kpi.youOweCents === 0}
-              onClick={() => openSettlementForEdge(topCreditorEdge)}
-              className="h-7 px-3 text-[12px]"
-            >
-              Quick Settle
-            </Button>
           </div>
         </Card>
       </section>
 
-      {/* Middle Row: Category Breakdown (7 cols) + Peer Balances (5 cols) */}
+      {/* Row 2: Monthly Category Breakdown (7 cols) + Peer Balances (5 cols) */}
       <section className="grid grid-cols-1 gap-6 lg:grid-cols-12">
         {/* Left 7 Columns: Monthly Category Breakdown */}
         <Card
           variant="section"
           padding="md"
           data-testid="category-breakdown-card"
-          className="flex flex-col justify-between gap-5 lg:col-span-7"
+          className="flex flex-col justify-between lg:col-span-7"
         >
-          <div className="flex flex-col gap-5">
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="text-[17px] font-semibold tracking-tight text-ink">
-                    Monthly Category Breakdown
-                  </h2>
-                  <Badge tone="neutral" size="sm">
-                    {cycleLabel}
-                  </Badge>
-                </div>
-                <p className="mt-1 text-[12px] text-ink-muted-48">
-                  {activeBudgetCents && activeBudgetCents > 0 && !kpi.hasMixedCurrencies ? (
+          <div>
+            <div className="mb-1 flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <h2 className="text-[17px] font-semibold tracking-tight text-ink">
+                  Monthly Category Breakdown
+                </h2>
+                <p className="mt-0.5 text-[13px] text-ink-muted-48 tabular-nums">
+                  {kpi.operationalBudgetCents !== null &&
+                  kpi.operationalBudgetCents > 0 ? (
                     <>
-                      Current total:{" "}
-                      <strong className="font-semibold tabular-nums text-ink">
-                        {formatMinorUnits(
-                          kpi.totalGroupExpensesCents,
-                          kpi.displayCurrency,
-                        )}
-                      </strong>{" "}
-                      /{" "}
-                      {formatMinorUnits(activeBudgetCents, kpi.displayCurrency)}{" "}
-                      target budget ({budgetConsumedPct}% consumed)
+                      {formatMinorUnits(
+                        kpi.totalGroupExpensesCents,
+                        kpi.displayCurrency,
+                      )}{" "}
+                      spent of{" "}
+                      {formatMinorUnits(
+                        kpi.operationalBudgetCents,
+                        kpi.displayCurrency,
+                      )}{" "}
+                      {shortCycleLabel} target (
+                      {(kpi.budgetUtilizationPercent ?? 0).toFixed(1)}%)
                     </>
                   ) : (
                     <>
-                      Cycle spend across{" "}
-                      <strong className="font-semibold text-ink">
-                        {kpi.categoryTotals.length}
-                      </strong>{" "}
+                      {formatMinorUnits(
+                        kpi.totalGroupExpensesCents,
+                        kpi.displayCurrency,
+                      )}{" "}
+                      spent across {kpi.categoryTotals.length}{" "}
                       {kpi.categoryTotals.length === 1
                         ? "category"
-                        : "categories"}
+                        : "categories"}{" "}
+                      in {shortCycleLabel}
                     </>
                   )}
                 </p>
               </div>
-
-              <Link
-                href={buildNavHref("/expenses")}
-                className="inline-flex items-center gap-1 text-[12px] font-medium text-[#0066cc] hover:underline"
+              <Badge
+                tone="neutral"
+                size="sm"
+                data-testid="category-cycle-pill"
+                className="shrink-0 whitespace-nowrap tabular-nums"
               >
-                <span>View Full Report</span>
-                <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
-              </Link>
+                {cycleRangePill}
+              </Badge>
             </div>
 
-            {/* Segmented Category Meter */}
-            <ProgressBar
-              label="Monthly category spending breakdown"
-              value={kpi.totalGroupExpensesCents}
-              max={
-                activeBudgetCents &&
-                activeBudgetCents > kpi.totalGroupExpensesCents &&
-                !kpi.hasMixedCurrencies
-                  ? activeBudgetCents
-                  : Math.max(kpi.totalGroupExpensesCents, 1)
-              }
-              size="lg"
-              segments={
-                kpi.totalGroupExpensesCents > 0
-                  ? kpi.categoryTotals.slice(0, 6).map((cat) => ({
-                      id: cat.category,
-                      label: cat.category,
-                      value: cat.amountCents,
-                      color: getCategoryColor(cat.category),
-                    }))
-                  : undefined
-              }
-              tone="primary"
-              className="rounded-full border border-hairline bg-canvas-parchment p-0.5"
-            />
+            {/* Multi-segment ProgressBar */}
+            <div className="mt-4 mb-5">
+              <ProgressBar
+                label="Monthly category spending breakdown"
+                value={kpi.totalGroupExpensesCents}
+                max={Math.max(kpi.totalGroupExpensesCents, 1)}
+                size="md"
+                segments={
+                  kpi.totalGroupExpensesCents > 0
+                    ? kpi.categoryTotals.slice(0, 6).map((cat, idx) => ({
+                        id: cat.category,
+                        label: cat.category,
+                        value: cat.amountCents,
+                        color: getCategoryColor(cat.category, idx),
+                      }))
+                    : undefined
+                }
+                tone="primary"
+              />
+            </div>
 
-            {/* Category Tiles */}
+            {/* 6-Category Ranked List */}
             {kpi.categoryTotals.length === 0 ? (
-              <div className="rounded-[14px] border border-hairline bg-canvas-parchment p-4 text-[13px] text-ink-muted-48">
-                No expenses logged in {cycleLabel} yet. Use Quick Add to record
+              <div className="rounded-[14px] border border-hairline bg-surface-pearl p-4 text-[13px] text-ink-muted-48">
+                No expenses logged in {cycleLabel} yet. Use + Add Expense to record
                 a shared bill.
               </div>
             ) : (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {kpi.categoryTotals.slice(0, 6).map((cat) => {
+              <div className="space-y-1" data-testid="category-breakdown-list">
+                {kpi.categoryTotals.slice(0, 6).map((cat, idx) => {
                   const pct =
                     kpi.totalGroupExpensesCents > 0
                       ? Math.round(
@@ -1892,86 +1661,40 @@ export function DashboardClient({
                         )
                       : 0;
                   return (
-                    <div
+                    <Link
                       key={cat.category}
-                      className="flex items-center justify-between gap-2 rounded-[14px] border border-hairline bg-canvas-parchment p-3.5"
+                      href={buildNavHref("/expenses")}
+                      data-testid={`category-row-${idx}`}
+                      className="flex items-center justify-between gap-3 rounded-xl px-2.5 py-2 transition-colors hover:bg-surface-pearl"
                     >
-                      <div className="flex min-w-0 items-center gap-2">
+                      <div className="flex min-w-0 items-center gap-2.5">
                         <span
-                          className="h-2.5 w-2.5 shrink-0 rounded-full"
+                          className="h-1.5 w-1.5 shrink-0 rounded-full"
                           style={{
-                            backgroundColor: getCategoryColor(cat.category),
+                            backgroundColor: getCategoryColor(cat.category, idx),
                           }}
                         />
-                        <span className="truncate text-[12px] font-medium text-ink">
+                        <span className="truncate text-[13px] font-medium text-ink">
                           {cat.category}
                         </span>
                       </div>
-                      <div className="shrink-0 text-right">
-                        <span className="block text-[12px] font-semibold tabular-nums text-ink">
+                      <div className="flex shrink-0 items-center gap-3">
+                        <span className="text-[13px] font-semibold tabular-nums text-ink">
                           {formatMinorUnits(cat.amountCents, kpi.displayCurrency)}
                         </span>
-                        <span className="text-[11px] tabular-nums text-ink-muted-48">
+                        <span className="w-10 text-right text-[12px] font-medium tabular-nums text-ink-muted-48">
                           {pct}%
                         </span>
                       </div>
-                    </div>
+                    </Link>
                   );
                 })}
-
-                {budgetRemainingCents !== null &&
-                  activeBudgetCents !== null &&
-                  !kpi.hasMixedCurrencies && (
-                    <div className="flex items-center justify-between gap-2 rounded-[14px] border border-hairline bg-canvas p-3.5">
-                      <div className="flex min-w-0 items-center gap-2">
-                        <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-ink-muted-48" />
-                        <span className="truncate text-[12px] font-medium text-ink-muted-48">
-                          Budget Buffer
-                        </span>
-                      </div>
-                      <div className="shrink-0 text-right">
-                        <span className="block text-[12px] font-semibold tabular-nums text-ink">
-                          {formatMinorUnits(
-                            budgetRemainingCents,
-                            kpi.displayCurrency,
-                          )}
-                        </span>
-                        <span
-                          className={`text-[11px] font-medium tabular-nums ${
-                            (budgetConsumedPct ?? 0) > 100
-                              ? "text-[#ff3b30]"
-                              : "text-[#248a3d]"
-                          }`}
-                        >
-                          {(budgetConsumedPct ?? 0) > 100
-                            ? "Over budget"
-                            : `${Math.max(0, 100 - (budgetConsumedPct ?? 0))}% left`}
-                        </span>
-                      </div>
-                    </div>
-                  )}
               </div>
             )}
           </div>
-
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-[14px] border border-hairline bg-canvas-parchment p-3.5 text-[12px]">
-            <div className="flex items-center gap-2 text-ink-muted-80">
-              <PieChart
-                className="h-4 w-4 shrink-0 text-[#0066cc]"
-                aria-hidden="true"
-              />
-              <span>{cycleSplitRatioText}</span>
-            </div>
-            <Link
-              href={buildNavHref("/split-groups")}
-              className="font-medium text-[#0066cc] hover:underline"
-            >
-              Edit Default Ratios
-            </Link>
-          </div>
         </Card>
 
-        {/* Right 5 Columns: Peer Balances + Simplify Switch */}
+        {/* Right 5 Columns: Peer Balances (per-group simplification is always-on) */}
         <Card
           variant="section"
           padding="md"
@@ -1984,64 +1707,26 @@ export function DashboardClient({
                 <h2 className="text-[17px] font-semibold tracking-tight text-ink">
                   Peer Balances
                 </h2>
-                <p className="text-[12px] text-ink-muted-48">
+                <p className="text-[13px] text-ink-muted-48">
                   {activeLedgerGroup
-                    ? activeLedgerGroup.simplifyDebts
-                      ? "Simplified bipartite transfers within this group"
-                      : "Direct pairwise balances within this group"
-                    : "Per-group balances (never netted across groups)"}
+                    ? `Active settlements in ${activeLedgerGroup.name}`
+                    : "Active settlements across all groups"}
                 </p>
               </div>
-
-              {activeLedgerGroup ? (
-                <div className="flex shrink-0 items-center gap-2 rounded-full border border-hairline bg-canvas-parchment px-3 py-1">
-                  <Switch
-                    id="simplify-debts-switch"
-                    label="Simplify"
-                    aria-label="Simplify debts"
-                    size="sm"
-                    tone="success"
-                    checked={activeLedgerGroup.simplifyDebts}
-                    disabled={savingSimplifyGroupId === activeLedgerGroup.id}
-                    onCheckedChange={(next) =>
-                      void handleToggleSimplify(activeLedgerGroup, next)
-                    }
-                  />
-                </div>
-              ) : scopedGroups.length === 1 ? (
-                <div className="flex items-center gap-2 rounded-full border border-hairline bg-canvas-parchment px-3 py-1">
-                  <Switch
-                    id="simplify-debts-switch"
-                    label="Simplify"
-                    aria-label="Simplify debts"
-                    size="sm"
-                    tone="success"
-                    checked={scopedGroups[0].simplifyDebts}
-                    disabled={savingSimplifyGroupId === scopedGroups[0].id}
-                    onCheckedChange={(next) =>
-                      void handleToggleSimplify(scopedGroups[0], next)
-                    }
-                  />
-                </div>
-              ) : (
-                <Badge tone="info" size="sm">
-                  Per-group
-                </Badge>
-              )}
             </div>
 
             {/* Balances List */}
             <div
               data-testid="peer-balances-list"
-              className="flex flex-col gap-3"
+              className="flex flex-col gap-2.5"
             >
               {scopedGroups.length === 0 ? (
-                <div className="rounded-[14px] border border-hairline bg-canvas-parchment p-4 text-[13px] text-ink-muted-48">
+                <div className="rounded-[14px] border border-hairline bg-surface-pearl p-4 text-[13px] text-ink-muted-48">
                   Create or join a split group to track peer balances.
                 </div>
               ) : activeLedgerGroup ? (
                 debtsByGroup[0]?.edges.length === 0 ? (
-                  <div className="rounded-[14px] border border-hairline bg-canvas-parchment p-4 text-[13px] text-ink-muted-48">
+                  <div className="rounded-[14px] border border-hairline bg-surface-pearl p-4 text-[13px] text-ink-muted-48">
                     All balances settled in {activeLedgerGroup.name}.
                   </div>
                 ) : (
@@ -2065,18 +1750,6 @@ export function DashboardClient({
                           {group.baseCurrency}
                         </Badge>
                       </div>
-                      <Switch
-                        id={`simplify-debts-switch-${group.id}`}
-                        label="Simplify"
-                        aria-label={`Simplify ${group.name}`}
-                        size="sm"
-                        tone="success"
-                        checked={group.simplifyDebts}
-                        disabled={savingSimplifyGroupId === group.id}
-                        onCheckedChange={(next) =>
-                          void handleToggleSimplify(group, next)
-                        }
-                      />
                     </div>
                     {edges.length === 0 ? (
                       <p className="text-[12px] text-ink-muted-48">
@@ -2096,29 +1769,26 @@ export function DashboardClient({
           {/* Net Bottom Summary */}
           <div
             data-testid="overall-net-settlement"
-            className="flex flex-wrap items-center justify-between gap-2 border-t border-divider-soft pt-3"
+            className="flex flex-wrap items-center justify-between gap-2 rounded-[14px] border border-hairline bg-surface-pearl p-3"
           >
-            <span className="text-[12px] text-ink-muted-48">
+            <span className="text-[12px] font-medium text-ink-muted-48">
               Overall Net Settlement
             </span>
             <span
-              className={`text-[13px] font-semibold tabular-nums ${
-                kpi.hasMixedCurrencies
-                  ? "text-ink-muted-80"
-                  : netSettlementCents > 0
-                    ? "text-[#248a3d]"
-                    : netSettlementCents < 0
-                      ? "text-[#ff3b30]"
-                      : "text-ink"
-              }`}
-            >
-              {kpi.hasMixedCurrencies
-                ? "Multiple currencies"
-                : netSettlementCents > 0
-                  ? `+${formatMinorUnits(netSettlementCents, kpi.displayCurrency)} Net Owed to You`
+              className={cn(
+                "text-[13px] font-bold tabular-nums",
+                netSettlementCents > 0
+                  ? "text-[#166534]"
                   : netSettlementCents < 0
-                    ? `-${formatMinorUnits(Math.abs(netSettlementCents), kpi.displayCurrency)} Net You Owe`
-                    : `${formatMinorUnits(0, kpi.displayCurrency)} All Settled`}
+                    ? "text-[#dc2626]"
+                    : "text-ink",
+              )}
+            >
+              {netSettlementCents > 0
+                ? `${formatMinorUnits(netSettlementCents, kpi.displayCurrency, { showPlus: true })} in your favor`
+                : netSettlementCents < 0
+                  ? `${formatMinorUnits(netSettlementCents, kpi.displayCurrency)} net you owe`
+                  : `${formatMinorUnits(0, kpi.displayCurrency)} all settled`}
             </span>
           </div>
         </Card>
@@ -2184,7 +1854,7 @@ export function DashboardClient({
           </div>
         </div>
 
-        <div className="overflow-hidden rounded-[14px] border border-hairline">
+        <div className="overflow-x-auto rounded-[14px] border border-hairline">
           <Table aria-label="Recent Shared Transactions">
             <TableHeader>
               <TableRow>

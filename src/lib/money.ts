@@ -15,6 +15,22 @@ export const SUPPORTED_CURRENCIES: CurrencyOption[] = [
   { code: "JPY", label: "JPY — Japanese Yen (¥)", symbol: "¥", minorDigits: 0 },
 ];
 
+/**
+ * Deterministic USD-per-1-unit reference FX rates used for display-only
+ * `User.display_currency` rollups when offline or before live FX rates load.
+ * Never used to mutate group ledger records (each group ledger remains strictly
+ * in `Group.base_currency`).
+ */
+export const DEFAULT_USD_PER_UNIT: Record<string, number> = {
+  USD: 1,
+  EUR: 1.085,
+  GBP: 1.27,
+  CAD: 0.725,
+  AUD: 0.655,
+  CHF: 1.135,
+  JPY: 0.006667,
+};
+
 const CURRENCY_META_MAP = new Map<string, CurrencyOption>(
   SUPPORTED_CURRENCIES.map((c) => [c.code, c]),
 );
@@ -54,6 +70,61 @@ export function getCurrencySymbol(currency = "USD"): string {
   } catch {
     return normalized;
   }
+}
+
+/**
+ * Returns the deterministic fallback FX rate (units of `to` per 1 unit of `from`).
+ */
+export function getFallbackFxRate(from: string, to: string): number {
+  const normFrom = from.trim().toUpperCase();
+  const normTo = to.trim().toUpperCase();
+  if (normFrom === normTo) return 1;
+  const fromUsd = DEFAULT_USD_PER_UNIT[normFrom] ?? 1;
+  const toUsd = DEFAULT_USD_PER_UNIT[normTo] ?? 1;
+  return Number((fromUsd / toUsd).toFixed(6));
+}
+
+/**
+ * Converts integer minor units from `fromCurrency` into `toCurrency` for
+ * display-only rollup (e.g. All Groups KPIs and Monthly Category Breakdown).
+ *
+ * - Identity when `fromCurrency === toCurrency` (zero drift).
+ * - Accounts for differing minor digits (e.g. JPY 0 digits vs USD 2 digits).
+ * - Accepts an optional `fxRatesToTarget` map keyed by source currency code
+ *   (e.g. `{ EUR: 1.085, GBP: 1.27 }`), falling back to `getFallbackFxRate`.
+ */
+export function convertMinorUnitsToCurrency(
+  minorUnits: number,
+  fromCurrency: string,
+  toCurrency: string,
+  fxRatesToTarget?: Readonly<Record<string, number>>,
+): number {
+  if (!Number.isFinite(minorUnits)) return 0;
+  const truncated = Math.trunc(minorUnits);
+  const normFrom = fromCurrency.trim().toUpperCase();
+  const normTo = toCurrency.trim().toUpperCase();
+  if (truncated === 0 || normFrom === normTo) {
+    return truncated === 0 ? 0 : truncated;
+  }
+
+  const suppliedRate = fxRatesToTarget?.[normFrom];
+  const rate =
+    typeof suppliedRate === "number" &&
+    Number.isFinite(suppliedRate) &&
+    suppliedRate > 0
+      ? suppliedRate
+      : getFallbackFxRate(normFrom, normTo);
+
+  const fromDigits = getCurrencyMinorDigits(normFrom);
+  const toDigits = getCurrencyMinorDigits(normTo);
+  const fromScale = 10 ** fromDigits;
+  const toScale = 10 ** toDigits;
+
+  const sign = truncated < 0 ? -1 : 1;
+  const absMinor = Math.abs(truncated);
+  const convertedAbs = Math.round((absMinor / fromScale) * rate * toScale);
+  if (convertedAbs === 0) return 0;
+  return sign * convertedAbs;
 }
 
 export interface FormatMinorUnitsOptions {

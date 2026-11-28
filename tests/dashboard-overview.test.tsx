@@ -359,25 +359,41 @@ describe("Issue #84 — Dashboard overview: cycle-scoped spend vs cumulative bal
     // 1. Open cycle (2026-11) in All Groups mode
     expect(screen.queryByTestId("settled-closed-period-badge")).not.toBeInTheDocument();
 
+    // Header omits group-filter dropdown, LiveSyncPill, and Simplify switch
+    expect(screen.queryByLabelText("Filter dashboard by group")).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: /Simplify/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Live Sync/i)).not.toBeInTheDocument();
+
     const totalCard = screen.getByTestId("kpi-total-spent");
+    expect(totalCard).toHaveTextContent("TOTAL SPENT (NOV 2026)");
     expect(totalCard).toHaveTextContent("$190.00"); // 90 + 60 + 40
-    expect(totalCard).toHaveTextContent("Your share: $70.00");
-    expect(totalCard).toHaveTextContent("3 transactions");
+    expect(totalCard).toHaveTextContent("+5.6% vs Oct 2026");
+    expect(totalCard).toHaveTextContent("Your share: $70.00 · 3 expenses");
+    expect(totalCard).toHaveTextContent("BUDGET UTILIZATION: 4.8%");
 
     // All Groups combined operational budget ($3,000 + $1,000 = $4,000)
     const catCard = screen.getByTestId("category-breakdown-card");
-    expect(catCard).toHaveTextContent("$190.00 / $4,000.00 target budget");
+    expect(catCard).toHaveTextContent("$190.00 spent of $4,000.00 Nov 2026 target (4.8%)");
+    expect(screen.getByTestId("category-cycle-pill")).toHaveTextContent("Cycle: Nov 1-30");
     expect(catCard).toHaveTextContent("Groceries & Food");
     expect(catCard).toHaveTextContent("Dining Out");
     expect(catCard).toHaveTextContent("Entertainment");
-    expect(catCard).toHaveTextContent("Budget Buffer");
     expect(catCard).not.toHaveTextContent("Utilities");
 
     // Cumulative balances (never netted across groups): +$90.00 owed, -$50.00 owe, +$40.00 net
-    expect(screen.getByTestId("kpi-you-are-owed")).toHaveTextContent("+$90.00");
-    expect(screen.getByTestId("kpi-you-owe")).toHaveTextContent("-$50.00");
+    const netCard = screen.getByTestId("kpi-net-settlement-balance");
+    expect(netCard).toHaveTextContent("NET SETTLEMENT BALANCE");
+    expect(netCard).toHaveTextContent("+$40.00");
+    expect(netCard).toHaveTextContent("You are owed $90.00 · You owe $50.00");
+    expect(netCard).toHaveTextContent("All settlements verified across 2 groups");
+
+    const oweCard = screen.getByTestId("kpi-you-owe");
+    expect(oweCard).toHaveTextContent("-$50.00");
+    expect(oweCard).toHaveTextContent("1 pending balance · 1 peer");
+    expect(oweCard).toHaveTextContent("Next auto-reconciliation:");
+
     expect(screen.getByTestId("overall-net-settlement")).toHaveTextContent(
-      "+$40.00 Net Owed to You",
+      "+$40.00 in your favor",
     );
 
     // Peer Balances shows per-group cards without cross-group netting
@@ -411,9 +427,11 @@ describe("Issue #84 — Dashboard overview: cycle-scoped spend vs cumulative bal
     );
 
     // Cycle-scoped Total Spent & Category Breakdown update to 2026-10 ($180.00)
+    expect(totalCard).toHaveTextContent("TOTAL SPENT (OCT 2026)");
     expect(totalCard).toHaveTextContent("$180.00");
-    expect(totalCard).toHaveTextContent("2 transactions");
-    expect(catCard).toHaveTextContent("$180.00 / $4,000.00 target budget");
+    expect(totalCard).toHaveTextContent("2 expenses");
+    expect(catCard).toHaveTextContent("$180.00 spent of $4,000.00 Oct 2026 target (4.5%)");
+    expect(screen.getByTestId("category-cycle-pill")).toHaveTextContent("Cycle: Oct 1-31");
     expect(catCard).toHaveTextContent("Utilities");
     expect(catCard).toHaveTextContent("Transit & Travel");
     expect(catCard).not.toHaveTextContent("Groceries & Food");
@@ -423,11 +441,11 @@ describe("Issue #84 — Dashboard overview: cycle-scoped spend vs cumulative bal
     expect(within(txCard).getByText("October Rental Car")).toBeInTheDocument();
     expect(within(txCard).queryByText("November Trader Joe's")).not.toBeInTheDocument();
 
-    // Cumulative Peer Balances, You Are Owed, You Owe, and Overall Net Settlement remain unchanged
-    expect(screen.getByTestId("kpi-you-are-owed")).toHaveTextContent("+$90.00");
+    // Cumulative Peer Balances, Net Settlement Balance, You Owe, and Overall Net Settlement remain unchanged
+    expect(screen.getByTestId("kpi-net-settlement-balance")).toHaveTextContent("+$40.00");
     expect(screen.getByTestId("kpi-you-owe")).toHaveTextContent("-$50.00");
     expect(screen.getByTestId("overall-net-settlement")).toHaveTextContent(
-      "+$40.00 Net Owed to You",
+      "+$40.00 in your favor",
     );
     expect(
       within(aptGroupBox).getByTestId("peer-balance-amount-u-elena-u-alex"),
@@ -488,5 +506,103 @@ describe("Issue #84 — Dashboard overview: cycle-scoped spend vs cumulative bal
     });
     expect(screen.queryByRole("menuitem", { name: "Edit Expense" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Delete Expense" })).not.toBeInTheDocument();
+  });
+
+  it("rolls up All Groups KPIs & Category Breakdown into User.display_currency and keeps single-group strictly in Group.base_currency", async () => {
+    const eurShellGroups: ShellGroupSummary[] = [
+      SHELL_GROUPS[0],
+      {
+        ...SHELL_GROUPS[1],
+        id: "grp-lisbon",
+        name: "Lisbon Retreat",
+        slug: "lisbon-retreat",
+        baseCurrency: "EUR",
+      },
+    ];
+    const eurGroups: ExpenseGroupInfo[] = [
+      INITIAL_GROUPS[0],
+      {
+        ...INITIAL_GROUPS[1],
+        id: "grp-lisbon",
+        name: "Lisbon Retreat",
+        slug: "lisbon-retreat",
+        baseCurrency: "EUR",
+        operationalBudgetCents: 100000, // €1,000.00
+      },
+    ];
+    const mixedExpenses: ExpenseLedgerRecord[] = [
+      EXPENSES[2], // Apt 4B: $90.00 Groceries & Food (Alex share $30)
+      {
+        ...EXPENSES[4],
+        id: "exp-lisbon-1",
+        groupId: "grp-lisbon",
+        groupName: "Lisbon Retreat",
+        groupBaseCurrency: "EUR",
+        currency: "EUR",
+        category: "Travel & Fuel",
+        amountCents: 10000, // €100.00 -> $108.50 at fallback 1.085
+        splitBreakdown: [
+          { user_id: "u-alex", share_cents: 5000 },
+          { user_id: "u-elena", share_cents: 5000 },
+        ],
+      },
+    ];
+
+    // 1. All Groups rolls up into User.display_currency (USD)
+    mockSearchParams = new URLSearchParams("group=all&cycle=2026-11");
+    const { unmount } = render(
+      <AppShell
+        groups={eurShellGroups}
+        user={{
+          id: "u-alex",
+          fullName: "Alex Rivera",
+          email: "alex@example.com",
+          displayCurrency: "USD",
+        }}
+      >
+        <DashboardClient
+          initialExpenses={mixedExpenses}
+          currentUserId="u-alex"
+          userBaseCurrency="USD"
+          initialGroups={eurGroups}
+          initialSettlements={[]}
+          initialBillingCycles={[]}
+        />
+      </AppShell>,
+    );
+
+    // $90.00 + €100.00 * 1.085 ($108.50) = $198.50
+    expect(screen.getByTestId("kpi-total-spent")).toHaveTextContent("$198.50");
+    expect(screen.getByTestId("category-breakdown-card")).toHaveTextContent("$108.50");
+    expect(screen.getByTestId("category-breakdown-card")).toHaveTextContent("$90.00");
+    unmount();
+
+    // 2. Single-group selection displays strictly in Group.base_currency (EUR)
+    mockSearchParams = new URLSearchParams("group=grp-lisbon&cycle=2026-11");
+    render(
+      <AppShell
+        groups={eurShellGroups}
+        user={{
+          id: "u-alex",
+          fullName: "Alex Rivera",
+          email: "alex@example.com",
+          displayCurrency: "USD",
+        }}
+      >
+        <DashboardClient
+          initialExpenses={mixedExpenses}
+          currentUserId="u-alex"
+          userBaseCurrency="USD"
+          initialGroups={eurGroups}
+          initialSettlements={[]}
+          initialBillingCycles={[]}
+        />
+      </AppShell>,
+    );
+
+    expect(screen.getByTestId("kpi-total-spent")).toHaveTextContent("€100.00");
+    expect(screen.getByTestId("kpi-you-owe")).toHaveTextContent("-€50.00");
+    expect(screen.getByTestId("kpi-net-settlement-balance")).toHaveTextContent("-€50.00");
+    expect(screen.getByTestId("category-breakdown-card")).toHaveTextContent("€100.00 spent of €1,000.00");
   });
 });

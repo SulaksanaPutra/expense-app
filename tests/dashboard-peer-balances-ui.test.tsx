@@ -237,16 +237,8 @@ beforeEach(() => {
   pushMock.mockReset();
 });
 
-describe("Dashboard Peer Balances & Simplify Switch", () => {
-  it("toggles Simplify immediately in single-group view, updates pairs without altering net balance, and persists for ADMIN", async () => {
-    const user = userEvent.setup();
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(
-        JSON.stringify({ ok: true, groupId: "grp-apt4b", simplify_debts: false }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
-    );
-
+describe("Dashboard Peer Balances (Always-On Per-Group Simplification)", () => {
+  it("keeps per-group debt simplification always-on and omits the legacy Simplify switch", async () => {
     render(
       <AppShell
         groups={SHELL_GROUPS}
@@ -264,12 +256,11 @@ describe("Dashboard Peer Balances & Simplify Switch", () => {
     );
 
     const peerCard = screen.getByTestId("peer-balances-card");
-    const simplifySwitch = within(peerCard).getByRole("switch", {
-      name: /Simplify/i,
-    });
-    expect(simplifySwitch).toHaveAttribute("aria-checked", "true");
+    expect(
+      within(peerCard).queryByRole("switch", { name: /Simplify/i }),
+    ).not.toBeInTheDocument();
 
-    // Simplified mode: Elena -> Alex (+$10.00) and Elena -> Marcus ($40.00)
+    // Always-on simplified mode: Elena -> Alex (+$10.00) and Elena -> Marcus ($40.00)
     expect(
       within(peerCard).getByTestId("peer-balance-amount-u-elena-u-alex"),
     ).toHaveTextContent("+$10.00");
@@ -281,68 +272,7 @@ describe("Dashboard Peer Balances & Simplify Switch", () => {
     ).not.toBeInTheDocument();
 
     const netFooter = screen.getByTestId("overall-net-settlement");
-    expect(netFooter).toHaveTextContent("+$10.00 Net Owed to You");
-
-    // Toggle Simplify OFF -> pairs & amounts update immediately
-    await user.click(simplifySwitch);
-    expect(simplifySwitch).toHaveAttribute("aria-checked", "false");
-
-    // Direct pairwise mode: Alex -> Marcus (-$10.00), Elena -> Alex (+$20.00), Elena -> Marcus ($30.00)
-    expect(
-      within(peerCard).getByTestId("peer-balance-amount-u-alex-u-marcus"),
-    ).toHaveTextContent("-$10.00");
-    expect(
-      within(peerCard).getByTestId("peer-balance-amount-u-elena-u-alex"),
-    ).toHaveTextContent("+$20.00");
-    expect(
-      within(peerCard).getByTestId("peer-balance-amount-u-elena-u-marcus"),
-    ).toHaveTextContent("$30.00");
-
-    // Net balance before and after simplification is identical (+20 - 10 = +$10.00)
-    expect(netFooter).toHaveTextContent("+$10.00 Net Owed to You");
-
-    await waitFor(() => {
-      expect(fetchSpy).toHaveBeenCalledWith(
-        "/api/groups/grp-apt4b/simplify",
-        expect.objectContaining({
-          method: "PATCH",
-          body: JSON.stringify({ simplify_debts: false }),
-        }),
-      );
-    });
-  });
-
-  it("allows non-admin MEMBER to preview Simplify toggle immediately without issuing ADMIN PATCH", async () => {
-    const user = userEvent.setup();
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
-
-    render(
-      <AppShell
-        groups={SHELL_GROUPS}
-        user={{ id: "u-alex", fullName: "Alex Rivera", email: "alex@example.com" }}
-      >
-        <DashboardClient
-          initialExpenses={SAMPLE_EXPENSES}
-          currentUserId="u-alex"
-          userBaseCurrency="USD"
-          initialGroups={makeInitialGroups("MEMBER")}
-          initialSettlements={[]}
-          initialBillingCycles={[]}
-        />
-      </AppShell>,
-    );
-
-    const peerCard = screen.getByTestId("peer-balances-card");
-    const simplifySwitch = within(peerCard).getByRole("switch", {
-      name: /Simplify/i,
-    });
-    await user.click(simplifySwitch);
-
-    expect(simplifySwitch).toHaveAttribute("aria-checked", "false");
-    expect(
-      within(peerCard).getByTestId("peer-balance-amount-u-alex-u-marcus"),
-    ).toHaveTextContent("-$10.00");
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(netFooter).toHaveTextContent("+$10.00 in your favor");
   });
 
   it("isolates balances strictly per group_id in All Groups view without cross-group netting", async () => {
@@ -364,6 +294,9 @@ describe("Dashboard Peer Balances & Simplify Switch", () => {
       </AppShell>,
     );
 
+    const peerCard = screen.getByTestId("peer-balances-card");
+    expect(within(peerCard).queryByRole("switch")).not.toBeInTheDocument();
+
     const aptGroupBox = screen.getByTestId("peer-balance-group-grp-apt4b");
     const tahoeGroupBox = screen.getByTestId("peer-balance-group-grp-tahoe");
 
@@ -379,7 +312,7 @@ describe("Dashboard Peer Balances & Simplify Switch", () => {
 
     // Net summary across groups is +10 - 20 = -$10.00
     expect(screen.getByTestId("overall-net-settlement")).toHaveTextContent(
-      "-$10.00 Net You Owe",
+      "-$10.00 net you owe",
     );
   });
 
@@ -433,7 +366,7 @@ describe("Dashboard Peer Balances & Simplify Switch", () => {
 
     expect(peerCard).toHaveTextContent("All balances settled in Tahoe Ski Trip.");
     expect(screen.getByTestId("overall-net-settlement")).toHaveTextContent(
-      "$0.00 All Settled",
+      "$0.00 all settled",
     );
   });
 });

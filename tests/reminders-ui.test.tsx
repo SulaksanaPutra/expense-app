@@ -231,15 +231,9 @@ describe("Reminder Pills & 24h Cooldown UI", () => {
         new Response(
           JSON.stringify({
             ok: true,
-            sent: [
-              {
-                channel: "SMS",
-                deliveryMode: "sms",
-                cooldown: marcusCooldown,
-              },
-            ],
-            rateLimited: [],
-            failed: [],
+            channel: "SMS",
+            deliveryMode: "sms",
+            cooldown: marcusCooldown,
           }),
           { status: 201, headers: { "Content-Type": "application/json" } },
         ),
@@ -262,10 +256,6 @@ describe("Reminder Pills & 24h Cooldown UI", () => {
       </AppShell>,
     );
 
-    const batchBtn = screen.getByTestId("send-batch-reminders-btn");
-    expect(batchBtn).toBeEnabled();
-    expect(batchBtn).toHaveTextContent("Send 2 reminders");
-
     const elenaRemindBtn = screen.getByTestId("remind-peer-btn-grp-apt4b-u-elena");
     expect(elenaRemindBtn).toBeEnabled();
     expect(elenaRemindBtn).toHaveTextContent("Remind");
@@ -279,19 +269,14 @@ describe("Reminder Pills & 24h Cooldown UI", () => {
     expect(elenaRemindBtn).toHaveTextContent("Reminded today (24h remaining)");
     expect(screen.getByText("Push reminder sent")).toBeInTheDocument();
 
-    // Batch button decrements from 2 to 1
-    expect(batchBtn).toBeEnabled();
-    expect(batchBtn).toHaveTextContent("Send 1 reminder");
-
-    // Click Send 1 reminder -> sends only Marcus (SMS)
-    await user.click(batchBtn);
+    // Click single Remind for Marcus (SMS)
+    const marcusRemindBtn = screen.getByTestId("remind-peer-btn-grp-tahoe-u-marcus");
+    expect(marcusRemindBtn).toBeEnabled();
+    await user.click(marcusRemindBtn);
 
     await waitFor(() => {
-      expect(batchBtn).toBeDisabled();
+      expect(marcusRemindBtn).toBeDisabled();
     });
-    expect(batchBtn).toHaveTextContent("Reminded today (24h remaining)");
-    const marcusRemindBtn = screen.getByTestId("remind-peer-btn-grp-tahoe-u-marcus");
-    expect(marcusRemindBtn).toBeDisabled();
     expect(marcusRemindBtn).toHaveTextContent("Reminded today (24h remaining)");
 
     expect(fetchSpy).toHaveBeenNthCalledWith(
@@ -301,13 +286,12 @@ describe("Reminder Pills & 24h Cooldown UI", () => {
     );
     expect(fetchSpy).toHaveBeenNthCalledWith(
       2,
-      "/api/reminders",
+      "/api/groups/grp-tahoe/reminders",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
-          targets: [
-            { group_id: "grp-tahoe", debtor_id: "u-marcus", amount_cents: 2500 },
-          ],
+          debtor_id: "u-marcus",
+          amount_cents: 2500,
         }),
       }),
     );
@@ -381,9 +365,7 @@ describe("Reminder Pills & 24h Cooldown UI", () => {
     expect(marcusRemindBtn).toHaveTextContent("Reminded today (19h remaining)");
     expect(screen.getByText("Reminder cooldown active")).toBeInTheDocument();
 
-    const batchBtn = screen.getByTestId("send-batch-reminders-btn");
-    expect(batchBtn).toBeDisabled();
-    expect(batchBtn).toHaveTextContent("Reminded today (17h remaining)");
+
   });
 
   it("wires Remind pill with 24h cooldown on Split Groups Spotlight member cards", async () => {

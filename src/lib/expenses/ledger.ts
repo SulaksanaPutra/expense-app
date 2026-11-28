@@ -1,5 +1,9 @@
 import { parseCycleParam } from "@/components/shell/url-state";
-import { formatMinorUnits, formatMinorUnitsDecimal } from "@/lib/money";
+import {
+  convertMinorUnitsToCurrency,
+  formatMinorUnits,
+  formatMinorUnitsDecimal,
+} from "@/lib/money";
 import {
   computeGroupMemberNetBalances,
   computeMemberNetBalancesFromEdges,
@@ -74,6 +78,8 @@ export interface ExpenseGroupInfo {
   simplifyDebts: boolean;
   operationalBudgetCents: number | null;
   billingCycleAnchorDay: number;
+  cycleResetDay?: number;
+  autoSettleOnReset?: boolean;
   currentUserRole: MemberRole | null;
   currentUserStatus?: MemberStatus | null;
   members: ExpenseGroupMemberInfo[];
@@ -147,11 +153,16 @@ export interface ExpensesKpiSummary {
   pendingItemsCount: number;
   pendingPeerCount: number;
   youOweCount: number;
+  youOwePeerCount: number;
   youOweCents: number;
   owedToYouCount: number;
   owedToYouCents: number;
+  netSettlementCents: number;
+  operationalBudgetCents: number | null;
+  budgetUtilizationPercent: number | null;
   displayCurrency: string;
   hasMixedCurrencies: boolean;
+  isFxRolledUp: boolean;
   nextSettlementDateIso: string;
   nextSettlementDateLabel: string;
   categoryTotals: CategoryTotalItem[];
@@ -510,6 +521,7 @@ export function computeExpensesKpiSummary(params: {
   currentUserId: string;
   userBaseCurrency: string;
   personalShareCapCents: number | null;
+  fxRates?: Readonly<Record<string, number>>;
   referenceDate?: Date;
 }): ExpensesKpiSummary {
   const {
@@ -521,22 +533,35 @@ export function computeExpensesKpiSummary(params: {
     currentUserId,
     userBaseCurrency,
     personalShareCapCents,
+    fxRates,
     referenceDate = new Date(),
   } = params;
 
-  const scopedGroups =
-    activeGroupId === "all"
-      ? groups
-      : groups.filter((g) => g.id === activeGroupId);
+  const isAllGroups = activeGroupId === "all";
+  const scopedGroups = isAllGroups
+    ? groups
+    : groups.filter((g) => g.id === activeGroupId);
 
-  const currencies = Array.from(new Set(scopedGroups.map((g) => g.baseCurrency)));
+  const normalizedUserCurrency = (userBaseCurrency || "USD").trim().toUpperCase();
+  const currencies = Array.from(
+    new Set(scopedGroups.map((g) => (g.baseCurrency || "USD").trim().toUpperCase())),
+  );
   const hasMixedCurrencies = currencies.length > 1;
-  const displayCurrency =
-    scopedGroups.length === 1
-      ? scopedGroups[0].baseCurrency
-      : currencies.length === 1
-        ? currencies[0]
-        : userBaseCurrency;
+  const displayCurrency = isAllGroups
+    ? normalizedUserCurrency
+    : (scopedGroups[0]?.baseCurrency || normalizedUserCurrency).trim().toUpperCase();
+  const isFxRolledUp =
+    isAllGroups && currencies.some((code) => code !== displayCurrency);
+
+  const toDisplayMinorUnits = (amountMinor: number, sourceCurrency: string): number => {
+    if (!isAllGroups) return Math.trunc(amountMinor);
+    return convertMinorUnitsToCurrency(
+      amountMinor,
+      sourceCurrency || displayCurrency,
+      displayCurrency,
+      fxRates,
+    );
+  };
 
   const prevCycleSlug = stepCycleSlugSafe(cycleSlug, -1);
 
@@ -550,12 +575,21 @@ export function computeExpensesKpiSummary(params: {
   const categoryTotalsMap = new Map<string, { amountCents: number; count: number }>();
 
   for (const exp of expenses) {
-    if (activeGroupId !== "all" && exp.groupId !== activeGroupId) continue;
+    if (!isAllGroups && exp.groupId !== activeGroupId) continue;
+
+    const expCurrency = (exp.groupBaseCurrency || exp.currency || displayCurrency)
+      .trim()
+      .toUpperCase();
 
     if (isExpenseInCycleWindow(exp.expenseDate, cycleSlug, exp.groupBillingAnchorDay)) {
-      totalGroupExpensesCents += Math.trunc(exp.amountCents);
+      const convertedAmount = toDisplayMinorUnits(exp.amountCents, expCurrency);
+      const convertedShare = toDisplayMinorUnits(
+        getUserShareCents(exp, currentUserId),
+        expCurrency,
+      );
+      totalGroupExpensesCents += convertedAmount;
       transactionCount += 1;
-      personalShareCents += getUserShareCents(exp, currentUserId);
+      personalShareCents += convertedShare;
       if (!exp.isSettledForUser && !exp.isLocked) {
         pendingItemsCount += 1;
         if (exp.paidBy !== currentUserId) {
@@ -573,13 +607,13 @@ export function computeExpensesKpiSummary(params: {
         amountCents: 0,
         count: 0,
       };
-      catEntry.amountCents += Math.trunc(exp.amountCents);
+      catEntry.amountCents += convertedAmount;
       catEntry.count += 1;
       categoryTotalsMap.set(exp.category, catEntry);
     } else if (
       isExpenseInCycleWindow(exp.expenseDate, prevCycleSlug, exp.groupBillingAnchorDay)
     ) {
-      previousCycleExpensesCents += Math.trunc(exp.amountCents);
+      previousCycleExpensesCents += toDisplayMinorUnits(exp.amountCents, expCurrency);
     }
   }
 
@@ -603,7 +637,16 @@ export function computeExpensesKpiSummary(params: {
       : null;
 
   const uniqueMemberIds = new Set<string>();
+  let totalOperationalBudgetCents = 0;
+  let hasAnyOperationalBudget = false;
   for (const g of scopedGroups) {
+    if (g.operationalBudgetCents !== null && g.operationalBudgetCents > 0) {
+      hasAnyOperationalBudget = true;
+      totalOperationalBudgetCents += toDisplayMinorUnits(
+        g.operationalBudgetCents,
+        g.baseCurrency,
+      );
+    }
     for (const m of g.members) {
       if (m.status === "ACTIVE") {
         uniqueMemberIds.add(m.userId);
@@ -611,10 +654,19 @@ export function computeExpensesKpiSummary(params: {
     }
   }
 
+  const operationalBudgetCents = hasAnyOperationalBudget
+    ? totalOperationalBudgetCents
+    : null;
+  const budgetUtilizationPercent =
+    operationalBudgetCents !== null && operationalBudgetCents > 0
+      ? Math.round((totalGroupExpensesCents / operationalBudgetCents) * 1000) / 10
+      : null;
+
   let youOweCents = 0;
   let youOweCount = 0;
   let owedToYouCents = 0;
   let owedToYouCount = 0;
+  const youOwePeers = new Set<string>();
   const pendingDebtPeers = new Set<string>();
 
   for (const group of scopedGroups) {
@@ -624,25 +676,46 @@ export function computeExpensesKpiSummary(params: {
       settlements,
     });
     for (const edge of edges) {
+      const convertedEdgeCents = toDisplayMinorUnits(
+        edge.amountCents,
+        edge.currency || group.baseCurrency,
+      );
       if (edge.payerId === currentUserId) {
-        youOweCents += edge.amountCents;
+        youOweCents += convertedEdgeCents;
         youOweCount += 1;
+        youOwePeers.add(edge.recipientId);
         pendingDebtPeers.add(edge.recipientId);
       } else if (edge.recipientId === currentUserId) {
-        owedToYouCents += edge.amountCents;
+        owedToYouCents += convertedEdgeCents;
         owedToYouCount += 1;
         pendingDebtPeers.add(edge.payerId);
       }
     }
   }
 
+  const netSettlementCents = owedToYouCents - youOweCents;
   const unsettledTotalCents = youOweCents + owedToYouCents;
   const resolvedPendingItemsCount =
     pendingItemsCount > 0 ? pendingItemsCount : youOweCount + owedToYouCount;
   const pendingPeerCount =
     pendingDebtPeers.size > 0 ? pendingDebtPeers.size : pendingExpensePeers.size;
-  const anchorDay = scopedGroups[0]?.billingCycleAnchorDay ?? 1;
-  const nextSettlement = getNextGroupSettlementDate(anchorDay, referenceDate);
+
+  const autoSettleGroups = scopedGroups.filter(
+    (g) => g.autoSettleOnReset !== false,
+  );
+  const candidateResetGroups =
+    autoSettleGroups.length > 0 ? autoSettleGroups : scopedGroups;
+  const nextSettlement =
+    candidateResetGroups.length > 0
+      ? candidateResetGroups
+          .map((g) =>
+            getNextGroupSettlementDate(
+              g.cycleResetDay ?? g.billingCycleAnchorDay ?? 1,
+              referenceDate,
+            ),
+          )
+          .sort((a, b) => a.isoDate.localeCompare(b.isoDate))[0]
+      : getNextGroupSettlementDate(1, referenceDate);
 
   const categoryTotals = Array.from(categoryTotalsMap.entries())
     .map(([category, data]) => ({
@@ -666,11 +739,16 @@ export function computeExpensesKpiSummary(params: {
     pendingItemsCount: resolvedPendingItemsCount,
     pendingPeerCount,
     youOweCount,
+    youOwePeerCount: youOwePeers.size,
     youOweCents,
     owedToYouCount,
     owedToYouCents,
+    netSettlementCents,
+    operationalBudgetCents,
+    budgetUtilizationPercent,
     displayCurrency,
     hasMixedCurrencies,
+    isFxRolledUp,
     nextSettlementDateIso: nextSettlement.isoDate,
     nextSettlementDateLabel: nextSettlement.label,
     categoryTotals,

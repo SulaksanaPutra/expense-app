@@ -1,23 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { isValidCurrencyCode } from "@/lib/money";
-
-// Reference rates per 1 USD for offline / sandbox fallback
-const USD_PER_UNIT: Record<string, number> = {
-  USD: 1,
-  EUR: 1.085,
-  GBP: 1.27,
-  CAD: 0.725,
-  AUD: 0.655,
-  CHF: 1.135,
-  JPY: 0.006667,
-};
-
-function getFallbackRate(from: string, to: string): number {
-  if (from === to) return 1;
-  const fromUsd = USD_PER_UNIT[from] ?? 1;
-  const toUsd = USD_PER_UNIT[to] ?? 1;
-  return Number((fromUsd / toUsd).toFixed(6));
-}
+import { getFallbackFxRate, isValidCurrencyCode } from "@/lib/money";
 
 export async function GET(request: NextRequest) {
   const from = (request.nextUrl.searchParams.get("from") ?? "USD")
@@ -80,7 +62,7 @@ export async function GET(request: NextRequest) {
     ok: true,
     from,
     to,
-    rate: getFallbackRate(from, to),
+    rate: getFallbackFxRate(from, to),
     source: "API" as const,
   });
 }
