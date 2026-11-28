@@ -53,6 +53,7 @@ export async function GET() {
       ok: true,
       profile: data.profile,
       groupCount: data.groupCount,
+      settlementHandles: data.settlementHandles,
     },
     { status: 200 },
   );
