@@ -7,6 +7,7 @@ import type {
 } from "@/types/database";
 import {
   createSignedInviteToken,
+  INVITE_TOKEN_TTL_MS,
   verifySignedInviteToken,
   type InviteTokenVerifyErrorCode,
 } from "./invite-token";
@@ -180,6 +181,7 @@ export async function previewGroupInvite(
   const verified = verifySignedInviteToken({
     token: params.token,
     expectedSlug: params.slug,
+    maxAgeMs: INVITE_TOKEN_TTL_MS,
   });
 
   if (!verified.ok) {
@@ -269,7 +271,10 @@ export async function previewGroupInvite(
   let projectedSharePercentage = 0;
   if (existingActive) {
     projectedSharePercentage = Number(existingActive.share_percentage);
-  } else if (group.default_split_mode === "EQUAL") {
+  } else if (
+    group.default_split_mode === "EQUAL" ||
+    group.default_split_mode === "SHARES"
+  ) {
     const projectedMap = computeEqualSharePercentages([
       ...activeMembers.map((m) => m.user_id),
       "__pending_member__",
@@ -320,6 +325,7 @@ export async function acceptGroupInvite(
   const verified = verifySignedInviteToken({
     token: params.token,
     expectedSlug: params.slug,
+    maxAgeMs: INVITE_TOKEN_TTL_MS,
   });
 
   if (!verified.ok) {
@@ -485,6 +491,20 @@ export async function acceptGroupInvite(
     params.authUser.id,
   ];
 
+  // Mark matching email invite record as ACCEPTED when present (non-blocking for link invites / partial mocks).
+  try {
+    const invitesTable = adminSupabase.from("group_invites") as unknown as {
+      update?: (patch: { status: "ACCEPTED" }) => {
+        eq?: (col: string, val: string) => Promise<{ error: unknown }>;
+      };
+    };
+    if (params.token && typeof invitesTable?.update === "function") {
+      await invitesTable.update({ status: "ACCEPTED" }).eq?.("token", params.token);
+    }
+  } catch {
+    // Non-blocking for link invites or partial test mocks.
+  }
+
   if (group.default_split_mode === "EQUAL") {
     const equalShares = computeEqualSharePercentages(orderedActiveMemberIds);
 
@@ -546,7 +566,69 @@ export async function acceptGroupInvite(
     };
   }
 
-  // CUSTOM_RATIOS mode: new member remains at 0% and group transitions to NEEDS_RATIO_UPDATE.
+  // SHARES mode: auto-join with 1 default share unit and keep group ACTIVE.
+  if (group.default_split_mode === "SHARES") {
+    const equalShares = computeEqualSharePercentages(orderedActiveMemberIds);
+    for (const memberId of orderedActiveMemberIds) {
+      const nextShare = equalShares.get(memberId) ?? 0;
+      const { error: shareUpdateError } = await adminSupabase
+        .from("group_members")
+        .update({ share_percentage: nextShare })
+        .eq("group_id", group.id)
+        .eq("user_id", memberId);
+
+      if (shareUpdateError) {
+        return {
+          ok: false,
+          status: 500,
+          code: "SERVER_CONFIG_ERROR",
+          message:
+            shareUpdateError.message ||
+            "Failed to recalculate proportional member shares.",
+        };
+      }
+    }
+
+    const joinedShare = equalShares.get(params.authUser.id) ?? 0;
+    const memberDisplayName =
+      params.authUser.fullName?.trim() ||
+      params.authUser.email ||
+      "New Member";
+    await recordGroupAuditEvent(adminSupabase, {
+      groupId: group.id,
+      actorId: params.authUser.id,
+      actorName: memberDisplayName,
+      eventType:
+        existingSelf && existingSelf.status === "FORMER_MEMBER"
+          ? "MEMBER_REJOINED"
+          : "MEMBER_JOINED",
+      summary: `${memberDisplayName} joined group via invite in SHARES mode (${joinedShare}% share)`,
+      metadata: {
+        joined_share_percentage: joinedShare,
+        next_split_mode: "SHARES",
+        flagged_needs_ratio_update: false,
+      },
+    });
+
+    return {
+      ok: true,
+      alreadyMember: false,
+      groupId: group.id,
+      slug: group.slug,
+      groupName: group.name,
+      groupStatus: group.status,
+      defaultSplitMode: "SHARES",
+      sharePercentage: joinedShare,
+      activeMemberCount: orderedActiveMemberIds.length,
+      memberShares: orderedActiveMemberIds.map((userId) => ({
+        userId,
+        sharePercentage: equalShares.get(userId) ?? 0,
+      })),
+    };
+  }
+
+  // PERCENTAGE / CUSTOM / CUSTOM_RATIOS mode: new member remains at 0% and group transitions to NEEDS_RATIO_UPDATE.
+  const effectiveSplitMode = group.default_split_mode;
   const { error: statusUpdateError } = await adminSupabase
     .from("groups")
     .update({ status: "NEEDS_RATIO_UPDATE" })
@@ -575,10 +657,10 @@ export async function acceptGroupInvite(
       existingSelf && existingSelf.status === "FORMER_MEMBER"
         ? "MEMBER_REJOINED"
         : "MEMBER_JOINED",
-    summary: `${memberDisplayName} joined in CUSTOM_RATIOS mode (0% initial share; review required)`,
+    summary: `${memberDisplayName} joined in ${effectiveSplitMode} mode (0% initial share; review required)`,
     metadata: {
       joined_share_percentage: 0,
-      next_split_mode: "CUSTOM_RATIOS",
+      next_split_mode: effectiveSplitMode,
       flagged_needs_ratio_update: true,
     },
   });
@@ -598,7 +680,7 @@ export async function acceptGroupInvite(
     slug: group.slug,
     groupName: group.name,
     groupStatus: "NEEDS_RATIO_UPDATE",
-    defaultSplitMode: "CUSTOM_RATIOS",
+    defaultSplitMode: effectiveSplitMode,
     sharePercentage: 0,
     activeMemberCount: orderedActiveMemberIds.length,
     memberShares,

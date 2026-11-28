@@ -24,12 +24,15 @@ import {
   parseCurrencyInputToMinorUnits,
 } from "@/lib/money";
 import type { SettingsUserProfile } from "@/lib/settings/service";
+import type { SecuritySessionsData } from "@/lib/settings/security";
 import { AccountDangerZone } from "./AccountDangerZone";
+import { SecuritySessionsCard } from "./SecuritySessionsCard";
 
 export interface SettingsClientProps {
   initialProfile: SettingsUserProfile;
   groupCount?: number;
   balances: UserGroupBalanceSummary[];
+  initialSecurity?: SecuritySessionsData;
   loadError?: string | null;
 }
 
@@ -108,6 +111,7 @@ export function SettingsClient({
   initialProfile,
   groupCount = 0,
   balances,
+  initialSecurity,
   loadError = null,
 }: SettingsClientProps) {
   const router = useRouter();
@@ -164,6 +168,35 @@ export function SettingsClient({
   const toastCounterRef = React.useRef(0);
   const avatarInputRef = React.useRef<HTMLInputElement>(null);
   const emailInputId = React.useId();
+
+  const resolvedSecurity = React.useMemo<SecuritySessionsData>(
+    () =>
+      initialSecurity ?? {
+        sso: {
+          googleConnected: false,
+          email: initialProfile.email,
+          providerLabel: "Google Workspace SSO",
+          statusLabel: "Available",
+          twoFactorEnforced: false,
+        },
+        passkeys: [],
+        sessions: [
+          {
+            id: `session-current-${initialProfile.id.slice(0, 8)}`,
+            deviceLabel: "Web Browser · Current Session",
+            browser: "Browser",
+            os: "Desktop",
+            deviceType: "desktop",
+            location: "Current session",
+            ipAddress: "127.0.0.1",
+            createdAt: initialProfile.createdAt,
+            lastActiveAt: new Date().toISOString(),
+            isCurrent: true,
+          },
+        ],
+      },
+    [initialProfile.createdAt, initialProfile.email, initialProfile.id, initialSecurity],
+  );
 
   const pushToast = React.useCallback((toast: Omit<ToastItem, "id">) => {
     toastCounterRef.current += 1;
@@ -690,6 +723,12 @@ export function SettingsClient({
               />
             </Card>
           </Card>
+
+          {/* Card 3 (Left): Security & Active Sessions */}
+          <SecuritySessionsCard
+            initialData={resolvedSecurity}
+            onToast={pushToast}
+          />
         </div>
 
         {/* RIGHT COLUMN (5 cols) */}

@@ -1,6 +1,9 @@
 import { JoinGroupClient } from "@/components/split-groups/JoinGroupClient";
 import { getAuthenticatedUser, hasSupabaseEnv } from "@/lib/auth/guards";
-import { verifySignedInviteToken } from "@/lib/groups/invite-token";
+import {
+  INVITE_TOKEN_TTL_MS,
+  verifySignedInviteToken,
+} from "@/lib/groups/invite-token";
 import { previewGroupInvite } from "@/lib/groups/onboarding";
 import { createAdminClient, hasSupabaseAdminEnv } from "@/lib/supabase/admin";
 
@@ -28,6 +31,7 @@ export default async function JoinGroupPage({
   const verifiedToken = verifySignedInviteToken({
     token,
     expectedSlug: slug,
+    maxAgeMs: INVITE_TOKEN_TTL_MS,
   });
 
   if (!verifiedToken.ok) {
