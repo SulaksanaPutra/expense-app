@@ -20,7 +20,7 @@ const SIZE_CLASSES: Record<AvatarSize, string> = {
 };
 
 const TONE_PALETTE = [
-  "bg-[#0066cc] text-white",
+  "bg-primary text-on-primary",
   "bg-emerald-600 text-white",
   "bg-indigo-600 text-white",
   "bg-amber-600 text-white",
@@ -132,7 +132,7 @@ export function AvatarStack({
         <span
           aria-hidden="true"
           className={cn(
-            "inline-flex shrink-0 items-center justify-center rounded-full border border-hairline bg-canvas-parchment font-semibold text-ink-muted-80 ring-2 ring-canvas",
+            "inline-flex shrink-0 items-center justify-center rounded-full border border-hairline bg-surface-container-low font-semibold text-on-surface-variant ring-2 ring-canvas tabular-nums",
             SIZE_CLASSES[size],
           )}
         >

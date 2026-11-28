@@ -68,10 +68,10 @@ export function Pagination({
       )}
     >
       {showSummary ? (
-        <p className="text-[13px] text-ink-muted-48">
-          Showing <span className="font-medium text-ink">{startItem}</span> to{" "}
-          <span className="font-medium text-ink">{endItem}</span> of{" "}
-          <span className="font-medium text-ink">{totalItems}</span> {itemLabel}
+        <p className="text-[13px] text-outline tabular-nums">
+          Showing <span className="font-medium text-on-surface">{startItem}</span> to{" "}
+          <span className="font-medium text-on-surface">{endItem}</span> of{" "}
+          <span className="font-medium text-on-surface">{totalItems}</span> {itemLabel}
         </p>
       ) : (
         <span />
@@ -83,11 +83,11 @@ export function Pagination({
           disabled={safeCurrent <= 1}
           onClick={() => onPageChange(safeCurrent - 1)}
           className={cn(
-            "inline-flex h-8 items-center justify-center rounded-pill border border-hairline bg-canvas px-3 text-[13px] font-medium text-ink-muted-80 transition-colors",
+            "inline-flex h-8 items-center justify-center rounded-pill border border-hairline bg-canvas px-3 text-[13px] font-medium text-on-surface-variant transition-colors",
             "focus-visible:outline-2 focus-visible:outline-primary-focus focus-visible:outline-offset-2",
             safeCurrent <= 1
               ? "opacity-45 cursor-not-allowed"
-              : "hover:bg-canvas-parchment hover:text-ink cursor-pointer",
+              : "hover:bg-surface-container-low hover:text-on-surface cursor-pointer",
           )}
         >
           Previous
@@ -100,7 +100,7 @@ export function Pagination({
                 <span
                   key={`ellipsis-${index}`}
                   aria-hidden="true"
-                  className="px-1.5 text-[13px] text-ink-muted-48"
+                  className="px-1.5 text-[13px] text-outline"
                 >
                   ...
                 </span>
@@ -116,11 +116,11 @@ export function Pagination({
                 aria-label={`Page ${page}`}
                 onClick={() => onPageChange(page)}
                 className={cn(
-                  "inline-flex h-8 w-8 items-center justify-center rounded-full text-[13px] font-medium transition-colors cursor-pointer",
+                  "inline-flex h-8 w-8 items-center justify-center rounded-full text-[13px] font-medium tabular-nums transition-colors cursor-pointer",
                   "focus-visible:outline-2 focus-visible:outline-primary-focus focus-visible:outline-offset-2",
                   isCurrent
                     ? "bg-primary text-on-primary"
-                    : "border border-hairline bg-canvas text-ink-muted-80 hover:bg-canvas-parchment hover:text-ink",
+                    : "border border-hairline bg-canvas text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface",
                 )}
               >
                 {page}
@@ -134,11 +134,11 @@ export function Pagination({
           disabled={safeCurrent >= safeTotalPages}
           onClick={() => onPageChange(safeCurrent + 1)}
           className={cn(
-            "inline-flex h-8 items-center justify-center rounded-pill border border-hairline bg-canvas px-3 text-[13px] font-medium text-ink-muted-80 transition-colors",
+            "inline-flex h-8 items-center justify-center rounded-pill border border-hairline bg-canvas px-3 text-[13px] font-medium text-on-surface-variant transition-colors",
             "focus-visible:outline-2 focus-visible:outline-primary-focus focus-visible:outline-offset-2",
             safeCurrent >= safeTotalPages
               ? "opacity-45 cursor-not-allowed"
-              : "hover:bg-canvas-parchment hover:text-ink cursor-pointer",
+              : "hover:bg-surface-container-low hover:text-on-surface cursor-pointer",
           )}
         >
           Next

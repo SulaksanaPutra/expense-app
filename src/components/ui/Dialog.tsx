@@ -169,6 +169,7 @@ export function Dialog({
   return (
     <dialog
       ref={dialogRef}
+      aria-modal="true"
       aria-labelledby={titleId}
       aria-describedby={description ? descriptionId : undefined}
       onCancel={handleCancel}
@@ -177,7 +178,7 @@ export function Dialog({
       onClick={handleBackdropClick}
       {...({ closedby: closedByValue } as Record<string, string>)}
       className={cn(
-        "fixed inset-0 m-auto w-[calc(100%-2rem)] bg-transparent p-0 text-ink backdrop:bg-ink/45",
+        "fixed inset-0 m-auto w-[calc(100%-2rem)] bg-transparent p-0 text-on-surface backdrop:bg-on-surface/45",
         SIZE_CLASSES[size],
         !open && "hidden",
       )}
@@ -185,7 +186,7 @@ export function Dialog({
       {open && (
         <div
           className={cn(
-            "flex max-h-[90vh] w-full flex-col overflow-hidden rounded-[18px] border border-hairline bg-canvas text-ink",
+            "flex max-h-[90vh] w-full flex-col overflow-hidden rounded-[18px] border border-hairline bg-canvas text-on-surface shadow-[0_16px_40px_rgba(0,0,0,0.08)]",
             className,
           )}
         >
@@ -193,14 +194,14 @@ export function Dialog({
             <div className="min-w-0">
               <h2
                 id={titleId}
-                className="font-display text-[19px] font-semibold leading-snug tracking-[-0.015em] text-ink"
+                className="font-display text-[17px] font-semibold leading-snug tracking-[-0.015em] text-on-surface"
               >
                 {title}
               </h2>
               {description && (
                 <p
                   id={descriptionId}
-                  className="mt-1 text-[13px] leading-relaxed text-ink-muted-48"
+                  className="mt-1 text-[13px] leading-relaxed text-outline"
                 >
                   {description}
                 </p>
@@ -211,7 +212,7 @@ export function Dialog({
                 type="button"
                 onClick={onClose}
                 aria-label="Close dialog"
-                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-hairline bg-canvas text-ink-muted-80 transition-colors hover:bg-canvas-parchment hover:text-ink focus-visible:outline-2 focus-visible:outline-primary-focus focus-visible:outline-offset-2"
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-hairline bg-canvas text-on-surface-variant transition-colors hover:bg-surface-container-low hover:text-on-surface focus-visible:outline-2 focus-visible:outline-primary-focus focus-visible:outline-offset-2"
               >
                 <X className="h-4 w-4" aria-hidden="true" />
               </button>

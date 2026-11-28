@@ -26,17 +26,17 @@ export interface ButtonProps
 
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
   primary:
-    "rounded-pill bg-primary text-on-primary hover:bg-primary-focus border border-transparent",
+    "rounded-pill bg-primary text-on-primary hover:bg-primary-focus border border-transparent shadow-xs",
   secondary:
-    "rounded-pill bg-canvas text-ink border border-hairline hover:bg-surface-pearl",
+    "rounded-pill bg-canvas text-on-surface border border-hairline hover:bg-surface-pearl",
   "danger-soft":
     "rounded-pill bg-red-50 text-red-700 border border-red-200 hover:bg-red-100",
   danger:
-    "rounded-pill bg-red-600 text-white border border-transparent hover:bg-red-700",
+    "rounded-pill bg-danger text-on-error border border-transparent hover:bg-red-700",
   ghost:
-    "rounded-pill bg-transparent text-ink-muted-80 border border-transparent hover:bg-canvas-parchment hover:text-ink",
+    "rounded-pill bg-transparent text-on-surface-variant border border-transparent hover:bg-surface-container-low hover:text-on-surface",
   "icon-circle":
-    "rounded-full bg-canvas text-ink border border-hairline hover:bg-canvas-parchment p-0",
+    "rounded-full bg-canvas text-on-surface border border-hairline hover:bg-surface-container-low p-0",
 };
 
 const SIZE_CLASSES: Record<ButtonSize, string> = {
@@ -77,7 +77,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         disabled={isDisabled}
         aria-busy={loading ? "true" : undefined}
         className={cn(
-          "inline-flex items-center justify-center font-medium leading-none transition-transform duration-150 select-none whitespace-nowrap",
+          "inline-flex items-center justify-center font-medium leading-none transition-all duration-150 select-none whitespace-nowrap",
           "focus-visible:outline-2 focus-visible:outline-primary-focus focus-visible:outline-offset-2",
           !isDisabled && "active:scale-95 cursor-pointer",
           isDisabled && "opacity-50 cursor-not-allowed",
