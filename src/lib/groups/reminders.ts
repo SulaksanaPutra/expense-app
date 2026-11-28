@@ -391,7 +391,7 @@ export async function sendSettlementReminder(
   // 1. Validate group exists and is not ARCHIVED
   const { data: groupRow, error: groupErr } = await supabase
     .from("groups")
-    .select("id, name, status, base_currency, simplify_debts")
+    .select("id, name, status, base_currency")
     .eq("id", groupId)
     .maybeSingle();
 
@@ -550,7 +550,7 @@ export async function sendSettlementReminder(
       groupId,
       groupName: groupRow.name,
       baseCurrency: groupRow.base_currency,
-      simplifyDebts: Boolean(groupRow.simplify_debts),
+      simplifyDebts: true,
       creditorId,
       debtorId,
     });

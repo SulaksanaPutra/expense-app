@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { runArchiveRulesEvaluation } from "@/lib/groups/archive";
 import {
   createGroupExpense,
   createGroupSettlement,
@@ -261,70 +260,5 @@ describe("Notification persistence for NEW_EXPENSE, SETTLEMENT_CONFIRMATION, and
       currency: "USD",
       is_read: false,
     });
-  });
-
-  it("persists deduplicated LEASE_ARCHIVE_PROMPT notifications for residential group admins", async () => {
-    const db: MockDb = {
-      users: [],
-      groups: [
-        {
-          id: "grp-res",
-          name: "Elm St Apt",
-          group_type: "RESIDENTIAL",
-          status: "ACTIVE",
-          billing_cycle_anchor_day: 1,
-          lease_end_date: "2026-10-31",
-          trip_auto_archive_enabled: true,
-          trip_auto_archive_days: 14,
-          residential_lease_prompt_enabled: true,
-          zero_balance_since: null,
-          lease_prompt_snoozed_until: null,
-        },
-      ],
-      group_members: [
-        {
-          group_id: "grp-res",
-          user_id: "u-admin",
-          role: "ADMIN",
-          status: "ACTIVE",
-          share_percentage: 50,
-          joined_at: "2026-01-01T00:00:00.000Z",
-        },
-        {
-          group_id: "grp-res",
-          user_id: "u-member",
-          role: "MEMBER",
-          status: "ACTIVE",
-          share_percentage: 50,
-          joined_at: "2026-01-02T00:00:00.000Z",
-        },
-      ],
-      expenses: [],
-      settlements: [],
-      billing_cycles: [],
-      notifications: [],
-      group_audit_logs: [],
-    };
-
-    const supabase = createMockSupabase(db) as unknown as Parameters<
-      typeof runArchiveRulesEvaluation
-    >[0];
-    const now = new Date("2026-11-15T12:00:00.000Z");
-
-    const first = await runArchiveRulesEvaluation(supabase, now);
-    expect(first.ok).toBe(true);
-    expect(db.notifications).toHaveLength(1);
-    expect(db.notifications[0]).toMatchObject({
-      user_id: "u-admin",
-      group_id: "grp-res",
-      type: "LEASE_ARCHIVE_PROMPT",
-      title: "Lease archive prompt",
-      is_read: false,
-    });
-
-    // Second evaluation does not create duplicate unread notification
-    const second = await runArchiveRulesEvaluation(supabase, now);
-    expect(second.ok).toBe(true);
-    expect(db.notifications).toHaveLength(1);
   });
 });

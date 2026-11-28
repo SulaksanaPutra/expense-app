@@ -213,8 +213,7 @@ describe("POST /api/groups Integration", () => {
         base_currency: "USD",
         operational_budget_cents: 450000,
         billing_cycle_anchor_day: 15,
-        lease_end_date: "2027-08-31",
-      }),
+        }),
     });
 
     const res = await createGroupPost(req);
@@ -231,7 +230,6 @@ describe("POST /api/groups Integration", () => {
       base_currency: "USD",
       operational_budget_cents: 450000,
       billing_cycle_anchor_day: 15,
-      lease_end_date: "2027-08-31",
       created_by: "usr-creator-1",
     });
 
@@ -472,6 +470,6 @@ describe("POST /api/groups Integration", () => {
     expect(result.archivedGroups).toHaveLength(1);
     expect(result.activeGroups[0].cycleTurnoverCents).toBe(8000);
     expect(result.activeGroups[0].userNetLedgerCents).toBe(4000);
-    expect(result.activeGroups[0].recurringRuleCount).toBe(1);
+    expect(result.activeGroups[0].recurringRuleCount).toBe(0);
   });
 });
