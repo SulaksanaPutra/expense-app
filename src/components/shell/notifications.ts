@@ -29,6 +29,8 @@ export function getNotificationTypeLabel(
       return "Reminder";
     case "LEASE_ARCHIVE_PROMPT":
       return "Cycle summary";
+    case "CYCLE_CLOSE_REMINDER":
+      return "Cycle closing";
     default:
       return null;
   }
