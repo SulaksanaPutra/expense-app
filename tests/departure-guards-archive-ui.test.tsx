@@ -248,11 +248,9 @@ describe("Departure Guards, Archive Rules & Read-Only Archived Ledgers UI", () =
 
     renderSplitGroups();
 
-    // 1. In Apt 4B Roommates (userNetLedgerCents = +10000), Leave Group via card menu opens blocking ConfirmDialog
-    await user.click(
-      screen.getByRole("button", { name: "Actions for Apt 4B Roommates" }),
-    );
-    await user.click(screen.getByRole("menuitem", { name: "Leave Group" }));
+    // 1. In Apt 4B Roommates (userNetLedgerCents = +10000), Leave Group via Split Rules & Invite tab opens blocking ConfirmDialog
+    await user.click(screen.getByRole("tab", { name: "Split Rules & Invite" }));
+    await user.click(screen.getByRole("button", { name: "Leave Group" }));
 
     const blockedDialog = screen.getByRole("dialog", {
       name: "Leave Apt 4B Roommates",
@@ -269,13 +267,8 @@ describe("Departure Guards, Archive Rules & Read-Only Archived Ledgers UI", () =
     expect(fetchSpy).not.toHaveBeenCalled();
 
     // 2. Switch to Coffee Club ($0.00 balance) -> Leave Group confirm button is enabled
-    await user.click(
-      screen.getByRole("button", { name: "Manage Group Coffee Club" }),
-    );
-    await user.click(
-      screen.getByRole("button", { name: "Actions for Coffee Club" }),
-    );
-    await user.click(screen.getByRole("menuitem", { name: "Leave Group" }));
+    await user.click(screen.getByTestId("group-card-grp-settled"));
+    await user.click(screen.getByRole("button", { name: "Leave Group" }));
 
     const allowedDialog = screen.getByRole("dialog", {
       name: "Leave Coffee Club",
@@ -445,25 +438,23 @@ describe("Departure Guards, Archive Rules & Read-Only Archived Ledgers UI", () =
 
     renderSplitGroups();
 
-    // 1. Residential 7-day post-lease prompt is visible
-    expect(
-      screen.getByText("Lease ended for Apt 4B Roommates"),
-    ).toBeInTheDocument();
-
-    // 2. Archive Rules modal opens with configurable controls
-    await user.click(screen.getByRole("button", { name: "Archive Rules" }));
-    const rulesDialog = screen.getByRole("dialog", {
-      name: "Group Archive Rules",
+    // 1. Archive Group confirmation opens from card menu showing Current Net Ledger
+    await user.click(
+      screen.getByRole("button", { name: "Actions for Apt 4B Roommates" }),
+    );
+    await user.click(screen.getByRole("menuitem", { name: "Archive Group" }));
+    const archiveConfirm = screen.getByRole("dialog", {
+      name: "Archive Apt 4B Roommates?",
     });
     expect(
-      within(rulesDialog).getByLabelText("Zero-balance days threshold"),
-    ).toHaveValue(14);
-    await user.click(within(rulesDialog).getByRole("button", { name: "Cancel" }));
-
-    // 3. Expand Archived Ledgers and inspect Summer Italy 2025 in read-only mode
+      within(archiveConfirm).getByText(/Current Net Ledger/i),
+    ).toBeInTheDocument();
     await user.click(
-      screen.getByRole("button", { name: /Archived Ledgers \(1\)/i }),
+      within(archiveConfirm).getByRole("button", { name: "Cancel" }),
     );
+
+    // 2. Switch to Archived tab and inspect Summer Italy 2025 in read-only mode
+    await user.click(screen.getByRole("tab", { name: "Archived (1)" }));
     const archivedCard = screen.getByTestId("archived-group-card-grp-italy");
     expect(within(archivedCard).getByText("Summer Italy 2025")).toBeInTheDocument();
 
@@ -481,8 +472,12 @@ describe("Departure Guards, Archive Rules & Read-Only Archived Ledgers UI", () =
       within(spotlight).queryByRole("button", { name: "Leave Group" }),
     ).not.toBeInTheDocument();
 
-    // 4. Archive Apt 4B Roommates via Residential lease prompt ConfirmDialog
-    await user.click(screen.getByRole("button", { name: "Archive Group" }));
+    // 4. Switch back to Active and archive Apt 4B Roommates via card menu ConfirmDialog
+    await user.click(screen.getByRole("tab", { name: "Active (2)" }));
+    await user.click(
+      screen.getByRole("button", { name: "Actions for Apt 4B Roommates" }),
+    );
+    await user.click(screen.getByRole("menuitem", { name: "Archive Group" }));
     const confirmArchive = screen.getByRole("dialog", {
       name: "Archive Apt 4B Roommates?",
     });
@@ -495,7 +490,7 @@ describe("Departure Guards, Archive Rules & Read-Only Archived Ledgers UI", () =
       expect.objectContaining({ method: "PATCH" }),
     );
     expect(
-      screen.getByRole("button", { name: /Archived Ledgers \(2\)/i }),
+      screen.getByRole("tab", { name: "Archived (2)" }),
     ).toBeInTheDocument();
   });
 });

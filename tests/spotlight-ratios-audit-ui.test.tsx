@@ -228,29 +228,19 @@ afterEach(() => {
 });
 
 describe("Spotlight Partition, ADMIN Edit Ratios Modal & Audit Log Drawer", () => {
-  it("renders Spotlight Partition with Paid This Period, Owed/Due status, Assigned Habitat, lease info, and 3-column summary strip", () => {
+  it("renders Spotlight Partition with Group Members Paid/Share/Net Position and Who Owes Whom transfers", () => {
     renderSplitGroups();
 
     const spotlight = screen.getByTestId("spotlight-partition");
-    expect(within(spotlight).getAllByText("Paid This Period").length).toBe(3);
-    expect(within(spotlight).getByText("Owed +$462.50")).toBeInTheDocument();
-    expect(within(spotlight).getByText("Due -$462.50")).toBeInTheDocument();
+    expect(within(spotlight).getByText("GROUP MEMBERS (3)")).toBeInTheDocument();
+    expect(within(spotlight).getAllByText("Paid:").length).toBe(3);
+    expect(within(spotlight).getAllByText("Share:").length).toBe(3);
+    expect(within(spotlight).getAllByText("Net Position").length).toBe(3);
+    expect(within(spotlight).getByText("+$462.50")).toBeInTheDocument();
+    expect(within(spotlight).getByText("-$462.50")).toBeInTheDocument();
     expect(within(spotlight).getByText("Settled")).toBeInTheDocument();
-
-    const habitatCard = screen.getByTestId("assigned-habitat-card");
-    expect(within(habitatCard).getByText("Assigned Habitat")).toBeInTheDocument();
-    expect(within(habitatCard).getByText("Apt 4B Roommates")).toBeInTheDocument();
-    expect(within(habitatCard).getByText("$4,500.00 Monthly Target")).toBeInTheDocument();
-    expect(within(habitatCard).getByText("Lease ends 2027-08-31")).toBeInTheDocument();
-    expect(within(habitatCard).getByText("Auto-ingestion active (2)")).toBeInTheDocument();
-
-    const summary = screen.getByLabelText("Selected group activity summary");
-    expect(within(summary).getByText("Monthly Logged Vouchers")).toBeInTheDocument();
-    expect(within(summary).getByText("4 Transactions")).toBeInTheDocument();
-    expect(within(summary).getByText("Recurring Rules")).toBeInTheDocument();
-    expect(within(summary).getByText("2 Active")).toBeInTheDocument();
-    expect(within(summary).getByText("Ledger Consensus")).toBeInTheDocument();
-    expect(within(summary).getByText("Open Balances")).toBeInTheDocument();
+    expect(within(spotlight).getByText("WHO OWES WHOM")).toBeInTheDocument();
+    expect(within(spotlight).getByText("1 transfer to zero balances")).toBeInTheDocument();
   });
 
   it("enforces view-only ratio display for MEMBER role and prevents saving changes", async () => {
@@ -260,12 +250,13 @@ describe("Spotlight Partition, ADMIN Edit Ratios Modal & Audit Log Drawer", () =
     renderSplitGroups();
 
     // Switch to Tahoe Ski Cabin where current user is MEMBER
-    await user.click(
-      screen.getByRole("button", { name: "Manage Group Tahoe Ski Cabin" }),
-    );
+    await user.click(screen.getByTestId("group-card-grp-tahoe"));
 
     const spotlight = screen.getByTestId("spotlight-partition");
     expect(within(spotlight).getByText("View-only")).toBeInTheDocument();
+    await user.click(
+      within(spotlight).getByRole("tab", { name: "Split Rules & Invite" }),
+    );
     expect(
       within(spotlight).queryByRole("button", { name: "Edit Ratios" }),
     ).not.toBeInTheDocument();
@@ -404,7 +395,7 @@ describe("Spotlight Partition, ADMIN Edit Ratios Modal & Audit Log Drawer", () =
     ).not.toBeInTheDocument();
 
     // Open Audit Log Drawer via "Log" button and verify recorded entries + filtering
-    await user.click(within(spotlight).getByRole("button", { name: "Log" }));
+    await user.click(within(spotlight).getByRole("button", { name: "Audit Log" }));
 
     const drawer = screen.getByTestId("audit-log-drawer");
     expect(

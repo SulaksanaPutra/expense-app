@@ -45,7 +45,7 @@ async function loadShellContext(): Promise<{
   try {
     const supabase = await createClient();
 
-    const [{ data: profile }, { data: groupRows }, notificationsResult] =
+    const [profileRes, groupsRes, notificationsResult] =
       await Promise.all([
         supabase
           .from("users")
@@ -57,7 +57,7 @@ async function loadShellContext(): Promise<{
         supabase
           .from("groups")
           .select(
-            "id, name, slug, group_type, status, base_currency, default_split_mode",
+            "id, name, slug, group_type, category, status, base_currency, default_split_mode",
           )
           .neq("status", "ARCHIVED")
           .order("created_at", { ascending: true }),
@@ -70,6 +70,29 @@ async function loadShellContext(): Promise<{
           .order("created_at", { ascending: false })
           .limit(25),
       ]);
+
+    let profile = profileRes.data;
+    if (profileRes.error && (profileRes.error.code === "42703" || profileRes.error.code === "PGRST204")) {
+      const fb = await supabase
+        .from("users")
+        .select("id, full_name, email, base_currency, personal_share_cap_cents, notification_prefs")
+        .eq("id", authUser.id)
+        .maybeSingle();
+      profile = fb.data ? ({ ...fb.data, display_currency: fb.data.base_currency, auto_include_in_expenses: true } as typeof profile) : null;
+    }
+
+    let groupRows = groupsRes.data;
+    if (groupsRes.error && (groupsRes.error.code === "42703" || groupsRes.error.code === "PGRST204")) {
+      const fb = await supabase
+        .from("groups")
+        .select("id, name, slug, group_type, status, base_currency, default_split_mode")
+        .neq("status", "ARCHIVED")
+        .order("created_at", { ascending: true });
+      groupRows = (fb.data ?? []).map((g) => ({
+        ...g,
+        category: g.group_type === "RESIDENTIAL" ? "HOME" : g.group_type === "TRIP" ? "TRIP" : "UTILITIES",
+      })) as typeof groupRows;
+    }
 
     const notifications: ShellNotificationItem[] = (
       notificationsResult?.data ?? []
@@ -201,6 +224,7 @@ async function loadShellContext(): Promise<{
       name: g.name,
       slug: g.slug,
       groupType: g.group_type,
+      category: g.category,
       status: g.status,
       baseCurrency: g.base_currency,
       defaultSplitMode: g.default_split_mode,

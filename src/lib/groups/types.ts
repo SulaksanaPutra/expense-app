@@ -1,4 +1,5 @@
 import type {
+  GroupCategory,
   GroupStatus,
   GroupType,
   MemberRole,
@@ -10,11 +11,23 @@ import type { ReminderCooldownInfo } from "./reminders";
 
 export interface CreateGroupInput {
   name: string;
+  category: GroupCategory;
   group_type: GroupType;
   base_currency: string;
+  default_split_mode: SplitMode;
   operational_budget_cents: number | null;
   billing_cycle_anchor_day: number;
   lease_end_date: string | null;
+  member_emails: string[];
+}
+
+export interface UpdateGroupInput {
+  name?: string;
+  category?: GroupCategory;
+  base_currency?: string;
+  default_split_mode?: SplitMode;
+  add_member_emails?: string[];
+  remove_member_ids?: string[];
 }
 
 export interface SplitGroupMemberDetail {
@@ -34,6 +47,7 @@ export interface SplitGroupDetail {
   name: string;
   slug: string;
   groupType: GroupType;
+  category?: GroupCategory;
   status: GroupStatus;
   baseCurrency: string;
   defaultSplitMode: SplitMode;

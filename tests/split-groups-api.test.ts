@@ -473,3 +473,249 @@ describe("POST /api/groups Integration", () => {
     expect(result.activeGroups[0].recurringRuleCount).toBe(0);
   });
 });
+
+
+import { PATCH as updateGroupPatch } from "@/app/api/groups/[groupId]/route";
+import { validateUpdateGroupPayload } from "@/lib/groups/service";
+
+describe("v2 Group Category Validation & PATCH /api/groups/[groupId]", () => {
+  const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const originalAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  beforeEach(() => {
+    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "anon-key-123";
+    getUserMock.mockReset();
+    fromMock.mockReset();
+  });
+
+  afterEach(() => {
+    if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
+    if (originalAnonKey === undefined)
+      delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    else process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = originalAnonKey;
+  });
+
+  it("accepts all 5 v2 categories (HOME|TRIP|DINING|UTILITIES|OTHER) and rejects invalid categories", () => {
+    for (const category of ["HOME", "TRIP", "DINING", "UTILITIES", "OTHER"]) {
+      const res = validateCreateGroupPayload({
+        name: `Group ${category}`,
+        category,
+        default_split_mode: "EQUAL",
+        base_currency: "USD",
+      });
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.data.category).toBe(category);
+      }
+    }
+
+    const badCreate = validateCreateGroupPayload({
+      name: "Bad Category Group",
+      category: "INVALID_CAT",
+      base_currency: "USD",
+    });
+    expect(badCreate.ok).toBe(false);
+    if (!badCreate.ok) {
+      expect(badCreate.errors.category).toMatch(/HOME, TRIP, DINING, UTILITIES, or OTHER/i);
+    }
+
+    const badUpdate = validateUpdateGroupPayload({
+      category: "SPORTS",
+    });
+    expect(badUpdate.ok).toBe(false);
+    if (!badUpdate.ok) {
+      expect(badUpdate.errors.category).toMatch(/HOME, TRIP, DINING, UTILITIES, or OTHER/i);
+    }
+  });
+
+  it("updates a group via PATCH /api/groups/[groupId] for an active ADMIN", async () => {
+    getUserMock.mockResolvedValueOnce({
+      data: {
+        user: {
+          id: "usr-admin-1",
+          email: "jordan@example.com",
+          user_metadata: { full_name: "Jordan Doe" },
+        },
+      },
+      error: null,
+    });
+
+    const groupsUpdateEqMock = vi.fn().mockResolvedValue({ error: null });
+    const groupsUpdateMock = vi.fn().mockReturnValue({ eq: groupsUpdateEqMock });
+    const invitesInsertMock = vi.fn().mockResolvedValue({ error: null });
+
+    fromMock.mockImplementation((table: string) => {
+      if (table === "groups") {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: vi.fn().mockResolvedValue({
+                data: {
+                  id: "grp-1",
+                  name: "Apartment 4B Shared",
+                  slug: "apt-4b",
+                  group_type: "RESIDENTIAL",
+                  category: "HOME",
+                  status: "ACTIVE",
+                  base_currency: "USD",
+                  default_split_mode: "EQUAL",
+                  operational_budget_cents: null,
+                  billing_cycle_anchor_day: 1,
+                  invite_token: "tok-1",
+                  invite_token_version: 1,
+                },
+                error: null,
+              }),
+            }),
+          }),
+          update: groupsUpdateMock,
+        };
+      }
+      if (table === "group_members") {
+        return {
+          select: () => ({
+            eq: () => ({
+              eq: () => ({
+                maybeSingle: vi.fn().mockResolvedValue({
+                  data: { role: "ADMIN", status: "ACTIVE" },
+                  error: null,
+                }),
+              }),
+              order: vi.fn().mockResolvedValue({
+                data: [
+                  {
+                    group_id: "grp-1",
+                    user_id: "usr-admin-1",
+                    role: "ADMIN",
+                    status: "ACTIVE",
+                    share_percentage: 100,
+                    joined_at: "2026-10-01T00:00:00Z",
+                  },
+                ],
+                error: null,
+              }),
+            }),
+          }),
+        };
+      }
+      if (table === "group_invites") {
+        return { insert: invitesInsertMock };
+      }
+      if (table === "users") {
+        return {
+          select: () => ({
+            in: vi.fn().mockResolvedValue({
+              data: [
+                {
+                  id: "usr-admin-1",
+                  full_name: "Jordan Doe",
+                  email: "jordan@example.com",
+                },
+              ],
+              error: null,
+            }),
+          }),
+        };
+      }
+      return {};
+    });
+
+    const req = new NextRequest("http://localhost:3000/api/groups/grp-1", {
+      method: "PATCH",
+      body: JSON.stringify({
+        name: "Friday Supper Club",
+        category: "DINING",
+        default_split_mode: "PERCENTAGE",
+        base_currency: "EUR",
+        add_member_emails: ["friend@example.com"],
+      }),
+    });
+
+    const res = await updateGroupPatch(req, {
+      params: Promise.resolve({ groupId: "grp-1" }),
+    });
+    expect(res.status).toBe(200);
+    const payload = await res.json();
+
+    expect(groupsUpdateMock).toHaveBeenCalledWith({
+      name: "Friday Supper Club",
+      category: "DINING",
+      group_type: "RECURRING",
+      base_currency: "EUR",
+      default_split_mode: "PERCENTAGE",
+    });
+    expect(invitesInsertMock).toHaveBeenCalledTimes(1);
+    expect(payload.group.name).toBe("Friday Supper Club");
+    expect(payload.group.category).toBe("DINING");
+    expect(payload.group.defaultSplitMode).toBe("PERCENTAGE");
+    expect(payload.group.baseCurrency).toBe("EUR");
+    expect(payload.invitedEmails).toEqual(["friend@example.com"]);
+  });
+
+  it("rejects PATCH /api/groups/[groupId] with 403 for non-ADMIN member", async () => {
+    getUserMock.mockResolvedValueOnce({
+      data: {
+        user: {
+          id: "usr-member-2",
+          email: "marcus@example.com",
+        },
+      },
+      error: null,
+    });
+
+    fromMock.mockImplementation((table: string) => {
+      if (table === "groups") {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: vi.fn().mockResolvedValue({
+                data: {
+                  id: "grp-1",
+                  name: "Apartment 4B Shared",
+                  slug: "apt-4b",
+                  group_type: "RESIDENTIAL",
+                  category: "HOME",
+                  status: "ACTIVE",
+                  base_currency: "USD",
+                  default_split_mode: "EQUAL",
+                  operational_budget_cents: null,
+                  billing_cycle_anchor_day: 1,
+                  invite_token: "tok-1",
+                  invite_token_version: 1,
+                },
+                error: null,
+              }),
+            }),
+          }),
+        };
+      }
+      if (table === "group_members") {
+        return {
+          select: () => ({
+            eq: () => ({
+              eq: () => ({
+                maybeSingle: vi.fn().mockResolvedValue({
+                  data: { role: "MEMBER", status: "ACTIVE" },
+                  error: null,
+                }),
+              }),
+            }),
+          }),
+        };
+      }
+      return {};
+    });
+
+    const req = new NextRequest("http://localhost:3000/api/groups/grp-1", {
+      method: "PATCH",
+      body: JSON.stringify({ name: "Hijacked Name" }),
+    });
+
+    const res = await updateGroupPatch(req, {
+      params: Promise.resolve({ groupId: "grp-1" }),
+    });
+    expect(res.status).toBe(403);
+  });
+});

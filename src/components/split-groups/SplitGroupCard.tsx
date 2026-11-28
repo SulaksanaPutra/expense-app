@@ -2,63 +2,89 @@
 
 import * as React from "react";
 import {
-  ArrowDownLeft,
-  ArrowUpRight,
-  CheckCircle2,
-  ChevronRight,
-  Copy,
-  Layers,
-  LogOut,
-  Zap,
+  Archive,
+  Clock,
+  Pencil,
+  SlidersHorizontal,
 } from "lucide-react";
 import {
   AvatarStack,
   Badge,
-  Button,
   Card,
   Dropdown,
 } from "@/components/ui";
-import type { BadgeTone, DropdownItem } from "@/components/ui";
+import type { DropdownItem } from "@/components/ui";
 import { cn } from "@/lib/cn";
+import { resolveGroupCategory } from "@/lib/groups/service";
 import type { SplitGroupDetail } from "@/lib/groups/types";
 import { formatMinorUnits } from "@/lib/money";
-import type { GroupType } from "@/types/database";
+import type { GroupCategory } from "@/types/database";
 
-const GROUP_TYPE_BADGE: Record<
-  GroupType,
-  { label: string; tone: BadgeTone }
-> = {
-  RESIDENTIAL: { label: "Primary Residence", tone: "info" },
-  TRIP: { label: "Seasonal Trip", tone: "warning" },
-  RECURRING: { label: "Recurring Flat", tone: "neutral" },
+export const GROUP_CATEGORY_LABELS: Record<GroupCategory, string> = {
+  HOME: "Home",
+  TRIP: "Trip",
+  DINING: "Dining",
+  UTILITIES: "Utilities",
+  OTHER: "Other",
 };
+
+export function formatSplitRuleLabel(group: SplitGroupDetail): string {
+  const activeCount = group.members.filter((m) => m.status === "ACTIVE").length;
+
+  if (group.defaultSplitMode === "EQUAL") {
+    if (activeCount === 2) {
+      return "2-Way (50/50)";
+    }
+    if (activeCount > 0) {
+      const pct = 100 / activeCount;
+      const pctLabel = Number.isInteger(pct) ? `${pct}%` : `${pct.toFixed(1)}%`;
+      return `${activeCount}-Way Equal (${pctLabel})`;
+    }
+    return "Equal Split";
+  }
+
+  if (group.defaultSplitMode === "PERCENTAGE") {
+    return "Percentage Split";
+  }
+
+  if (group.defaultSplitMode === "SHARES") {
+    return "Shares Split";
+  }
+
+  return "Itemized Custom";
+}
 
 export interface SplitGroupCardProps {
   group: SplitGroupDetail;
   isSelected: boolean;
-  onManageGroup: (groupId: string) => void;
-  onQuickSplit: (groupId: string) => void;
-  onCopyInviteLink: (group: SplitGroupDetail) => void;
-  onLeaveGroup?: (group: SplitGroupDetail) => void;
+  onSelectGroup: (groupId: string) => void;
+  onEditGroup: (group: SplitGroupDetail) => void;
+  onOpenSplitRules: (group: SplitGroupDetail) => void;
+  onOpenAuditLog: (group: SplitGroupDetail) => void;
+  onArchiveGroup: (group: SplitGroupDetail) => void;
 }
 
 export function SplitGroupCard({
   group,
   isSelected,
-  onManageGroup,
-  onQuickSplit,
-  onCopyInviteLink,
-  onLeaveGroup,
+  onSelectGroup,
+  onEditGroup,
+  onOpenSplitRules,
+  onOpenAuditLog,
+  onArchiveGroup,
 }: SplitGroupCardProps) {
-  const typeMeta = GROUP_TYPE_BADGE[group.groupType];
+  const category = resolveGroupCategory(group);
+  const categoryLabel = GROUP_CATEGORY_LABELS[category];
   const isArchived = group.status === "ARCHIVED";
-  const isCurrentUserFormer = group.members.some(
-    (m) => m.isCurrentUser && m.status === "FORMER_MEMBER",
-  );
-  const canLogExpense = !isArchived && !isCurrentUserFormer;
+
   const activeMembers = React.useMemo(
     () => group.members.filter((m) => m.status === "ACTIVE"),
     [group.members],
+  );
+
+  const splitRuleLabel = React.useMemo(
+    () => formatSplitRuleLabel(group),
+    [group],
   );
 
   const netLedger = group.userNetLedgerCents;
@@ -73,74 +99,85 @@ export function SplitGroupCard({
   const menuItems = React.useMemo<DropdownItem[]>(() => {
     const items: DropdownItem[] = [
       {
-        id: "manage-group",
-        label: "Manage Group",
-        icon: <Layers className="h-4 w-4" aria-hidden="true" />,
-        onSelect: () => onManageGroup(group.id),
+        id: "edit-group",
+        label: "Edit Group",
+        icon: <Pencil className="h-3.5 w-3.5" aria-hidden="true" />,
+        disabled: isArchived,
+        onSelect: () => onEditGroup(group),
+      },
+      {
+        id: "split-rules-invite",
+        label: "Split Rules & Invite",
+        icon: <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />,
+        onSelect: () => onOpenSplitRules(group),
+      },
+      {
+        id: "audit-log",
+        label: "Audit Log",
+        icon: <Clock className="h-3.5 w-3.5" aria-hidden="true" />,
+        onSelect: () => onOpenAuditLog(group),
       },
     ];
 
-    if (canLogExpense) {
-      items.push({
-        id: "quick-split",
-        label: "Quick Split",
-        icon: <Zap className="h-4 w-4" aria-hidden="true" />,
-        onSelect: () => onQuickSplit(group.id),
-      });
-    }
-
-    items.push(
-      { id: "divider", separator: true },
-      {
-        id: "copy-invite",
-        label: "Copy Invite Link",
-        icon: <Copy className="h-4 w-4" aria-hidden="true" />,
-        onSelect: () => onCopyInviteLink(group),
-      },
-    );
-
-    if (!isArchived && onLeaveGroup) {
-      items.push({
-        id: "leave-group",
-        label: "Leave Group",
-        danger: true,
-        icon: <LogOut className="h-4 w-4" aria-hidden="true" />,
-        onSelect: () => onLeaveGroup(group),
-      });
+    if (!isArchived) {
+      items.push(
+        { id: "divider", separator: true },
+        {
+          id: "archive-group",
+          label: "Archive Group",
+          danger: true,
+          icon: <Archive className="h-3.5 w-3.5" aria-hidden="true" />,
+          onSelect: () => onArchiveGroup(group),
+        },
+      );
     }
 
     return items;
-  }, [canLogExpense, group, isArchived, onCopyInviteLink, onLeaveGroup, onManageGroup, onQuickSplit]);
+  }, [
+    group,
+    isArchived,
+    onArchiveGroup,
+    onEditGroup,
+    onOpenAuditLog,
+    onOpenSplitRules,
+  ]);
 
-  const memberCountLabel = `${activeMembers.length} ${
-    activeMembers.length === 1 ? "member" : "members"
-  } active`;
+  const handleCardKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      onSelectGroup(group.id);
+    }
+  };
 
   return (
     <Card
       variant="section"
       padding="md"
+      role="button"
+      tabIndex={0}
+      aria-pressed={isSelected}
+      aria-label={`Select group ${group.name}`}
       data-testid={`group-card-${group.id}`}
       data-selected={isSelected ? "true" : "false"}
+      onClick={() => onSelectGroup(group.id)}
+      onKeyDown={handleCardKeyDown}
       className={cn(
-        "flex flex-col justify-between transition-colors",
+        "flex cursor-pointer flex-col justify-between transition-all focus-visible:outline-2 focus-visible:outline-primary-focus focus-visible:outline-offset-2",
         isSelected
-          ? "border-primary ring-1 ring-primary/20"
-          : "hover:border-ink-muted-48/50",
+          ? "border-primary ring-2 ring-primary/15"
+          : "border-outline-variant/60 hover:border-outline",
       )}
     >
-      <div className="flex flex-col gap-4">
-        <div className="flex items-start justify-between gap-2">
+      <div>
+        <div className="mb-3 flex items-start justify-between gap-2">
           <div className="flex flex-wrap items-center gap-1.5">
             <Badge
-              tone={typeMeta.tone}
+              tone="neutral"
               size="sm"
-              dot
-              data-group-type={group.groupType}
-              aria-label={`Group type: ${typeMeta.label} (${group.groupType})`}
-              className="uppercase tracking-wide"
+              data-group-category={category}
+              className="border-outline-variant/60 bg-surface-container-low text-on-surface-variant"
             >
-              {typeMeta.label}
+              {categoryLabel}
             </Badge>
             {group.status === "NEEDS_RATIO_UPDATE" && (
               <Badge tone="warning" size="sm">
@@ -148,112 +185,65 @@ export function SplitGroupCard({
               </Badge>
             )}
           </div>
-          <Dropdown
-            variant="action-menu"
-            triggerAriaLabel={`Actions for ${group.name}`}
-            items={menuItems}
-          />
+          <div
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
+            <Dropdown
+              variant="action-menu"
+              triggerAriaLabel={`Actions for ${group.name}`}
+              items={menuItems}
+            />
+          </div>
         </div>
 
-        <div>
-          <h2 className="font-display text-[20px] font-semibold tracking-tight text-ink">
-            {group.name}
-          </h2>
-          <p className="mt-1 text-[12px] leading-relaxed text-ink-muted-48">
-            {group.defaultSplitMode === "EQUAL" ? "Equal Split" : "Custom Ratios"} ·{" "}
-            {group.baseCurrency} · Cycle day {group.billingCycleAnchorDay}
-            {group.operationalBudgetCents !== null
-              ? ` · Budget ${formatMinorUnits(
-                  group.operationalBudgetCents,
-                  group.baseCurrency,
-                )}`
-              : ""}
-          </p>
-        </div>
+        <h3 className="truncate font-display text-[17px] font-semibold tracking-tight text-on-surface">
+          {group.name}
+        </h3>
+        <p className="mt-0.5 truncate text-[13px] text-outline">
+          {splitRuleLabel}
+        </p>
 
-        <div className="flex items-center gap-2.5 py-0.5">
+        <div className="mt-4 mb-5">
           <AvatarStack
             members={activeMembers.map((m) => ({
               id: m.userId,
               name: m.name,
             }))}
-            max={3}
-            size="md"
+            max={4}
+            size="sm"
           />
-          <span className="text-[12px] text-ink-muted-48">{memberCountLabel}</span>
         </div>
-
-        <Card variant="sub-card" padding="sm" className="flex flex-col gap-2">
-          <div className="flex items-baseline justify-between gap-2">
-            <span className="text-[12px] text-ink-muted-48">Cycle Turnover</span>
-            <span className="text-[14px] font-semibold tabular-nums text-ink">
-              {formattedTurnover}
-            </span>
-          </div>
-          <div className="flex items-baseline justify-between gap-2 border-t border-hairline pt-2">
-            <span className="text-[12px] text-ink-muted-48">Your Net Ledger</span>
-            <span
-              className={cn(
-                "inline-flex items-center gap-1 text-[15px] font-semibold tabular-nums",
-                netLedger > 0
-                  ? "text-emerald-700"
-                  : netLedger < 0
-                    ? "text-red-600"
-                    : "text-ink-muted-48",
-              )}
-            >
-              {netLedger > 0 ? (
-                <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
-              ) : netLedger < 0 ? (
-                <ArrowDownLeft className="h-4 w-4" aria-hidden="true" />
-              ) : (
-                <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-              )}
-              {formattedNetLedger}
-            </span>
-          </div>
-          <span
-            className={cn(
-              "text-right text-[11px] font-medium",
-              netLedger > 0
-                ? "text-emerald-700"
-                : netLedger < 0
-                  ? "text-red-600"
-                  : "text-ink-muted-48",
-            )}
-          >
-            {netLedger > 0
-              ? "Settlement surplus owed to you"
-              : netLedger < 0
-                ? "Outstanding liability"
-                : "Zero balance · Fully settled"}
-          </span>
-        </Card>
       </div>
 
-      <div className="flex items-center gap-2.5 pt-5">
-        <Button
-          type="button"
-          variant={isSelected ? "primary" : "secondary"}
-          size="sm"
-          fullWidth
-          rightIcon={<ChevronRight className="h-4 w-4" aria-hidden="true" />}
-          aria-pressed={isSelected}
-          aria-label={`Manage Group ${group.name}`}
-          onClick={() => onManageGroup(group.id)}
-        >
-          Manage Group
-        </Button>
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          disabled={!canLogExpense}
-          aria-label={`Quick Split for ${group.name}`}
-          onClick={() => onQuickSplit(group.id)}
-        >
-          Quick Split
-        </Button>
+      <div className="flex items-end justify-between gap-2 border-t border-outline-variant/40 pt-3 tabular-nums">
+        <div className="min-w-0">
+          <span className="block text-[11px] text-outline">Cycle Spend</span>
+          <span className="mt-0.5 block truncate text-[14px] font-semibold text-on-surface">
+            {formattedTurnover}
+          </span>
+        </div>
+        <div className="shrink-0 text-right">
+          <span className="block text-[11px] text-outline">Your Net</span>
+          {netLedger === 0 ? (
+            <Badge
+              tone="neutral"
+              size="sm"
+              className="mt-0.5 border-outline-variant/60 bg-surface-container-low text-on-surface-variant"
+            >
+              Settled
+            </Badge>
+          ) : (
+            <span
+              className={cn(
+                "mt-0.5 block text-[14px] font-semibold",
+                netLedger > 0 ? "text-emerald-700" : "text-red-600",
+              )}
+            >
+              {formattedNetLedger}
+            </span>
+          )}
+        </div>
       </div>
     </Card>
   );
