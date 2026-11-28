@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { hasSupabaseEnv } from "@/lib/auth/guards";
+import { deleteArchivedGroup } from "@/lib/groups/archive";
 import {
   toShellGroupSummary,
   updateSplitGroup,
@@ -87,6 +88,59 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       shellGroup: toShellGroupSummary(result.group),
       invitedEmails: result.invitedEmails,
       removedMemberIds: result.removedMemberIds,
+    },
+    { status: 200 },
+  );
+}
+
+export async function DELETE(_request: NextRequest, context: RouteContext) {
+  if (!hasSupabaseEnv()) {
+    return NextResponse.json(
+      { error: "Supabase environment is not configured." },
+      { status: 503 },
+    );
+  }
+
+  const { groupId } = await context.params;
+  if (!groupId || !groupId.trim()) {
+    return NextResponse.json(
+      { error: "Group ID is required." },
+      { status: 400 },
+    );
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !user) {
+    return NextResponse.json(
+      { error: "Authentication required." },
+      { status: 401 },
+    );
+  }
+
+  const result = await deleteArchivedGroup(supabase, user.id, groupId);
+  if (!result.ok) {
+    return NextResponse.json(
+      {
+        error: result.message,
+        ...(result.code ? { code: result.code } : {}),
+        ...(result.unsettledMemberCount !== undefined
+          ? { unsettledMemberCount: result.unsettledMemberCount }
+          : {}),
+      },
+      { status: result.status },
+    );
+  }
+
+  return NextResponse.json(
+    {
+      ok: true,
+      groupId: result.groupId,
+      groupName: result.groupName,
     },
     { status: 200 },
   );

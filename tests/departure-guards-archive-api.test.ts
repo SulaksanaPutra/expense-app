@@ -294,6 +294,9 @@ import { DELETE as accountDelete, GET as accountGet } from "@/app/api/account/ro
 import { POST as expensePost } from "@/app/api/groups/[groupId]/expenses/route";
 import { POST as leavePost } from "@/app/api/groups/[groupId]/leave/route";
 import { DELETE as removeMemberDelete } from "@/app/api/groups/[groupId]/members/[userId]/route";
+import { POST as archivePost } from "@/app/api/groups/[groupId]/archive/route";
+import { POST as restorePost } from "@/app/api/groups/[groupId]/restore/route";
+import { DELETE as groupDelete } from "@/app/api/groups/[groupId]/route";
 import { POST as settlementPost } from "@/app/api/groups/[groupId]/settlements/route";
 
 describe("Departure Guards (FORMER_MEMBER), Archive Rules & ARCHIVED Read-Only API", () => {
@@ -753,5 +756,103 @@ describe("Departure Guards (FORMER_MEMBER), Archive Rules & ARCHIVED Read-Only A
     expect(settleRes.status).toBe(409);
     expect((await settleRes.json()).code).toBe("GROUP_ARCHIVED");
 
+  });
+
+  it("allows ADMIN to archive a group with unsettled balances, restore it to ACTIVE, and enforces $0.00-gated permanent Delete (409 when unsettled, 200 when $0.00)", async () => {
+    // 1. Non-admin cannot archive
+    getUserMock.mockResolvedValueOnce({
+      data: { user: { id: "u-elena", email: "elena@example.com" } },
+      error: null,
+    });
+    const forbiddenArchive = await archivePost(
+      new NextRequest("http://localhost:3000/api/groups/grp-apt4b/archive", {
+        method: "POST",
+      }),
+      { params: Promise.resolve({ groupId: "grp-apt4b" }) },
+    );
+    expect(forbiddenArchive.status).toBe(403);
+
+    // 2. ADMIN archives grp-apt4b even with unsettled balances (exp-1 = $300.00)
+    getUserMock.mockResolvedValueOnce({
+      data: { user: { id: "u-admin", email: "alex@example.com" } },
+      error: null,
+    });
+    const archiveRes = await archivePost(
+      new NextRequest("http://localhost:3000/api/groups/grp-apt4b/archive", {
+        method: "POST",
+        body: JSON.stringify({ reason: "Testing unsettled archive" }),
+      }),
+      { params: Promise.resolve({ groupId: "grp-apt4b" }) },
+    );
+    expect(archiveRes.status).toBe(200);
+    const archiveJson = await archiveRes.json();
+    expect(archiveJson.status).toBe("ARCHIVED");
+    expect(
+      activeDb.groups.find((g) => g.id === "grp-apt4b")?.status,
+    ).toBe("ARCHIVED");
+
+    // 3. Permanent delete of grp-apt4b is blocked (409 UNSETTLED_BALANCES) because members have net_balance_cents != 0
+    getUserMock.mockResolvedValueOnce({
+      data: { user: { id: "u-admin", email: "alex@example.com" } },
+      error: null,
+    });
+    const blockedDelete = await groupDelete(
+      new NextRequest("http://localhost:3000/api/groups/grp-apt4b", {
+        method: "DELETE",
+      }),
+      { params: Promise.resolve({ groupId: "grp-apt4b" }) },
+    );
+    expect(blockedDelete.status).toBe(409);
+    const blockedDeleteJson = await blockedDelete.json();
+    expect(blockedDeleteJson.code).toBe("UNSETTLED_BALANCES");
+    expect(blockedDeleteJson.unsettledMemberCount).toBe(3);
+
+    // 4. ADMIN restores grp-apt4b back to ACTIVE
+    getUserMock.mockResolvedValueOnce({
+      data: { user: { id: "u-admin", email: "alex@example.com" } },
+      error: null,
+    });
+    const restoreRes = await restorePost(
+      new NextRequest("http://localhost:3000/api/groups/grp-apt4b/restore", {
+        method: "POST",
+      }),
+      { params: Promise.resolve({ groupId: "grp-apt4b" }) },
+    );
+    expect(restoreRes.status).toBe(200);
+    const restoreJson = await restoreRes.json();
+    expect(restoreJson.status).toBe("ACTIVE");
+    expect(
+      activeDb.groups.find((g) => g.id === "grp-apt4b")?.status,
+    ).toBe("ACTIVE");
+
+    // 5. Deleting an ACTIVE group is blocked (409 GROUP_NOT_ARCHIVED)
+    getUserMock.mockResolvedValueOnce({
+      data: { user: { id: "u-admin", email: "alex@example.com" } },
+      error: null,
+    });
+    const activeDeleteRes = await groupDelete(
+      new NextRequest("http://localhost:3000/api/groups/grp-tahoe", {
+        method: "DELETE",
+      }),
+      { params: Promise.resolve({ groupId: "grp-tahoe" }) },
+    );
+    expect(activeDeleteRes.status).toBe(409);
+    expect((await activeDeleteRes.json()).code).toBe("GROUP_NOT_ARCHIVED");
+
+    // 6. Permanent delete of ARCHIVED group with $0.00 balances (grp-archived) succeeds (200)
+    getUserMock.mockResolvedValueOnce({
+      data: { user: { id: "u-admin", email: "alex@example.com" } },
+      error: null,
+    });
+    const allowedDelete = await groupDelete(
+      new NextRequest("http://localhost:3000/api/groups/grp-archived", {
+        method: "DELETE",
+      }),
+      { params: Promise.resolve({ groupId: "grp-archived" }) },
+    );
+    expect(allowedDelete.status).toBe(200);
+    expect(
+      activeDb.groups.some((g) => g.id === "grp-archived"),
+    ).toBe(false);
   });
 });

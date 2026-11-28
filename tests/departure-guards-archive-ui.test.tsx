@@ -411,24 +411,41 @@ describe("Departure Guards, Archive Rules & Read-Only Archived Ledgers UI", () =
     ).toBeInTheDocument();
   });
 
-  it("supports Archive Rules configuration, Residential 7-day lease prompt archival, and collapsible Archived Ledgers read-only inspection", async () => {
+  it("supports Archive confirmation with unsettled balances, Archived view with Final Settlement History, Restore Group, and $0.00-gated Delete", async () => {
     const user = userEvent.setup();
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
-      .mockImplementation(async (input) => {
+      .mockImplementation(async (input, init) => {
         const url = String(input);
-        if (url.endsWith("/archive-rules")) {
+        const method = init?.method ?? "GET";
+        if (url === "/api/groups/grp-apt-4b/archive" && method === "POST") {
           return new Response(
             JSON.stringify({
               ok: true,
               groupId: "grp-apt-4b",
               status: "ARCHIVED",
-              tripAutoArchiveEnabled: true,
-              tripAutoArchiveDays: 14,
-              residentialLeasePromptEnabled: true,
-              leaseEndDate: "2026-11-10",
-              leasePromptSnoozedUntil: null,
               archivedAt: "2026-11-26T12:00:00.000Z",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (url === "/api/groups/grp-italy/restore" && method === "POST") {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              groupId: "grp-italy",
+              status: "ACTIVE",
+              archivedAt: null,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (url === "/api/groups/grp-italy" && method === "DELETE") {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              groupId: "grp-italy",
+              groupName: "Summer Italy 2025",
             }),
             { status: 200, headers: { "Content-Type": "application/json" } },
           );
@@ -438,7 +455,7 @@ describe("Departure Guards, Archive Rules & Read-Only Archived Ledgers UI", () =
 
     renderSplitGroups();
 
-    // 1. Archive Group confirmation opens from card menu showing Current Net Ledger
+    // 1. Archive Group confirmation opens from card menu showing Current Net Ledger & unsettled balance count
     await user.click(
       screen.getByRole("button", { name: "Actions for Apt 4B Roommates" }),
     );
@@ -447,19 +464,41 @@ describe("Departure Guards, Archive Rules & Read-Only Archived Ledgers UI", () =
       name: "Archive Apt 4B Roommates?",
     });
     expect(
-      within(archiveConfirm).getByText(/Current Net Ledger/i),
+      within(archiveConfirm).getByText("Current Net Ledger"),
     ).toBeInTheDocument();
+    expect(
+      within(archiveConfirm).getByText(/\+\$100\.00 \(2 unsettled balances\)/i),
+    ).toBeInTheDocument();
+
+    // Confirm archiving even with unsettled balances
     await user.click(
-      within(archiveConfirm).getByRole("button", { name: "Cancel" }),
+      within(archiveConfirm).getByRole("button", { name: "Archive Group" }),
     );
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "/api/groups/grp-apt-4b/archive",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(
+      screen.getByRole("tab", { name: "Archived (2)" }),
+    ).toBeInTheDocument();
 
-    // 2. Switch to Archived tab and inspect Summer Italy 2025 in read-only mode
-    await user.click(screen.getByRole("tab", { name: "Archived (1)" }));
-    const archivedCard = screen.getByTestId("archived-group-card-grp-italy");
-    expect(within(archivedCard).getByText("Summer Italy 2025")).toBeInTheDocument();
+    // 2. Switch to Archived tab: verify AlertBanner, cards, Final Settlement History, and read-only View Final Ledger
+    await user.click(screen.getByRole("tab", { name: "Archived (2)" }));
+    expect(
+      screen.getByText(/Archived groups are read-only\. Restore any group/i),
+    ).toBeInTheDocument();
+
+    const historyTable = screen.getByTestId("final-settlement-history");
+    expect(
+      within(historyTable).getByText("Final Settlement History"),
+    ).toBeInTheDocument();
+    expect(within(historyTable).getByText("2 records")).toBeInTheDocument();
+
+    const italyCard = screen.getByTestId("archived-group-card-grp-italy");
+    expect(within(italyCard).getByText("Summer Italy 2025")).toBeInTheDocument();
 
     await user.click(
-      within(archivedCard).getByRole("button", { name: "Inspect Ledger" }),
+      within(italyCard).getByRole("button", { name: "View Final Ledger" }),
     );
     const spotlight = screen.getByTestId("spotlight-partition");
     expect(
@@ -472,25 +511,53 @@ describe("Departure Guards, Archive Rules & Read-Only Archived Ledgers UI", () =
       within(spotlight).queryByRole("button", { name: "Leave Group" }),
     ).not.toBeInTheDocument();
 
-    // 4. Switch back to Active and archive Apt 4B Roommates via card menu ConfirmDialog
-    await user.click(screen.getByRole("tab", { name: "Active (2)" }));
-    await user.click(
-      screen.getByRole("button", { name: "Actions for Apt 4B Roommates" }),
-    );
-    await user.click(screen.getByRole("menuitem", { name: "Archive Group" }));
-    const confirmArchive = screen.getByRole("dialog", {
-      name: "Archive Apt 4B Roommates?",
+    // 3. Delete on unsettled archived group (Apt 4B Roommates) is blocked in ConfirmDialog
+    const aptCard = screen.getByTestId("archived-group-card-grp-apt-4b");
+    await user.click(within(aptCard).getByRole("button", { name: "Delete" }));
+    const blockedDeleteDialog = screen.getByRole("dialog", {
+      name: "Delete Apt 4B Roommates?",
     });
+    expect(
+      within(blockedDeleteDialog).getByText("Action Blocked"),
+    ).toBeInTheDocument();
+    expect(
+      within(blockedDeleteDialog).getByRole("button", { name: "Delete Group" }),
+    ).toBeDisabled();
     await user.click(
-      within(confirmArchive).getByRole("button", { name: "Archive Group" }),
+      within(blockedDeleteDialog).getByRole("button", { name: "Cancel" }),
     );
 
+    // 4. Delete on settled archived group (Summer Italy 2025, $0.00) succeeds
+    await user.click(within(italyCard).getByRole("button", { name: "Delete" }));
+    const allowedDeleteDialog = screen.getByRole("dialog", {
+      name: "Delete Summer Italy 2025?",
+    });
+    const confirmDeleteBtn = within(allowedDeleteDialog).getByRole("button", {
+      name: "Delete Group",
+    });
+    expect(confirmDeleteBtn).not.toBeDisabled();
+    await user.click(confirmDeleteBtn);
     expect(fetchSpy).toHaveBeenCalledWith(
-      "/api/groups/grp-apt-4b/archive-rules",
-      expect.objectContaining({ method: "PATCH" }),
+      "/api/groups/grp-italy",
+      expect.objectContaining({ method: "DELETE" }),
     );
     expect(
-      screen.getByRole("tab", { name: "Archived (2)" }),
+      screen.queryByTestId("archived-group-card-grp-italy"),
+    ).not.toBeInTheDocument();
+
+    // 5. Restore Group on Apt 4B Roommates returns it to Active
+    await user.click(
+      within(aptCard).getByRole("button", { name: "Restore Group" }),
+    );
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "/api/groups/grp-apt-4b/restore",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(
+      screen.getByRole("tab", { name: "Active (2)" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("tab", { name: "Archived (0)" }),
     ).toBeInTheDocument();
   });
 });
